@@ -1,0 +1,31 @@
+run:
+  timeout: 5m
+  go: "1.26"
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - revive
+    - misspell
+    - nolintlint
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/Laaaaksh/vessel
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+
+issues:
+  exclude-rules:
+    - path: "_test.go"
+      linters:
+        - errcheck
