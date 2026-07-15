@@ -1,0 +1,53 @@
+version: 2
+
+project_name: vessel
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: vessel
+    main: .
+    binary: vessel
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: vessel
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: Laaaaksh
+    name: vessel
+  draft: false
+  prerelease: auto
+
+brews:
+  - name: vessel
+    repository:
+      owner: Laaaaksh
+      name: homebrew-vessel
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/Laaaaksh/vessel"
+    description: "A keyboard-driven TUI for Apple's native Mac containers"
+    license: "Apache-2.0"
+    install: |
+      bin.install "vessel"
+    test: |
+      system "#{bin}/vessel", "--version"

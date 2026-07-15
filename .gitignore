@@ -1,0 +1,19 @@
+# Build output
+vessel
+dist/
+
+# Go
+*.test
+*.out
+vendor/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Config (local dev)
+.env
