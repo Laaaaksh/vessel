@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// cliMetrics is the raw JSON from `container stats --json`.
+// cliMetrics is the raw JSON from `container stats --format json`.
 type cliMetrics struct {
 	ID     string  `json:"id"`
 	CPU    float64 `json:"cpuPercent"`
@@ -78,7 +78,7 @@ func (p *Poller) poll(ctx context.Context) {
 	pctx, cancel := context.WithTimeout(ctx, p.client.timeout)
 	defer cancel()
 
-	out, err := p.client.run(pctx, "stats", "--all", "--no-stream", "--json")
+	out, err := p.client.run(pctx, "stats", "--no-stream", "--format", "json")
 	if err != nil {
 		// Metrics polling failures are non-fatal: the UI shows N/A.
 		return
