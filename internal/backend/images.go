@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// cliImage is the raw JSON shape from `container image list --json`.
+// cliImage is the raw JSON shape from `container image list --format json`.
 type cliImage struct {
 	ID         string `json:"id"`
 	Repository string `json:"repository"`
@@ -19,7 +19,7 @@ type cliImage struct {
 // ListImages returns all local images.
 func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 	var raw []cliImage
-	if err := c.runJSON(ctx, &raw, "image", "list", "--json"); err != nil {
+	if err := c.runJSON(ctx, &raw, "image", "list", "--format", "json"); err != nil {
 		return nil, fmt.Errorf("list images: %w", err)
 	}
 	return mapImages(raw), nil

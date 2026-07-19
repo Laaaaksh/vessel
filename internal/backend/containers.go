@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// cliContainer is the raw JSON shape from `container list --json`.
+// cliContainer is the raw JSON shape from `container list --format json`.
 // Field names match Apple's CLI output; we re-map into our Container type.
 type cliContainer struct {
 	ID      string `json:"id"`
@@ -28,7 +28,7 @@ type cliContainer struct {
 // ListContainers returns all containers (running and stopped).
 func (c *Client) ListContainers(ctx context.Context) ([]Container, error) {
 	var raw []cliContainer
-	if err := c.runJSON(ctx, &raw, "list", "--all", "--json"); err != nil {
+	if err := c.runJSON(ctx, &raw, "list", "--all", "--format", "json"); err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
 	return mapContainers(raw), nil
@@ -37,7 +37,7 @@ func (c *Client) ListContainers(ctx context.Context) ([]Container, error) {
 // InspectContainer returns detailed info for a single container.
 func (c *Client) InspectContainer(ctx context.Context, id string) (*Container, error) {
 	var raw []cliContainer
-	if err := c.runJSON(ctx, &raw, "inspect", "--json", id); err != nil {
+	if err := c.runJSON(ctx, &raw, "inspect", id); err != nil {
 		return nil, fmt.Errorf("inspect container %s: %w", id, err)
 	}
 	if len(raw) == 0 {
