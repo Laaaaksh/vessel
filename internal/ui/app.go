@@ -392,7 +392,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		}
-	case "tab":
+	case m.keys.Tab:
 		m.activeView = (m.activeView + 1) % 3
 		return m, m.activeViewLoadCmd()
 	case "1":
@@ -413,19 +413,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Action keys for containers
 	if m.activeView == ViewContainers {
 		switch k {
-		case m.keys.Stop, "s":
+		case m.keys.Stop:
 			return m.runOnSelected("stop", func(ctx context.Context, id string) error {
 				return m.client.StopContainer(ctx, id)
 			})
-		case m.keys.Start, "u":
+		case m.keys.Start:
 			return m.runOnSelected("start", func(ctx context.Context, id string) error {
 				return m.client.StartContainer(ctx, id)
 			})
-		case m.keys.Restart, "r":
+		case m.keys.Restart:
 			return m.runOnSelected("restart", func(ctx context.Context, id string) error {
 				return m.client.RestartContainer(ctx, id)
 			})
-		case m.keys.Remove, "d":
+		case m.keys.Remove:
 			sel := m.cntPanel.Selected()
 			if sel == nil {
 				m.status = "nothing selected"
@@ -435,15 +435,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.pending = sel.ID
 			m.status = fmt.Sprintf("delete %s? [y/n]", sel.Name)
 			return m, nil
-		case m.keys.Logs, "L":
+		case m.keys.Logs:
 			return m.openLogs()
-		case m.keys.Enter, "enter":
+		case m.keys.Enter:
 			return m.openShell()
 		}
 	}
 
 	if m.activeView == ViewImages {
-		if k == "d" {
+		if k == m.keys.Remove {
 			sel := m.imgPanel.Selected()
 			if sel == nil {
 				return m, nil
@@ -459,7 +459,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.activeView == ViewVolumes {
-		if k == "d" {
+		if k == m.keys.Remove {
 			sel := m.volPanel.Selected()
 			if sel == nil {
 				return m, nil

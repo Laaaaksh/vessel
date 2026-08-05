@@ -4,6 +4,7 @@ package backend_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,13 +41,21 @@ func TestLive_ListAndLifecycle(t *testing.T) {
 	}
 	t.Logf("volumes: %d", len(vols))
 
-	// Prefer vessel-ports if present
-	id := cs[0].ID
+	// The lifecycle half of this test stops and restarts a real container, so it
+	// must only ever touch fixtures this project created. Never fall back to an
+	// arbitrary container: scripts/smoke.sh runs this unattended.
+	id := ""
 	for _, x := range cs {
 		if x.Name == "vessel-ports" {
 			id = x.ID
 			break
 		}
+		if id == "" && strings.HasPrefix(x.Name, "vessel-") {
+			id = x.ID
+		}
+	}
+	if id == "" {
+		t.Skip("no vessel-* container present; skipping lifecycle test")
 	}
 
 	if err := c.StopContainer(ctx, id); err != nil {

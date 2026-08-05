@@ -9,9 +9,3 @@ const (
 	ViewImages
 	ViewVolumes
 )
-
-// Panel is a panel that can be focused and rendered.
-type Panel interface {
-	Width() int
-	Height() int
-}

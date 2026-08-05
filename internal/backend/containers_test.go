@@ -91,6 +91,38 @@ func TestMapImages_fromLiveFixture(t *testing.T) {
 	if ref == "" {
 		t.Error("FormatRef empty")
 	}
+	if img.Size == raw[0].Configuration.Descriptor.Size {
+		t.Errorf("Size is the index descriptor size (%d), not the platform image size", img.Size)
+	}
+	// Sizes of the linux manifests in the alpine index fixture.
+	perArch := map[string]int64{"arm64": 4184689, "amd64": 3848024, "386": 3671765}
+	if want, ok := perArch[runtime.GOARCH]; ok && img.Size != want {
+		t.Errorf("Size on %s = %d, want %d", runtime.GOARCH, img.Size, want)
+	}
+}
+
+func TestImageSize_fallsBackToDescriptorWithoutVariants(t *testing.T) {
+	var r cliImage
+	r.Configuration.Descriptor.Size = 9218
+	if got := imageSize(r); got != 9218 {
+		t.Errorf("imageSize = %d, want 9218", got)
+	}
+}
+
+func TestImageSize_ignoresAttestationVariants(t *testing.T) {
+	var r cliImage
+	r.Configuration.Descriptor.Size = 9218
+	r.Variants = []cliImageVariant{
+		{Size: 86390},
+		{Size: 3555096},
+	}
+	r.Variants[0].Platform.OS = "unknown"
+	r.Variants[0].Platform.Architecture = "unknown"
+	r.Variants[1].Platform.OS = guestOS
+	r.Variants[1].Platform.Architecture = "some-other-arch"
+	if got := imageSize(r); got != 3555096 {
+		t.Errorf("imageSize = %d, want 3555096", got)
+	}
 }
 
 func TestMapVolumes_fromLiveFixture(t *testing.T) {

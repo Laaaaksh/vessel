@@ -36,6 +36,27 @@ func Pad(s string, w int) string {
 	return fmt.Sprintf("%-*s", w, Truncate(s, w))
 }
 
+// Window returns the [start, end) bounds of a scroll window of at most size
+// rows over total items, keeping cursor inside it. lipgloss pads a panel to its
+// declared height but never truncates, so a list that renders every item pushes
+// the footer off screen; every list slices through this instead.
+func Window(total, cursor, size int) (start, end int) {
+	if total <= 0 || size <= 0 {
+		return 0, 0
+	}
+	if total <= size {
+		return 0, total
+	}
+	start = cursor - size/2
+	if start > total-size {
+		start = total - size
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start, start + size
+}
+
 // Ago renders t as a coarse relative age, or "-" for the zero time.
 func Ago(t time.Time) string {
 	if t.IsZero() {

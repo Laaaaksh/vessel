@@ -20,17 +20,6 @@ const (
 // ListView renders the container list table.
 func (m Model) ListView(width, height int, poller *backend.Poller) string {
 	header := m.renderHeader(width)
-	var rows []string
-	for i, c := range m.filtered {
-		rows = append(rows, m.renderRow(c, i == m.cursor, width, poller))
-	}
-	if len(m.filtered) == 0 {
-		if m.filter != "" {
-			rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("  no matches"))
-		} else {
-			rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("  no containers"))
-		}
-	}
 
 	var filterBar string
 	if m.filtering {
@@ -39,6 +28,26 @@ func (m Model) ListView(width, height int, poller *backend.Poller) string {
 	} else if m.filter != "" {
 		filterBar = lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
 			Render(fmt.Sprintf("  filter: %s  (esc to clear)", m.filter))
+	}
+
+	// The header renders as two lines (text plus its bottom border), and the
+	// filter bar takes one more when shown.
+	rowsH := height - 2
+	if filterBar != "" {
+		rowsH--
+	}
+	start, end := uiutil.Window(len(m.filtered), m.cursor, max(1, rowsH))
+
+	var rows []string
+	for i := start; i < end; i++ {
+		rows = append(rows, m.renderRow(m.filtered[i], i == m.cursor, width, poller))
+	}
+	if len(m.filtered) == 0 {
+		if m.filter != "" {
+			rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("  no matches"))
+		} else {
+			rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("  no containers"))
+		}
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
