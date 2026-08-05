@@ -7,13 +7,16 @@ import (
 	"time"
 )
 
-// cliImage is the raw JSON shape from `container image list --format json`.
+// Apple container image list JSON (container 1.2.x).
 type cliImage struct {
-	ID         string `json:"id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Size       int64  `json:"size"`
-	Created    string `json:"created"`
+	Configuration struct {
+		CreationDate string `json:"creationDate"`
+		Name         string `json:"name"`
+		Descriptor   struct {
+			Size int64 `json:"size"`
+		} `json:"descriptor"`
+	} `json:"configuration"`
+	ID string `json:"id"`
 }
 
 // ListImages returns all local images.
@@ -27,26 +30,27 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 
 // RemoveImage removes an image by ID or name.
 func (c *Client) RemoveImage(ctx context.Context, id string) error {
-	_, err := c.run(ctx, "image", "rm", id)
+	_, err := c.run(ctx, "image", "delete", id)
 	return err
 }
 
 // PullImage pulls an image (blocking until complete).
 func (c *Client) PullImage(ctx context.Context, ref string) error {
-	_, err := c.run(ctx, "pull", ref)
+	_, err := c.run(ctx, "image", "pull", ref)
 	return err
 }
 
 func mapImages(raw []cliImage) []Image {
 	out := make([]Image, 0, len(raw))
 	for _, r := range raw {
+		repo, tag := splitRef(r.Configuration.Name)
 		img := Image{
 			ID:         r.ID,
-			Repository: r.Repository,
-			Tag:        r.Tag,
-			Size:       r.Size,
+			Repository: repo,
+			Tag:        tag,
+			Size:       r.Configuration.Descriptor.Size,
 		}
-		if t, err := time.Parse(time.RFC3339, r.Created); err == nil {
+		if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
 			img.Created = t
 		}
 		out = append(out, img)
@@ -54,10 +58,26 @@ func mapImages(raw []cliImage) []Image {
 	return out
 }
 
+func splitRef(name string) (repo, tag string) {
+	if name == "" {
+		return "", ""
+	}
+	// Take last ':' that looks like a tag (not a port in host:port/...)
+	i := strings.LastIndex(name, ":")
+	if i < 0 {
+		return name, "latest"
+	}
+	// Avoid splitting digests sha256:...
+	if strings.Contains(name[i+1:], "/") {
+		return name, "latest"
+	}
+	return name[:i], name[i+1:]
+}
+
 // FormatRef returns the full image reference "repo:tag".
 func FormatRef(img Image) string {
 	if img.Tag == "" || img.Tag == "<none>" {
 		return img.Repository
 	}
-	return strings.Join([]string{img.Repository, img.Tag}, ":")
+	return img.Repository + ":" + img.Tag
 }

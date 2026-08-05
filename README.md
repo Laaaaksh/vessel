@@ -16,13 +16,19 @@ brew install vessel
 - Drop into a shell inside any running container
 - Stream logs in real time
 - Inspect port mappings, environment variables, and container details
+- Browse images and volumes
 - Filter containers by name or image
 - Vim-style navigation (j/k, g/G)
 
 ## Requirements
 
-- macOS 15+ (Apple silicon or Intel)
-- Apple Mac containers installed (the `container` CLI must be in your PATH)
+- macOS 26+ on Apple silicon (macOS 15 may work with limitations)
+- [Apple Container CLI](https://github.com/apple/container) in your PATH
+
+```bash
+brew install container
+container system start   # downloads a default Linux kernel on first run
+```
 
 ## Install
 
@@ -50,9 +56,10 @@ vessel
 | `L` | View logs |
 | `s` | Stop container |
 | `u` | Start container |
-| `r` | Restart container |
-| `d` | Remove container |
+| `r` | Restart container (stop + start) |
+| `d` | Remove (confirm with `y`) |
 | `/` | Filter containers |
+| `tab` / `1` `2` `3` | Containers / Images / Volumes |
 | `?` | Toggle help |
 | `q` | Quit |
 
@@ -64,6 +71,14 @@ vessel reads `~/.config/vessel/config.toml`:
 poll_interval = "2s"   # how often to refresh metrics
 log_tail_lines = 100   # lines to show in log tail
 mouse_enabled = true
+```
+
+## Development
+
+```bash
+make test          # unit tests (uses fake container CLI)
+make build
+go test -tags=live ./internal/backend -run Live -v   # against real Apple CLI
 ```
 
 ## Contributing

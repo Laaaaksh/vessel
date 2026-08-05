@@ -3,26 +3,44 @@ package backend
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"os/exec"
 	"strings"
 	"time"
 )
 
-// cliContainer is the raw JSON shape from `container list --format json`.
-// Field names match Apple's CLI output; we re-map into our Container type.
+// Apple container list/inspect JSON (container 1.2.x).
 type cliContainer struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Image   string `json:"image"`
-	Status  string `json:"status"`
-	Created string `json:"created"` // RFC3339
-	Ports   []struct {
-		HostPort      int    `json:"hostPort"`
-		ContainerPort int    `json:"containerPort"`
-		Protocol      string `json:"protocol"`
-	} `json:"ports"`
-	Env    []string          `json:"env"`
-	Labels map[string]string `json:"labels"`
+	Configuration cliContainerConfig `json:"configuration"`
+	ID            string             `json:"id"`
+	Status        cliContainerStatus `json:"status"`
+}
+
+type cliContainerConfig struct {
+	ID             string             `json:"id"`
+	CreationDate   string             `json:"creationDate"`
+	Image          cliImageRef        `json:"image"`
+	InitProcess    cliInitProcess     `json:"initProcess"`
+	Labels         map[string]string  `json:"labels"`
+	PublishedPorts []cliPublishedPort `json:"publishedPorts"`
+}
+
+type cliImageRef struct {
+	Reference string `json:"reference"`
+}
+
+type cliInitProcess struct {
+	Environment []string `json:"environment"`
+}
+
+type cliPublishedPort struct {
+	HostPort      int    `json:"hostPort"`
+	ContainerPort int    `json:"containerPort"`
+	Protocol      string `json:"proto"`
+}
+
+type cliContainerStatus struct {
+	State       string `json:"state"`
+	StartedDate string `json:"startedDate"`
 }
 
 // ListContainers returns all containers (running and stopped).
@@ -59,33 +77,46 @@ func (c *Client) StopContainer(ctx context.Context, id string) error {
 	return err
 }
 
-// RestartContainer restarts a container.
+// RestartContainer stops then starts a container.
+// Apple's container CLI has no restart plugin as of 1.2.0.
 func (c *Client) RestartContainer(ctx context.Context, id string) error {
-	_, err := c.run(ctx, "restart", id)
+	if err := c.StopContainer(ctx, id); err != nil {
+		return err
+	}
+	return c.StartContainer(ctx, id)
+}
+
+// RemoveContainer deletes a container (force so running ones can be removed).
+func (c *Client) RemoveContainer(ctx context.Context, id string) error {
+	_, err := c.run(ctx, "delete", "--force", id)
 	return err
 }
 
-// RemoveContainer removes a container (must be stopped first).
-func (c *Client) RemoveContainer(ctx context.Context, id string) error {
-	_, err := c.run(ctx, "rm", id)
-	return err
+// ShellCmd returns an *exec.Cmd ready for interactive shell attach.
+// Callers should run it via tea.ExecProcess.
+func (c *Client) ShellCmd(id string) *exec.Cmd {
+	return exec.Command(c.binary, "exec", "-it", id, "/bin/sh")
 }
 
 func mapContainers(raw []cliContainer) []Container {
 	out := make([]Container, 0, len(raw))
 	for _, r := range raw {
+		name := r.Configuration.ID
+		if name == "" {
+			name = r.ID
+		}
 		c := Container{
 			ID:     r.ID,
-			Name:   strings.TrimPrefix(r.Name, "/"),
-			Image:  r.Image,
-			Status: r.Status,
-			Env:    r.Env,
-			Labels: r.Labels,
+			Name:   strings.TrimPrefix(name, "/"),
+			Image:  r.Configuration.Image.Reference,
+			Status: r.Status.State,
+			Env:    r.Configuration.InitProcess.Environment,
+			Labels: r.Configuration.Labels,
 		}
-		if t, err := time.Parse(time.RFC3339, r.Created); err == nil {
+		if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
 			c.Created = t
 		}
-		for _, p := range r.Ports {
+		for _, p := range r.Configuration.PublishedPorts {
 			proto := p.Protocol
 			if proto == "" {
 				proto = "tcp"
@@ -108,7 +139,7 @@ func FormatPorts(ports []PortMapping) string {
 	}
 	parts := make([]string, 0, len(ports))
 	for _, p := range ports {
-		parts = append(parts, strconv.Itoa(p.HostPort)+"→"+strconv.Itoa(p.ContainerPort))
+		parts = append(parts, fmt.Sprintf("%d→%d", p.HostPort, p.ContainerPort))
 	}
 	return strings.Join(parts, ", ")
 }
