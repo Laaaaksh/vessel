@@ -89,7 +89,7 @@ func (m Model) renderRow(c backend.Container, selected bool, width int, poller *
 		}
 	}
 
-	name := uiutil.Truncate(indicator+c.Name, colName)
+	name := uiutil.Pad(indicator+c.Name, colName)
 	status := uiutil.Pad(c.Status, colStatus)
 	ports := backend.FormatPorts(c.Ports)
 
