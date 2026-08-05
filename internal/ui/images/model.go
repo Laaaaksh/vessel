@@ -2,12 +2,12 @@ package images
 
 import (
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 // Model is the images panel.
@@ -73,9 +73,9 @@ func (m Model) ListView(width, height int) string {
 	var rows []string
 	for i, img := range m.items {
 		line := fmt.Sprintf("%-40s %-12s %s",
-			truncate(backend.FormatRef(img), 40),
-			human(img.Size),
-			ago(img.Created),
+			uiutil.Truncate(backend.FormatRef(img), 40),
+			uiutil.HumanBytes(img.Size),
+			uiutil.Ago(img.Created),
 		)
 		st := row
 		if i == m.cursor {
@@ -100,52 +100,12 @@ func (m Model) DetailView(width, height int) string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
 		"",
-		kv("ID", truncate(sel.ID, 16)),
-		kv("Size", human(sel.Size)),
-		kv("Created", ago(sel.Created)),
+		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
+		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
+		uiutil.KV("Created", uiutil.Ago(sel.Created)),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[d] delete image"),
 	}
 	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
-}
-
-func kv(k, v string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(k+":") +
-		" " + lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).Render(v)
-}
-
-func human(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.0f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
-}
-
-func ago(t time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return t.Format("2006-01-02")
-	}
 }

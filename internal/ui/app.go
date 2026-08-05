@@ -2,8 +2,10 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,18 +47,23 @@ type actionDoneMsg struct {
 }
 
 type logsOpenedMsg struct {
+	id    string
 	title string
 	lines []string
 	err   error
 }
 
 type logLineMsg struct {
+	id   string
 	text string
 }
 
 type logErrMsg struct {
 	err error
 }
+
+// logStreamEndMsg reports that the follow channel was closed.
+type logStreamEndMsg struct{}
 
 type shellDoneMsg struct {
 	err error
@@ -94,6 +101,8 @@ type Model struct {
 	status    string
 	pending   string // id/name awaiting delete confirm
 	logCancel context.CancelFunc
+	logCh     chan backend.LogLine
+	logID     string // container the active follow belongs to
 }
 
 // New creates the root model. Backend connection happens in Init.
@@ -130,14 +139,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.client = msg.client
 		m.poller = backend.NewPoller(msg.client, m.cfg.PollInterval.Duration)
-		return m, tea.Batch(m.startPollerCmd(), m.refreshCmd())
+		return m, m.startPollerCmd()
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.logPanel = m.logPanel.SetSize(msg.Width, msg.Height)
 		return m, nil
 	case tickMsg:
-		return m, m.refreshCmd()
+		// The tick chain is scheduled here and nowhere else, so out-of-band
+		// refreshes cannot fork additional poll loops.
+		return m, tea.Batch(m.refreshCmd(), m.scheduleTickCmd())
 	case containersLoadedMsg:
 		return m.applyContainersLoaded(msg)
 	case imagesLoadedMsg:
@@ -172,8 +183,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeLogs
 		m.logPanel = m.logPanel.Open(msg.title, msg.lines).SetSize(m.width, m.height)
-		sel := m.cntPanel.Selected()
-		if sel == nil || m.client == nil {
+		if m.client == nil {
 			return m, nil
 		}
 		if m.logCancel != nil {
@@ -181,20 +191,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		m.logCancel = cancel
-		ch := make(chan backend.LogLine, 64)
-		logCh = ch
-		client := m.client
-		id := sel.ID
-		go func() {
-			_ = client.StreamLogs(ctx, id, ch)
-			close(ch)
-		}()
-		return m, m.waitLogLineCmd()
+		m.logCh = make(chan backend.LogLine, 64)
+		m.logID = msg.id
+		return m, tea.Batch(m.streamLogsCmd(ctx, msg.id, m.logCh), m.waitLogLineCmd())
 	case logLineMsg:
+		if msg.id != m.logID {
+			return m, nil
+		}
 		m.logPanel = m.logPanel.Append(msg.text)
 		return m, m.waitLogLineCmd()
+	case logStreamEndMsg:
+		return m, nil
 	case logErrMsg:
-		if msg.err != nil && msg.err != context.Canceled {
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
 			m.logPanel = m.logPanel.SetError(msg.err.Error())
 		}
 		return m, nil
@@ -256,11 +265,36 @@ func (m Model) startPollerCmd() tea.Cmd {
 	}
 }
 
+func (m Model) scheduleTickCmd() tea.Cmd {
+	return tea.Tick(m.cfg.PollInterval.Duration, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// refreshCmd reloads the active view. Containers are always reloaded because the
+// sidebar fleet counts are visible in every view.
 func (m Model) refreshCmd() tea.Cmd {
 	if m.client == nil {
 		return nil
 	}
-	return tea.Batch(m.loadContainersCmd(), m.loadImagesCmd(), m.loadVolumesCmd())
+	if m.activeView == ViewContainers {
+		return m.loadContainersCmd()
+	}
+	return tea.Batch(m.loadContainersCmd(), m.activeViewLoadCmd())
+}
+
+func (m Model) activeViewLoadCmd() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	switch m.activeView {
+	case ViewImages:
+		return m.loadImagesCmd()
+	case ViewVolumes:
+		return m.loadVolumesCmd()
+	default:
+		return m.loadContainersCmd()
+	}
 }
 
 func (m Model) loadContainersCmd() tea.Cmd {
@@ -300,13 +334,15 @@ func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cm
 		m.lastErr = nil
 		m.cntPanel = m.cntPanel.SetItems(msg.items)
 	}
-	return m, tea.Tick(m.cfg.PollInterval.Duration, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+	return m, nil
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+
+	if k == "ctrl+c" {
+		return m, tea.Quit
+	}
 
 	if m.mode == modeLogs {
 		if k == "esc" || k == "q" {
@@ -314,6 +350,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.logCancel()
 				m.logCancel = nil
 			}
+			m.logCh = nil
+			m.logID = ""
 			m.mode = modeBrowse
 			return m, nil
 		}
@@ -324,7 +362,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.mode == modeConfirmDelete {
 		switch k {
-		case "y", "d":
+		case "y":
 			return m.confirmDelete()
 		case "n", "esc":
 			m.mode = modeBrowse
@@ -335,8 +373,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// While the filter prompt is open every printable key belongs to it, so the
+	// global bindings must not consume q/?/tab/digits.
+	if m.activeView == ViewContainers && m.cntPanel.Filtering() {
+		var cmd tea.Cmd
+		m.cntPanel, cmd = m.cntPanel.Update(msg)
+		return m, cmd
+	}
+
 	switch k {
-	case m.keys.Quit, "ctrl+c":
+	case m.keys.Quit:
 		return m, tea.Quit
 	case m.keys.Help:
 		m.showHelp = !m.showHelp
@@ -348,16 +394,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "tab":
 		m.activeView = (m.activeView + 1) % 3
-		return m, nil
+		return m, m.activeViewLoadCmd()
 	case "1":
 		m.activeView = ViewContainers
-		return m, nil
+		return m, m.activeViewLoadCmd()
 	case "2":
 		m.activeView = ViewImages
-		return m, nil
+		return m, m.activeViewLoadCmd()
 	case "3":
 		m.activeView = ViewVolumes
-		return m, nil
+		return m, m.activeViewLoadCmd()
 	}
 
 	if m.showHelp {
@@ -365,7 +411,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Action keys for containers
-	if m.activeView == ViewContainers && !m.cntPanel.Filtering() {
+	if m.activeView == ViewContainers {
 		switch k {
 		case m.keys.Stop, "s":
 			return m.runOnSelected("stop", func(ctx context.Context, id string) error {
@@ -443,10 +489,10 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 		defer cancel()
 		var err error
 		switch {
-		case len(pending) > 6 && pending[:6] == "image:":
-			err = client.RemoveImage(ctx, pending[6:])
-		case len(pending) > 7 && pending[:7] == "volume:":
-			err = client.RemoveVolume(ctx, pending[7:])
+		case strings.HasPrefix(pending, "image:"):
+			err = client.RemoveImage(ctx, strings.TrimPrefix(pending, "image:"))
+		case strings.HasPrefix(pending, "volume:"):
+			err = client.RemoveVolume(ctx, strings.TrimPrefix(pending, "volume:"))
 		default:
 			err = client.RemoveContainer(ctx, pending)
 		}
@@ -490,24 +536,33 @@ func (m Model) openLogs() (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		lines, err := client.TailLogs(ctx, id, n)
-		return logsOpenedMsg{title: name, lines: lines, err: err}
+		return logsOpenedMsg{id: id, title: name, lines: lines, err: err}
 	}
 }
 
-// logStream holds the channel for the active log follow.
-var logCh chan backend.LogLine
+// streamLogsCmd starts the follow stream. StreamLogs owns ch and closes it, so a
+// failure to start surfaces as both an error message and an end-of-stream.
+func (m Model) streamLogsCmd(ctx context.Context, id string, ch chan backend.LogLine) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		if err := client.StreamLogs(ctx, id, ch); err != nil {
+			return logErrMsg{err: err}
+		}
+		return nil
+	}
+}
 
 func (m Model) waitLogLineCmd() tea.Cmd {
-	ch := logCh
+	ch := m.logCh
 	if ch == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		line, ok := <-ch
 		if !ok {
-			return logErrMsg{err: context.Canceled}
+			return logStreamEndMsg{}
 		}
-		return logLineMsg{text: line.Text}
+		return logLineMsg{id: line.ContainerID, text: line.Text}
 	}
 }
 
@@ -525,8 +580,8 @@ func (m Model) openShell() (tea.Model, tea.Cmd) {
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 		// Treat exit as success if the process ran; surface real launch errors.
 		if err != nil {
-			if ee, ok := err.(*exec.ExitError); ok {
-				_ = ee
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
 				return shellDoneMsg{}
 			}
 			return shellDoneMsg{err: err}

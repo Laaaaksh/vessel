@@ -99,6 +99,8 @@ func (p *Poller) poll(ctx context.Context) {
 
 	now := time.Now()
 	data := make(map[string]Metrics, len(raw))
+	// Rebuilt from scratch so samples for removed containers do not accumulate.
+	next := make(map[string]cpuSample, len(raw))
 
 	p.prevMu.Lock()
 	defer p.prevMu.Unlock()
@@ -116,9 +118,10 @@ func (p *Poller) poll(ctx context.Context) {
 				m.CPUPercent = (deltaCPU / deltaWall) * 100
 			}
 		}
-		p.prev[r.ID] = cpuSample{usec: r.CPUUsageUsec, at: now}
+		next[r.ID] = cpuSample{usec: r.CPUUsageUsec, at: now}
 		data[r.ID] = m
 	}
+	p.prev = next
 	p.snapshot.set(data)
 }
 

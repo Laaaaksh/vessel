@@ -15,18 +15,22 @@ type LogLine struct {
 }
 
 // StreamLogs streams log lines from a container into ch until ctx is cancelled.
-// It is the caller's responsibility to drain ch after cancellation.
+// StreamLogs takes ownership of ch and is the only writer: it closes ch once the
+// stream ends, whether that is on cancellation, EOF, or a start-up failure.
 func (c *Client) StreamLogs(ctx context.Context, id string, ch chan<- LogLine) error {
 	cmd := exec.CommandContext(ctx, c.binary, "logs", "--follow", id)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		close(ch)
 		return err
 	}
 	if err := cmd.Start(); err != nil {
+		close(ch)
 		return err
 	}
 
 	go func() {
+		defer close(ch)
 		defer cmd.Wait() //nolint:errcheck // streaming termination is expected on cancel
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
