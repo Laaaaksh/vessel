@@ -141,6 +141,17 @@ func TestSplitRef(t *testing.T) {
 	if repo != "alpine" || tag != "latest" {
 		t.Fatalf("got %s %s", repo, tag)
 	}
+	repo, tag = splitRef("docker.io/library/alpine@sha256:abc123")
+	if repo != "docker.io/library/alpine" || tag != "" {
+		t.Fatalf("digest ref: got %q %q", repo, tag)
+	}
+	if got := FormatRef(Image{Repository: repo, Tag: tag}); got != "docker.io/library/alpine" {
+		t.Fatalf("digest FormatRef: got %q", got)
+	}
+	repo, tag = splitRef("registry.local:5000/team/app")
+	if repo != "registry.local:5000/team/app" || tag != "latest" {
+		t.Fatalf("registry port: got %q %q", repo, tag)
+	}
 }
 
 func TestCreatedParse(t *testing.T) {

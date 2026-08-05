@@ -3,11 +3,11 @@ package containers
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 const (
@@ -54,10 +54,10 @@ func (m Model) ListView(width, height int, poller *backend.Poller) string {
 
 func (m Model) renderHeader(width int) string {
 	cols := []string{
-		pad("NAME", colName),
-		pad("STATUS", colStatus),
-		pad("CPU", colCPU),
-		pad("MEMORY", colMem),
+		uiutil.Pad("NAME", colName),
+		uiutil.Pad("STATUS", colStatus),
+		uiutil.Pad("CPU", colCPU),
+		uiutil.Pad("MEMORY", colMem),
 		"PORTS",
 	}
 	return lipgloss.NewStyle().
@@ -89,15 +89,15 @@ func (m Model) renderRow(c backend.Container, selected bool, width int, poller *
 		}
 	}
 
-	name := truncate(indicator+c.Name, colName)
-	status := pad(c.Status, colStatus)
+	name := uiutil.Truncate(indicator+c.Name, colName)
+	status := uiutil.Pad(c.Status, colStatus)
 	ports := backend.FormatPorts(c.Ports)
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top,
 		statusStyle.Render(name)+" ",
 		statusStyle.Render(status)+" ",
-		lipgloss.NewStyle().Width(colCPU).Render(pad(cpu, colCPU))+" ",
-		lipgloss.NewStyle().Width(colMem).Render(pad(mem, colMem))+" ",
+		lipgloss.NewStyle().Width(colCPU).Render(uiutil.Pad(cpu, colCPU))+" ",
+		lipgloss.NewStyle().Width(colMem).Render(uiutil.Pad(mem, colMem))+" ",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Render(ports),
 	)
 
@@ -119,22 +119,22 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 	var lines []string
 	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name))
 	lines = append(lines, "")
-	lines = append(lines, kv("Image", sel.Image))
-	lines = append(lines, kv("ID", truncate(sel.ID, 12)))
+	lines = append(lines, uiutil.KV("Image", sel.Image))
+	lines = append(lines, uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)))
 	if !sel.Created.IsZero() {
-		lines = append(lines, kv("Created", ago(sel.Created)))
+		lines = append(lines, uiutil.KV("Created", uiutil.Ago(sel.Created)))
 	}
-	lines = append(lines, kv("Status", sel.Status))
-	lines = append(lines, kv("Ports", backend.FormatPorts(sel.Ports)))
+	lines = append(lines, uiutil.KV("Status", sel.Status))
+	lines = append(lines, uiutil.KV("Ports", backend.FormatPorts(sel.Ports)))
 
 	if poller != nil {
 		m2, ok := poller.Snapshot().Get(sel.ID)
-		lines = append(lines, kv("CPU", backend.FormatCPU(m2, ok)))
-		lines = append(lines, kv("Memory", backend.FormatMem(m2, ok)))
+		lines = append(lines, uiutil.KV("CPU", backend.FormatCPU(m2, ok)))
+		lines = append(lines, uiutil.KV("Memory", backend.FormatMem(m2, ok)))
 		if ok {
-			lines = append(lines, renderBar("CPU", m2.CPUPercent/100.0, width-4))
+			lines = append(lines, renderBar(m2.CPUPercent/100.0, width-4))
 			if m2.MemLimit > 0 {
-				lines = append(lines, renderBar("Mem", float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
+				lines = append(lines, renderBar(float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
 			}
 		}
 	}
@@ -147,7 +147,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 				break
 			}
 			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-				Render("  "+truncate(e, width-6)))
+				Render("  "+uiutil.Truncate(e, width-6)))
 		}
 	}
 
@@ -157,14 +157,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
-func kv(key, val string) string {
-	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(key + ":")
-	v := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).Render(val)
-	return lipgloss.JoinHorizontal(lipgloss.Top, k, " ", v)
-}
-
-func renderBar(label string, pct float64, width int) string {
-	_ = label
+func renderBar(pct float64, width int) string {
 	if pct < 0 {
 		pct = 0
 	}
@@ -179,29 +172,4 @@ func renderBar(label string, pct float64, width int) string {
 	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("#34d399")).Render(strings.Repeat("▓", filled)) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).Render(strings.Repeat("░", barWidth-filled))
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render(fmt.Sprintf("%3.0f%% ", pct*100)) + bar
-}
-
-func pad(s string, w int) string {
-	return fmt.Sprintf("%-*s", w, truncate(s, w))
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
-}
-
-func ago(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return t.Format("2006-01-02")
-	}
 }

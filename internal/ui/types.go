@@ -10,16 +10,6 @@ const (
 	ViewVolumes
 )
 
-// Focus tracks which panel has keyboard focus.
-type Focus int
-
-// Focus targets.
-const (
-	FocusSidebar Focus = iota
-	FocusList
-	FocusDetail
-)
-
 // Panel is a panel that can be focused and rendered.
 type Panel interface {
 	Width() int

@@ -62,12 +62,15 @@ func splitRef(name string) (repo, tag string) {
 	if name == "" {
 		return "", ""
 	}
+	// A digest-pinned ref has no tag; the digest is not one.
+	if i := strings.Index(name, "@"); i >= 0 {
+		return name[:i], ""
+	}
 	// Take last ':' that looks like a tag (not a port in host:port/...)
 	i := strings.LastIndex(name, ":")
 	if i < 0 {
 		return name, "latest"
 	}
-	// Avoid splitting digests sha256:...
 	if strings.Contains(name[i+1:], "/") {
 		return name, "latest"
 	}

@@ -2,12 +2,12 @@ package volumes
 
 import (
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 // Model is the volumes panel.
@@ -72,7 +72,7 @@ func (m Model) ListView(width, height int) string {
 
 	var rows []string
 	for i, v := range m.items {
-		line := fmt.Sprintf("%-28s %-10s %s", truncate(v.Name, 28), v.Driver, ago(v.Created))
+		line := fmt.Sprintf("%-28s %-10s %s", uiutil.Truncate(v.Name, 28), v.Driver, uiutil.Ago(v.Created))
 		st := row
 		if i == m.cursor {
 			st = sel
@@ -96,39 +96,12 @@ func (m Model) DetailView(width, height int) string {
 	lines := []string{
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
 		"",
-		kv("Driver", sel.Driver),
-		kv("Created", ago(sel.Created)),
-		kv("Path", truncate(sel.Mountpoint, width-12)),
+		uiutil.KV("Driver", sel.Driver),
+		uiutil.KV("Created", uiutil.Ago(sel.Created)),
+		uiutil.KV("Path", uiutil.Truncate(sel.Mountpoint, width-12)),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[d] delete volume"),
 	}
 	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
-}
-
-func kv(k, v string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(k+":") +
-		" " + lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).Render(v)
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
-}
-
-func ago(t time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return t.Format("2006-01-02")
-	}
 }
