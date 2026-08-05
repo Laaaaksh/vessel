@@ -62,11 +62,15 @@ type logErrMsg struct {
 	err error
 }
 
-// logStreamEndMsg reports that the follow channel was closed.
 type logStreamEndMsg struct{}
 
 type shellDoneMsg struct {
 	err error
+}
+
+type promptDoneMsg struct {
+	kind string
+	text string
 }
 
 // Mode is the top-level UI mode.
@@ -76,6 +80,9 @@ const (
 	modeBrowse Mode = iota
 	modeLogs
 	modeConfirmDelete
+	modeShell
+	modeActions
+	modePrompt
 )
 
 // Model is the root bubbletea model for vessel.
@@ -89,20 +96,36 @@ type Model struct {
 	height int
 
 	activeView View
+	focus      Focus
+	layout     LayoutMode
 	mode       Mode
 	showHelp   bool
+	showCmdLog bool
 
 	cntPanel containers.Model
 	imgPanel images.Model
 	volPanel volumes.Model
 	logPanel logs.Model
 
-	lastErr   error
-	status    string
-	pending   string // id/name awaiting delete confirm
-	logCancel context.CancelFunc
-	logCh     chan backend.LogLine
-	logID     string // container the active follow belongs to
+	lastErr    error
+	status     string
+	pending    string
+	pendingLbl string
+	logCancel  context.CancelFunc
+	logCh      chan backend.LogLine
+	logID      string
+	pollCancel context.CancelFunc
+	tickPaused bool
+
+	actionIdx   int
+	actionItems []actionItem
+	promptKind  string
+	promptBuf   string
+}
+
+type actionItem struct {
+	label string
+	run   func(Model) (Model, tea.Cmd)
 }
 
 // New creates the root model. Backend connection happens in Init.
@@ -113,6 +136,8 @@ func New() Model {
 		keys:       DefaultKeyMap(),
 		st:         newStyles(),
 		activeView: ViewContainers,
+		focus:      FocusList,
+		layout:     LayoutNormal,
 		mode:       modeBrowse,
 		cntPanel:   containers.New(),
 		imgPanel:   images.New(),
@@ -139,15 +164,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.client = msg.client
 		m.poller = backend.NewPoller(msg.client, m.cfg.PollInterval.Duration)
-		return m, m.startPollerCmd()
+		ctx, cancel := context.WithCancel(context.Background())
+		m.pollCancel = cancel
+		return m, m.startPollerCmd(ctx)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		rows := max(5, msg.Height-6)
+		m.cntPanel = m.cntPanel.SetPageRows(rows)
+		m.imgPanel = m.imgPanel.SetPageRows(rows)
+		m.volPanel = m.volPanel.SetPageRows(rows)
 		m.logPanel = m.logPanel.SetSize(msg.Width, msg.Height)
 		return m, nil
 	case tickMsg:
-		// The tick chain is scheduled here and nowhere else, so out-of-band
-		// refreshes cannot fork additional poll loops.
+		if m.tickPaused || m.mode == modeShell {
+			return m, nil
+		}
 		return m, tea.Batch(m.refreshCmd(), m.scheduleTickCmd())
 	case containersLoadedMsg:
 		return m.applyContainersLoaded(msg)
@@ -175,6 +207,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeBrowse
 		m.pending = ""
+		m.pendingLbl = ""
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
 		if msg.err != nil {
@@ -208,59 +241,125 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case shellDoneMsg:
+		m.mode = modeBrowse
+		m.tickPaused = false
 		if msg.err != nil {
 			m.lastErr = msg.err
 		}
-		return m, m.refreshCmd()
+		return m, tea.Batch(tea.ClearScreen, m.refreshCmd(), m.scheduleTickCmd())
+	case promptDoneMsg:
+		return m.handlePrompt(msg)
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg)
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(msg)
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
-
 	return m, nil
 }
 
 // View renders the full UI.
 func (m Model) View() tea.View {
 	var content string
-	if m.width == 0 {
+	switch {
+	case m.mode == modeShell:
+		// Empty view suppresses the pre-exec frame leak into the TTY.
+		content = ""
+	case m.width == 0:
 		content = "initialising vessel..."
-	} else if m.showHelp {
+	case m.width < 60 || m.height < 12:
+		content = m.st.errorText.Render("terminal too small — resize to at least 60×12")
+	case m.showHelp:
 		content = m.helpView()
-	} else if m.mode == modeLogs {
+	case m.mode == modeLogs:
 		content = m.logPanel.View()
-	} else {
-		sidebarW := 18
-		detailW := min(42, m.width/3)
-		listW := m.width - sidebarW - detailW
-
-		sidebar := m.sidebarView(sidebarW, m.height-2)
-		list, detail := m.mainPanels(listW, detailW, m.height-2)
-		body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, list, detail)
-		content = lipgloss.JoinVertical(lipgloss.Left, m.headerView(), body, m.footerView())
+	default:
+		content = m.browseView()
 	}
 
 	v := tea.NewView(content)
 	v.AltScreen = true
-	if m.cfg.MouseEnabled {
+	if m.cfg.MouseEnabled && m.mode != modeShell {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
 }
 
-func (m Model) mainPanels(listW, detailW, height int) (string, string) {
-	switch m.activeView {
-	case ViewImages:
-		return m.imgPanel.ListView(listW, height), m.imgPanel.DetailView(detailW, height)
-	case ViewVolumes:
-		return m.volPanel.ListView(listW, height), m.volPanel.DetailView(detailW, height)
-	default:
-		return m.cntPanel.ListView(listW, height, m.poller), m.cntPanel.DetailView(detailW, height, m.poller)
+func (m Model) browseView() string {
+	sidebarW, detailW, listW, bodyH, cmdH := m.layoutDims()
+	sidebar := m.sidebarView(sidebarW, bodyH)
+	list, detail := m.mainPanels(listW, detailW, bodyH)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, list, detail)
+	parts := []string{m.headerView(), body}
+	if m.showCmdLog && cmdH > 0 {
+		parts = append(parts, m.cmdLogView(cmdH))
 	}
+	parts = append(parts, m.footerView())
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if m.mode == modeConfirmDelete {
+		content = m.overlayModal(content, m.confirmModal())
+	}
+	if m.mode == modeActions {
+		content = m.overlayModal(content, m.actionsModal())
+	}
+	if m.mode == modePrompt {
+		content = m.overlayModal(content, m.promptModal())
+	}
+	return content
 }
 
-func (m Model) startPollerCmd() tea.Cmd {
+func (m Model) layoutDims() (sidebarW, detailW, listW, bodyH, cmdH int) {
+	sidebarW = 18
+	cmdH = 0
+	if m.showCmdLog {
+		cmdH = 4
+	}
+	bodyH = max(1, m.height-2-cmdH)
+	switch m.layout {
+	case LayoutWideList:
+		detailW = min(28, m.width/5)
+	case LayoutLogsEmphasis:
+		detailW = min(50, m.width/2)
+	default:
+		detailW = min(42, m.width/3)
+	}
+	listW = max(20, m.width-sidebarW-detailW)
+	return sidebarW, detailW, listW, bodyH, cmdH
+}
+
+func (m Model) mainPanels(listW, detailW, height int) (string, string) {
+	listBorder := m.paneStyle(m.focus == FocusList, listW, height)
+	detailBorder := m.paneStyle(m.focus == FocusDetail, detailW, height)
+	var list, detail string
+	switch m.activeView {
+	case ViewImages:
+		list = m.imgPanel.ListView(listW-2, height-2)
+		detail = m.imgPanel.DetailView(detailW-2, height-2)
+	case ViewVolumes:
+		list = m.volPanel.ListView(listW-2, height-2)
+		detail = m.volPanel.DetailView(detailW-2, height-2)
+	default:
+		list = m.cntPanel.ListView(listW-2, height-2, m.poller)
+		detail = m.cntPanel.DetailView(detailW-2, height-2, m.poller)
+	}
+	return listBorder.Render(list), detailBorder.Render(detail)
+}
+
+func (m Model) paneStyle(focused bool, w, h int) lipgloss.Style {
+	fg := colorBorder
+	if focused {
+		fg = colorPurple
+	}
+	return lipgloss.NewStyle().
+		Width(w).Height(h).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(fg)
+}
+
+func (m Model) startPollerCmd(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		go m.poller.Run(context.Background())
+		go m.poller.Run(ctx)
 		return tickMsg(time.Now())
 	}
 }
@@ -271,8 +370,6 @@ func (m Model) scheduleTickCmd() tea.Cmd {
 	})
 }
 
-// refreshCmd reloads the active view. Containers are always reloaded because the
-// sidebar fleet counts are visible in every view.
 func (m Model) refreshCmd() tea.Cmd {
 	if m.client == nil {
 		return nil
@@ -343,6 +440,29 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if k == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.mode == modeShell {
+		return m, nil
+	}
+
+	if m.mode == modePrompt {
+		return m.handlePromptKey(k)
+	}
+	if m.mode == modeActions {
+		return m.handleActionsKey(k)
+	}
+	if m.mode == modeConfirmDelete {
+		switch k {
+		case "y":
+			return m.confirmDelete()
+		case "n", "esc":
+			m.mode = modeBrowse
+			m.pending = ""
+			m.pendingLbl = ""
+			m.status = "cancelled"
+			return m, nil
+		}
+		return m, nil
+	}
 
 	if m.mode == modeLogs {
 		if k == "esc" || k == "q" {
@@ -355,128 +475,256 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeBrowse
 			return m, nil
 		}
+		if Match(k, m.keys.Yank) {
+			if err := CopyToClipboard(m.logPanel.SelectedLine()); err != nil {
+				m.lastErr = err
+			} else {
+				m.status = "copied log line"
+			}
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.logPanel, cmd = m.logPanel.Update(msg)
 		return m, cmd
 	}
 
-	if m.mode == modeConfirmDelete {
-		switch k {
-		case "y":
-			return m.confirmDelete()
-		case "n", "esc":
-			m.mode = modeBrowse
-			m.pending = ""
-			m.status = "delete cancelled"
-			return m, nil
-		}
-		return m, nil
+	if m.panelFiltering() {
+		return m.routeToPanel(msg)
 	}
 
-	// While the filter prompt is open every printable key belongs to it, so the
-	// global bindings must not consume q/?/tab/digits.
-	if m.activeView == ViewContainers && m.cntPanel.Filtering() {
-		var cmd tea.Cmd
-		m.cntPanel, cmd = m.cntPanel.Update(msg)
-		return m, cmd
-	}
-
-	switch k {
-	case m.keys.Quit:
+	switch {
+	case Match(k, m.keys.Quit):
 		return m, tea.Quit
-	case m.keys.Help:
+	case Match(k, m.keys.Help):
 		m.showHelp = !m.showHelp
 		return m, nil
-	case m.keys.Escape:
+	case Match(k, m.keys.Escape):
 		if m.showHelp {
 			m.showHelp = false
 			return m, nil
 		}
-	case m.keys.Tab:
+	case Match(k, m.keys.Tab):
 		m.activeView = (m.activeView + 1) % 3
 		return m, m.activeViewLoadCmd()
-	case "1":
+	case k == "1":
 		m.activeView = ViewContainers
 		return m, m.activeViewLoadCmd()
-	case "2":
+	case k == "2":
 		m.activeView = ViewImages
 		return m, m.activeViewLoadCmd()
-	case "3":
+	case k == "3":
 		m.activeView = ViewVolumes
 		return m, m.activeViewLoadCmd()
+	case Match(k, m.keys.LayoutNext):
+		m.layout = (m.layout + 1) % 3
+		m.status = "layout " + m.layout.String()
+		return m, nil
+	case Match(k, m.keys.LayoutPrev):
+		m.layout = (m.layout + 2) % 3
+		m.status = "layout " + m.layout.String()
+		return m, nil
+	case k == "`":
+		m.showCmdLog = !m.showCmdLog
+		return m, nil
+	case Match(k, m.keys.FocusNext, m.keys.Right):
+		m.focus = (m.focus + 1) % 3
+		return m, nil
+	case Match(k, m.keys.FocusPrev, m.keys.Left):
+		m.focus = (m.focus + 2) % 3
+		return m, nil
 	}
 
 	if m.showHelp {
 		return m, nil
 	}
 
-	// Action keys for containers
-	if m.activeView == ViewContainers {
-		switch k {
-		case m.keys.Stop:
+	if m.focus == FocusSidebar {
+		switch {
+		case m.keys.NavDown(k):
+			m.activeView = (m.activeView + 1) % 3
+			return m, m.activeViewLoadCmd()
+		case m.keys.NavUp(k):
+			m.activeView = (m.activeView + 2) % 3
+			return m, m.activeViewLoadCmd()
+		case Match(k, m.keys.Enter):
+			m.focus = FocusList
+			return m, nil
+		}
+		return m, nil
+	}
+
+	if Match(k, m.keys.Actions) {
+		return m.openActions()
+	}
+	if Match(k, m.keys.Yank) {
+		return m.yankSelected()
+	}
+
+	// View-specific actions (work from list or detail focus).
+	switch m.activeView {
+	case ViewContainers:
+		switch {
+		case Match(k, m.keys.Stop):
 			return m.runOnSelected("stop", func(ctx context.Context, id string) error {
 				return m.client.StopContainer(ctx, id)
 			})
-		case m.keys.Start:
+		case Match(k, m.keys.Start):
 			return m.runOnSelected("start", func(ctx context.Context, id string) error {
 				return m.client.StartContainer(ctx, id)
 			})
-		case m.keys.Restart:
+		case Match(k, m.keys.Restart):
 			return m.runOnSelected("restart", func(ctx context.Context, id string) error {
 				return m.client.RestartContainer(ctx, id)
 			})
-		case m.keys.Remove:
-			sel := m.cntPanel.Selected()
-			if sel == nil {
-				m.status = "nothing selected"
-				return m, nil
-			}
-			m.mode = modeConfirmDelete
-			m.pending = sel.ID
-			m.status = fmt.Sprintf("delete %s? [y/n]", sel.Name)
-			return m, nil
-		case m.keys.Logs:
+		case Match(k, m.keys.Remove):
+			return m.beginDeleteContainer()
+		case Match(k, m.keys.Logs):
 			return m.openLogs()
-		case m.keys.Enter:
+		case Match(k, m.keys.Enter) && m.focus != FocusDetail:
 			return m.openShell()
+		case Match(k, m.keys.Prune):
+			return m.runGlobal("prune stopped", func(ctx context.Context) error {
+				return m.client.PruneContainers(ctx)
+			})
+		case Match(k, m.keys.Create):
+			return m.beginPrompt("run", "image to run")
 		}
-	}
-
-	if m.activeView == ViewImages {
-		if k == m.keys.Remove {
+	case ViewImages:
+		switch {
+		case Match(k, m.keys.Remove):
 			sel := m.imgPanel.Selected()
 			if sel == nil {
 				return m, nil
 			}
 			m.mode = modeConfirmDelete
 			m.pending = "image:" + sel.ID
-			m.status = fmt.Sprintf("delete image %s? [y/n]", backend.FormatRef(*sel))
+			m.pendingLbl = backend.FormatRef(*sel)
 			return m, nil
+		case Match(k, m.keys.Pull):
+			return m.beginPrompt("pull", "image to pull")
+		case Match(k, m.keys.Prune):
+			return m.runGlobal("prune images", func(ctx context.Context) error {
+				return m.client.PruneImages(ctx)
+			})
+		case Match(k, m.keys.Create):
+			sel := m.imgPanel.Selected()
+			if sel == nil {
+				return m.beginPrompt("run", "image to run")
+			}
+			ref := backend.FormatRef(*sel)
+			return m.runGlobal("run "+ref, func(ctx context.Context) error {
+				return m.client.RunDetached(ctx, ref)
+			})
 		}
-		var cmd tea.Cmd
-		m.imgPanel, cmd = m.imgPanel.Update(msg)
-		return m, cmd
-	}
-
-	if m.activeView == ViewVolumes {
-		if k == m.keys.Remove {
+	case ViewVolumes:
+		switch {
+		case Match(k, m.keys.Remove):
 			sel := m.volPanel.Selected()
 			if sel == nil {
 				return m, nil
 			}
 			m.mode = modeConfirmDelete
 			m.pending = "volume:" + sel.Name
-			m.status = fmt.Sprintf("delete volume %s? [y/n]", sel.Name)
+			m.pendingLbl = sel.Name
 			return m, nil
+		case Match(k, m.keys.Create):
+			return m.beginPrompt("volcreate", "volume name")
+		case Match(k, m.keys.Prune):
+			return m.runGlobal("prune volumes", func(ctx context.Context) error {
+				return m.client.PruneVolumes(ctx)
+			})
 		}
-		var cmd tea.Cmd
-		m.volPanel, cmd = m.volPanel.Update(msg)
-		return m, cmd
 	}
 
+	if m.focus == FocusDetail {
+		return m, nil
+	}
+	return m.routeToPanel(msg)
+}
+
+func (m Model) panelFiltering() bool {
+	switch m.activeView {
+	case ViewImages:
+		return m.imgPanel.Filtering()
+	case ViewVolumes:
+		return m.volPanel.Filtering()
+	default:
+		return m.cntPanel.Filtering()
+	}
+}
+
+func (m Model) routeToPanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	m.cntPanel, cmd = m.cntPanel.Update(msg)
+	switch m.activeView {
+	case ViewImages:
+		m.imgPanel, cmd = m.imgPanel.Update(msg)
+	case ViewVolumes:
+		m.volPanel, cmd = m.volPanel.Update(msg)
+	default:
+		m.cntPanel, cmd = m.cntPanel.Update(msg)
+	}
 	return m, cmd
+}
+
+func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if !m.cfg.MouseEnabled || m.mode != modeBrowse {
+		return m, nil
+	}
+	ev := msg.Mouse()
+	// Rough mapping: rows below header (~1) into list region.
+	row := ev.Y - 2
+	if row < 0 {
+		return m, nil
+	}
+	m.focus = FocusList
+	switch m.activeView {
+	case ViewImages:
+		m.imgPanel = m.imgPanel.SetCursor(row)
+	case ViewVolumes:
+		m.volPanel = m.volPanel.SetCursor(row)
+	default:
+		m.cntPanel = m.cntPanel.SetCursor(row)
+	}
+	return m, nil
+}
+
+func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if !m.cfg.MouseEnabled || m.mode != modeBrowse {
+		return m, nil
+	}
+	delta := 1
+	if msg.Mouse().Button == tea.MouseWheelUp {
+		delta = -1
+	}
+	m.focus = FocusList
+	switch m.activeView {
+	case ViewImages:
+		m.imgPanel = m.imgPanel.MoveBy(delta)
+	case ViewVolumes:
+		m.volPanel = m.volPanel.MoveBy(delta)
+	default:
+		m.cntPanel = m.cntPanel.MoveBy(delta)
+	}
+	return m, nil
+}
+
+func (m Model) beginDeleteContainer() (tea.Model, tea.Cmd) {
+	marked := m.cntPanel.MarkedIDs()
+	if len(marked) > 1 {
+		m.mode = modeConfirmDelete
+		m.pending = "bulk:" + strings.Join(marked, ",")
+		m.pendingLbl = fmt.Sprintf("%d containers", len(marked))
+		return m, nil
+	}
+	sel := m.cntPanel.Selected()
+	if sel == nil {
+		m.status = "nothing selected"
+		return m, nil
+	}
+	m.mode = modeConfirmDelete
+	m.pending = sel.ID
+	m.pendingLbl = sel.Name
+	return m, nil
 }
 
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
@@ -484,8 +732,9 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	client := m.client
 	m.mode = modeBrowse
 	m.pending = ""
+	m.pendingLbl = ""
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		var err error
 		switch {
@@ -493,6 +742,14 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 			err = client.RemoveImage(ctx, strings.TrimPrefix(pending, "image:"))
 		case strings.HasPrefix(pending, "volume:"):
 			err = client.RemoveVolume(ctx, strings.TrimPrefix(pending, "volume:"))
+		case strings.HasPrefix(pending, "bulk:"):
+			ids := strings.Split(strings.TrimPrefix(pending, "bulk:"), ",")
+			for _, id := range ids {
+				if e := client.RemoveContainer(ctx, id); e != nil {
+					err = e
+					break
+				}
+			}
 		default:
 			err = client.RemoveContainer(ctx, pending)
 		}
@@ -522,6 +779,18 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 	}
 }
 
+func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+	m.status = label + "…"
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		if err := fn(ctx); err != nil {
+			return actionDoneMsg{err: err}
+		}
+		return actionDoneMsg{msg: label + " ok"}
+	}
+}
+
 func (m Model) openLogs() (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
@@ -540,8 +809,6 @@ func (m Model) openLogs() (tea.Model, tea.Cmd) {
 	}
 }
 
-// streamLogsCmd starts the follow stream. StreamLogs owns ch and closes it, so a
-// failure to start surfaces as both an error message and an end-of-stream.
 func (m Model) streamLogsCmd(ctx context.Context, id string, ch chan backend.LogLine) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
@@ -573,12 +840,13 @@ func (m Model) openShell() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if !sel.IsRunning() {
-		m.status = "container is not running"
+		m.status = "shell disabled: container is not running"
 		return m, nil
 	}
-	cmd := m.client.ShellCmd(sel.ID)
+	m.mode = modeShell
+	m.tickPaused = true
+	cmd := m.client.ShellCmd(sel.ID, m.cfg.Shell)
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-		// Treat exit as success if the process ran; surface real launch errors.
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
@@ -590,13 +858,279 @@ func (m Model) openShell() (tea.Model, tea.Cmd) {
 	})
 }
 
+func (m Model) yankSelected() (tea.Model, tea.Cmd) {
+	var text string
+	switch m.activeView {
+	case ViewImages:
+		if sel := m.imgPanel.Selected(); sel != nil {
+			text = backend.FormatRef(*sel)
+		}
+	case ViewVolumes:
+		if sel := m.volPanel.Selected(); sel != nil {
+			text = sel.Mountpoint
+			if text == "" {
+				text = sel.Name
+			}
+		}
+	default:
+		if sel := m.cntPanel.Selected(); sel != nil {
+			text = sel.ID
+		}
+	}
+	if err := CopyToClipboard(text); err != nil {
+		m.lastErr = err
+	} else {
+		m.status = "copied " + text
+	}
+	return m, nil
+}
+
+func (m Model) beginPrompt(kind, _ string) (tea.Model, tea.Cmd) {
+	m.mode = modePrompt
+	m.promptKind = kind
+	m.promptBuf = ""
+	return m, nil
+}
+
+func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "esc":
+		m.mode = modeBrowse
+		m.promptBuf = ""
+		m.status = "cancelled"
+		return m, nil
+	case "enter":
+		kind := m.promptKind
+		text := strings.TrimSpace(m.promptBuf)
+		m.mode = modeBrowse
+		m.promptBuf = ""
+		return m.handlePrompt(promptDoneMsg{kind: kind, text: text})
+	case "backspace":
+		if len(m.promptBuf) > 0 {
+			m.promptBuf = m.promptBuf[:len(m.promptBuf)-1]
+		}
+		return m, nil
+	default:
+		if len(k) == 1 {
+			m.promptBuf += k
+		}
+		return m, nil
+	}
+}
+
+func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.text == "" {
+		m.status = "empty input"
+		return m, nil
+	}
+	switch msg.kind {
+	case "pull":
+		ref := msg.text
+		return m.runGlobal("pull "+ref, func(ctx context.Context) error {
+			return m.client.PullImage(ctx, ref)
+		})
+	case "run":
+		ref := msg.text
+		return m.runGlobal("run "+ref, func(ctx context.Context) error {
+			return m.client.RunDetached(ctx, ref)
+		})
+	case "volcreate":
+		name := msg.text
+		return m.runGlobal("create volume "+name, func(ctx context.Context) error {
+			return m.client.CreateVolume(ctx, name)
+		})
+	case "custom":
+		return m.runCustom(msg.text)
+	}
+	return m, nil
+}
+
+func (m Model) openActions() (tea.Model, tea.Cmd) {
+	items := m.buildActions()
+	if len(items) == 0 {
+		m.status = "no actions"
+		return m, nil
+	}
+	m.mode = modeActions
+	m.actionItems = items
+	m.actionIdx = 0
+	return m, nil
+}
+
+func (m Model) buildActions() []actionItem {
+	var items []actionItem
+	switch m.activeView {
+	case ViewContainers:
+		items = append(items,
+			actionItem{"Start", func(m Model) (Model, tea.Cmd) {
+				x, c := m.runOnSelected("start", func(ctx context.Context, id string) error {
+					return m.client.StartContainer(ctx, id)
+				})
+				return x.(Model), c
+			}},
+			actionItem{"Stop", func(m Model) (Model, tea.Cmd) {
+				x, c := m.runOnSelected("stop", func(ctx context.Context, id string) error {
+					return m.client.StopContainer(ctx, id)
+				})
+				return x.(Model), c
+			}},
+			actionItem{"Restart", func(m Model) (Model, tea.Cmd) {
+				x, c := m.runOnSelected("restart", func(ctx context.Context, id string) error {
+					return m.client.RestartContainer(ctx, id)
+				})
+				return x.(Model), c
+			}},
+			actionItem{"Logs", func(m Model) (Model, tea.Cmd) {
+				x, c := m.openLogs()
+				return x.(Model), c
+			}},
+			actionItem{"Shell", func(m Model) (Model, tea.Cmd) {
+				x, c := m.openShell()
+				return x.(Model), c
+			}},
+			actionItem{"Prune stopped", func(m Model) (Model, tea.Cmd) {
+				x, c := m.runGlobal("prune stopped", func(ctx context.Context) error {
+					return m.client.PruneContainers(ctx)
+				})
+				return x.(Model), c
+			}},
+		)
+	case ViewImages:
+		items = append(items,
+			actionItem{"Pull…", func(m Model) (Model, tea.Cmd) {
+				x, c := m.beginPrompt("pull", "image")
+				return x.(Model), c
+			}},
+			actionItem{"Run", func(m Model) (Model, tea.Cmd) {
+				sel := m.imgPanel.Selected()
+				if sel == nil {
+					return m, nil
+				}
+				ref := backend.FormatRef(*sel)
+				x, c := m.runGlobal("run "+ref, func(ctx context.Context) error {
+					return m.client.RunDetached(ctx, ref)
+				})
+				return x.(Model), c
+			}},
+			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
+				x, c := m.runGlobal("prune images", func(ctx context.Context) error {
+					return m.client.PruneImages(ctx)
+				})
+				return x.(Model), c
+			}},
+		)
+	case ViewVolumes:
+		items = append(items,
+			actionItem{"Create…", func(m Model) (Model, tea.Cmd) {
+				x, c := m.beginPrompt("volcreate", "name")
+				return x.(Model), c
+			}},
+			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
+				x, c := m.runGlobal("prune volumes", func(ctx context.Context) error {
+					return m.client.PruneVolumes(ctx)
+				})
+				return x.(Model), c
+			}},
+		)
+	}
+	for _, cc := range m.cfg.CustomCommands {
+		cc := cc
+		items = append(items, actionItem{
+			label: "custom: " + cc.Name,
+			run: func(m Model) (Model, tea.Cmd) {
+				return m.runCustom(cc.Command)
+			},
+		})
+	}
+	return items
+}
+
+func (m Model) handleActionsKey(k string) (tea.Model, tea.Cmd) {
+	switch {
+	case k == "esc", Match(k, m.keys.Actions):
+		m.mode = modeBrowse
+		return m, nil
+	case m.keys.NavDown(k):
+		if m.actionIdx < len(m.actionItems)-1 {
+			m.actionIdx++
+		}
+		return m, nil
+	case m.keys.NavUp(k):
+		if m.actionIdx > 0 {
+			m.actionIdx--
+		}
+		return m, nil
+	case Match(k, m.keys.Enter):
+		item := m.actionItems[m.actionIdx]
+		m.mode = modeBrowse
+		return item.run(m)
+	}
+	return m, nil
+}
+
+func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
+	id, name, image := "", "", ""
+	switch m.activeView {
+	case ViewImages:
+		if sel := m.imgPanel.Selected(); sel != nil {
+			id, name, image = sel.ID, backend.FormatRef(*sel), backend.FormatRef(*sel)
+		}
+	case ViewVolumes:
+		if sel := m.volPanel.Selected(); sel != nil {
+			id, name = sel.Name, sel.Name
+		}
+	default:
+		if sel := m.cntPanel.Selected(); sel != nil {
+			id, name, image = sel.ID, sel.Name, sel.Image
+		}
+	}
+	cmdStr := tmpl
+	cmdStr = strings.ReplaceAll(cmdStr, "{{.ID}}", id)
+	cmdStr = strings.ReplaceAll(cmdStr, "{{.Name}}", name)
+	cmdStr = strings.ReplaceAll(cmdStr, "{{.Image}}", image)
+	m.status = "custom: " + cmdStr
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		c := exec.CommandContext(ctx, "bash", "-lc", cmdStr)
+		out, err := c.CombinedOutput()
+		if err != nil {
+			return actionDoneMsg{err: fmt.Errorf("%w: %s", err, string(out))}
+		}
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = "custom ok"
+		}
+		return actionDoneMsg{msg: uiutilTruncate(msg, 80)}
+	}
+}
+
+func uiutilTruncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
+
 func (m Model) headerView() string {
 	title := m.st.title.Render("⬡ vessel")
+	meta := m.st.dimText.Render(fmt.Sprintf("[%s] focus:%s layout:%s", m.viewName(), m.focus.String(), m.layout.String()))
 	hint := m.st.dimText.Render("[ ? help ]  [ q quit ]")
 	spacer := lipgloss.NewStyle().
-		Width(max(0, m.width-lipgloss.Width(title)-lipgloss.Width(hint))).
+		Width(max(0, m.width-lipgloss.Width(title)-lipgloss.Width(meta)-lipgloss.Width(hint)-2)).
 		Render("")
-	return lipgloss.JoinHorizontal(lipgloss.Top, title, spacer, hint)
+	return lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", meta, spacer, hint)
+}
+
+func (m Model) viewName() string {
+	switch m.activeView {
+	case ViewImages:
+		return "images"
+	case ViewVolumes:
+		return "volumes"
+	default:
+		return "containers"
+	}
 }
 
 func (m Model) footerView() string {
@@ -606,16 +1140,31 @@ func (m Model) footerView() string {
 	if m.status != "" {
 		return m.st.footerHelp.Width(m.width).Render(m.status)
 	}
+	cur, n := m.cursorInfo()
+	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)
+	if n == 0 {
+		prefix = "0/0  "
+	}
+	var keys string
 	switch m.activeView {
 	case ViewImages:
-		return m.st.footerHelp.Width(m.width).
-			Render("[tab] views  [d] delete image  [j/k] move  [?] help")
+		keys = "[p] pull  [c] run  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
 	case ViewVolumes:
-		return m.st.footerHelp.Width(m.width).
-			Render("[tab] views  [d] delete volume  [j/k] move  [?] help")
+		keys = "[c] create  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
 	default:
-		return m.st.footerHelp.Width(m.width).
-			Render("[enter] shell  [L] logs  [s] stop  [u] start  [r] restart  [d] remove  [/] filter  [tab] views")
+		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
+	}
+	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
+}
+
+func (m Model) cursorInfo() (int, int) {
+	switch m.activeView {
+	case ViewImages:
+		return m.imgPanel.Cursor(), m.imgPanel.Len()
+	case ViewVolumes:
+		return m.volPanel.Cursor(), m.volPanel.Len()
+	default:
+		return m.cntPanel.Cursor(), m.cntPanel.Len()
 	}
 }
 
@@ -623,52 +1172,111 @@ func (m Model) sidebarView(width, height int) string {
 	views := []struct {
 		label string
 		view  View
-		key   string
 	}{
-		{"📦 Containers", ViewContainers, "1"},
-		{"🖼  Images", ViewImages, "2"},
-		{"💾 Volumes", ViewVolumes, "3"},
+		{"Containers", ViewContainers},
+		{"Images", ViewImages},
+		{"Volumes", ViewVolumes},
 	}
 
+	focused := m.focus == FocusSidebar
 	var rows []string
-	rows = append(rows, m.st.sectionTitle.Width(width).Render("Views"))
+	rows = append(rows, m.st.sectionTitle.Width(width-2).Render("Views"))
 	for _, v := range views {
 		st := m.st.navItem
 		if m.activeView == v.view {
 			st = m.st.navItemActive
 		}
-		rows = append(rows, st.Width(width).Render(v.label))
+		label := fmt.Sprintf("%d %s", int(v.view)+1, v.label)
+		rows = append(rows, st.Width(width-2).Render(label))
 	}
-
 	rows = append(rows, "")
-	rows = append(rows, m.st.sectionTitle.Width(width).Render("Fleet"))
+	rows = append(rows, m.st.sectionTitle.Width(width-2).Render("Fleet"))
 	rows = append(rows, m.st.statRunning.Render(
 		fmt.Sprintf("● %d running", m.cntPanel.RunningCount())))
 	rows = append(rows, m.st.statStopped.Render(
 		fmt.Sprintf("○ %d stopped", m.cntPanel.StoppedCount())))
 
-	return lipgloss.NewStyle().
-		Width(width).Height(height).
-		Background(colorSurface).
-		BorderRight(true).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(colorBorder).
-		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	inner := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return m.paneStyle(focused, width, height).Render(inner)
+}
+
+func (m Model) cmdLogView(height int) string {
+	lines := []string{m.st.sectionTitle.Render("command log  [`] toggle")}
+	if m.client != nil {
+		log := m.client.CommandLog()
+		start := max(0, len(log)-(height-1))
+		for _, l := range log[start:] {
+			lines = append(lines, m.st.dimText.Render("  "+l))
+		}
+	}
+	return lipgloss.NewStyle().Width(m.width).Height(height).
+		BorderTop(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorBorder).
+		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func (m Model) helpView() string {
 	var rows []string
-	rows = append(rows, m.st.title.Render("vessel - keybindings"))
+	rows = append(rows, m.st.title.Render("vessel — keybindings"))
+	rows = append(rows, m.st.dimText.Render(fmt.Sprintf("view=%s focus=%s", m.viewName(), m.focus.String())))
 	rows = append(rows, "")
-	for _, b := range helpBindings() {
-		key := m.st.helpText.Width(18).Render(b.key)
+	for _, b := range helpBindings(m.activeView, m.focus, m.mode) {
+		key := m.st.helpText.Width(22).Render(b.key)
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, key, b.desc))
 	}
 	rows = append(rows, "")
 	rows = append(rows, m.st.dimText.Render("press ? or esc to close"))
-
 	return lipgloss.NewStyle().
 		Width(m.width).Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center).
 		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+func (m Model) confirmModal() string {
+	label := m.pendingLbl
+	if label == "" {
+		label = m.pending
+	}
+	body := fmt.Sprintf("Delete %s?\n\n[y] confirm   [n/esc] cancel", label)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorRed).
+		Padding(1, 2).
+		Width(min(48, m.width-4)).
+		Render(body)
+}
+
+func (m Model) actionsModal() string {
+	var rows []string
+	rows = append(rows, m.st.title.Render("actions"))
+	rows = append(rows, "")
+	for i, a := range m.actionItems {
+		line := "  " + a.label
+		if i == m.actionIdx {
+			line = m.st.navItemActive.Render("> " + a.label)
+		}
+		rows = append(rows, line)
+	}
+	rows = append(rows, "")
+	rows = append(rows, m.st.dimText.Render("[enter] run  [esc] close"))
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPurple).
+		Padding(1, 2).
+		Width(min(40, m.width-4)).
+		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+func (m Model) promptModal() string {
+	title := m.promptKind
+	body := fmt.Sprintf("%s: %s_", title, m.promptBuf)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorBlue).
+		Padding(1, 2).
+		Width(min(56, m.width-4)).
+		Render(body + "\n\n[enter] ok  [esc] cancel")
+}
+
+func (m Model) overlayModal(_, modal string) string {
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }

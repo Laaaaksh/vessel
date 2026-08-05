@@ -55,6 +55,12 @@ func (c *Client) PullImage(ctx context.Context, ref string) error {
 	return err
 }
 
+// PruneImages removes unused images.
+func (c *Client) PruneImages(ctx context.Context) error {
+	_, err := c.run(ctx, "image", "prune")
+	return err
+}
+
 func mapImages(raw []cliImage) []Image {
 	out := make([]Image, 0, len(raw))
 	for _, r := range raw {
