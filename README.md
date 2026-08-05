@@ -60,6 +60,7 @@ vessel
 | `d` | Remove (confirm with `y`) |
 | `/` | Filter containers |
 | `tab` / `1` `2` `3` | Containers / Images / Volumes |
+| `esc` | Close logs or help, clear filter |
 | `?` | Toggle help |
 | `q` | Quit |
 
@@ -79,6 +80,7 @@ mouse_enabled = true
 make test          # unit tests (uses fake container CLI)
 make build
 go test -tags=live ./internal/backend -run Live -v   # against real Apple CLI
+./scripts/smoke.sh # unit tests, plus the live tests if `container` is available
 ```
 
 ## Contributing

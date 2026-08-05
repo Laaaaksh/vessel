@@ -24,8 +24,9 @@ make test
 ## Requirements
 
 - Go 1.26+
-- Apple Mac containers CLI installed (`container` binary in your PATH)
-- macOS 15+ with Apple silicon or Intel
+- The runtime requirements in [README.md](README.md#requirements) (macOS and the `container` CLI).
+  Unit tests use the fake CLI in `internal/backend/fakecli/`, so a real runtime is only
+  needed for the live tests.
 
 ## Development workflow
 
