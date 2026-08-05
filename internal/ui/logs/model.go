@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 // Model is a full-screen log viewer.
@@ -64,14 +66,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.offset--
 		}
 	case "k", "up":
-		m.offset++
+		m.offset = min(m.offset+1, m.maxOffset())
 	case "g":
-		m.offset = max(0, len(m.lines)-(m.height-3))
+		m.offset = m.maxOffset()
 	case "G":
 		m.offset = 0
 	}
 	return m, nil
 }
+
+// maxOffset is the scrollback position that puts the first line at the top of
+// the viewport; scrolling further would shrink the visible window.
+func (m Model) maxOffset() int {
+	return max(0, len(m.lines)-m.bodyHeight())
+}
+
+func (m Model) bodyHeight() int { return max(1, m.height-3) }
 
 // View renders the log panel.
 func (m Model) View() string {
@@ -81,7 +91,7 @@ func (m Model) View() string {
 		Render("  [esc] back  [j/k] scroll  [G] tail")
 	header := lipgloss.JoinHorizontal(lipgloss.Top, title, hint)
 
-	bodyH := max(1, m.height-3)
+	bodyH := m.bodyHeight()
 	visible := m.visibleLines(bodyH)
 	body := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).
 		Width(m.width).Height(bodyH).
@@ -110,8 +120,8 @@ func (m Model) visibleLines(n int) []string {
 	}
 	out := make([]string, 0, end-start)
 	for _, line := range m.lines[start:end] {
-		if m.width > 4 && len(line) > m.width-2 {
-			line = line[:m.width-3] + "…"
+		if m.width > 4 {
+			line = uiutil.Truncate(line, m.width-2)
 		}
 		out = append(out, "  "+line)
 	}

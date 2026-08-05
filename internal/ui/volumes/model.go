@@ -70,8 +70,12 @@ func (m Model) ListView(width, height int) string {
 	sel := lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd"))
 	row := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0"))
 
+	// The header renders as two lines (text plus its bottom border).
+	start, end := uiutil.Window(len(m.items), m.cursor, max(1, height-2))
+
 	var rows []string
-	for i, v := range m.items {
+	for i := start; i < end; i++ {
+		v := m.items[i]
 		line := fmt.Sprintf("%-28s %-10s %s", uiutil.Truncate(v.Name, 28), v.Driver, uiutil.Ago(v.Created))
 		st := row
 		if i == m.cursor {

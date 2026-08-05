@@ -3,9 +3,14 @@ package backend
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 )
+
+// Apple container runs Linux guests regardless of the host OS, so the guest
+// platform to match a manifest variant against is always linux/GOARCH.
+const guestOS = "linux"
 
 // Apple container image list JSON (container 1.2.x).
 type cliImage struct {
@@ -16,7 +21,17 @@ type cliImage struct {
 			Size int64 `json:"size"`
 		} `json:"descriptor"`
 	} `json:"configuration"`
-	ID string `json:"id"`
+	ID       string            `json:"id"`
+	Variants []cliImageVariant `json:"variants"`
+}
+
+// cliImageVariant is one per-platform manifest beneath a multi-arch index.
+type cliImageVariant struct {
+	Platform struct {
+		OS           string `json:"os"`
+		Architecture string `json:"architecture"`
+	} `json:"platform"`
+	Size int64 `json:"size"`
 }
 
 // ListImages returns all local images.
@@ -48,7 +63,7 @@ func mapImages(raw []cliImage) []Image {
 			ID:         r.ID,
 			Repository: repo,
 			Tag:        tag,
-			Size:       r.Configuration.Descriptor.Size,
+			Size:       imageSize(r),
 		}
 		if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
 			img.Created = t
@@ -56,6 +71,29 @@ func mapImages(raw []cliImage) []Image {
 		out = append(out, img)
 	}
 	return out
+}
+
+// imageSize reports the size of the manifest this host would actually run.
+// configuration.descriptor.size is the size of the index manifest itself — a
+// few KiB — not of the image, so it is only a last resort.
+func imageSize(r cliImage) int64 {
+	var largest int64
+	for _, v := range r.Variants {
+		// "unknown/unknown" variants are attestation manifests, not images.
+		if v.Platform.OS == "unknown" || v.Platform.Architecture == "unknown" {
+			continue
+		}
+		if v.Platform.OS == guestOS && v.Platform.Architecture == runtime.GOARCH {
+			return v.Size
+		}
+		if v.Size > largest {
+			largest = v.Size
+		}
+	}
+	if largest > 0 {
+		return largest
+	}
+	return r.Configuration.Descriptor.Size
 }
 
 func splitRef(name string) (repo, tag string) {
