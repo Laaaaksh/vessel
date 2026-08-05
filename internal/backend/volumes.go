@@ -32,6 +32,18 @@ func (c *Client) RemoveVolume(ctx context.Context, name string) error {
 	return err
 }
 
+// CreateVolume creates a named volume.
+func (c *Client) CreateVolume(ctx context.Context, name string) error {
+	_, err := c.run(ctx, "volume", "create", name)
+	return err
+}
+
+// PruneVolumes removes volumes with no container references.
+func (c *Client) PruneVolumes(ctx context.Context) error {
+	_, err := c.run(ctx, "volume", "prune")
+	return err
+}
+
 func mapVolumes(raw []cliVolume) []Volume {
 	out := make([]Volume, 0, len(raw))
 	for _, r := range raw {

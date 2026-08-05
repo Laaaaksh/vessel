@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,6 +46,8 @@ func (s *MetricsSnapshot) set(data map[string]Metrics) {
 	s.data = data
 }
 
+const historyLen = 30
+
 // Poller fetches metrics on a fixed interval and stores them in a MetricsSnapshot.
 type Poller struct {
 	client   *Client
@@ -53,6 +56,9 @@ type Poller struct {
 
 	prevMu sync.Mutex
 	prev   map[string]cpuSample
+
+	histMu  sync.RWMutex
+	history map[string][]float64 // CPU% ring samples
 }
 
 // NewPoller creates a Poller with the given interval.
@@ -62,7 +68,37 @@ func NewPoller(client *Client, interval time.Duration) *Poller {
 		snapshot: newMetricsSnapshot(),
 		interval: interval,
 		prev:     make(map[string]cpuSample),
+		history:  make(map[string][]float64),
 	}
+}
+
+// Sparkline returns a compact unicode sparkline of recent CPU samples.
+func (p *Poller) Sparkline(id string, width int) string {
+	if width < 4 {
+		return ""
+	}
+	p.histMu.RLock()
+	samples := append([]float64{}, p.history[id]...)
+	p.histMu.RUnlock()
+	if len(samples) == 0 {
+		return ""
+	}
+	if len(samples) > width {
+		samples = samples[len(samples)-width:]
+	}
+	bars := []rune("▁▂▃▄▅▆▇█")
+	var b strings.Builder
+	for _, v := range samples {
+		idx := int(v / 12.5) // 0..7 for 0..100%
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(bars) {
+			idx = len(bars) - 1
+		}
+		b.WriteRune(bars[idx])
+	}
+	return b.String()
 }
 
 // Snapshot returns the shared MetricsSnapshot.
@@ -120,9 +156,20 @@ func (p *Poller) poll(ctx context.Context) {
 		}
 		next[r.ID] = cpuSample{usec: r.CPUUsageUsec, at: now}
 		data[r.ID] = m
+		p.pushHistory(r.ID, m.CPUPercent)
 	}
 	p.prev = next
 	p.snapshot.set(data)
+}
+
+func (p *Poller) pushHistory(id string, cpu float64) {
+	p.histMu.Lock()
+	defer p.histMu.Unlock()
+	h := append(p.history[id], cpu)
+	if len(h) > historyLen {
+		h = h[len(h)-historyLen:]
+	}
+	p.history[id] = h
 }
 
 // FormatCPU formats CPU as a percentage string.

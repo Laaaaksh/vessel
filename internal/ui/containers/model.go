@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 // Model is the containers panel model.
@@ -16,6 +17,8 @@ type Model struct {
 	cursor    int
 	filter    string
 	filtering bool
+	marked    map[string]bool
+	pageRows  int
 
 	styleSelected lipgloss.Style
 	styleRow      lipgloss.Style
@@ -26,6 +29,8 @@ type Model struct {
 // New creates the containers Model with default styles.
 func New() Model {
 	return Model{
+		marked:        make(map[string]bool),
+		pageRows:      10,
 		styleSelected: lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd")),
 		styleRow:      lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")),
 		styleRunning:  lipgloss.NewStyle().Foreground(lipgloss.Color("#34d399")),
@@ -35,6 +40,23 @@ func New() Model {
 
 // Filtering reports whether the filter prompt is active.
 func (m Model) Filtering() bool { return m.filtering }
+
+// Filter returns the active filter string.
+func (m Model) Filter() string { return m.filter }
+
+// Cursor returns the cursor index in the filtered list.
+func (m Model) Cursor() int { return m.cursor }
+
+// Len returns filtered length.
+func (m Model) Len() int { return len(m.filtered) }
+
+// SetPageRows sets the page-scroll window hint.
+func (m Model) SetPageRows(n int) Model {
+	if n > 0 {
+		m.pageRows = n
+	}
+	return m
+}
 
 // SetItems replaces the container list and reapplies the current filter.
 func (m Model) SetItems(items []backend.Container) Model {
@@ -53,6 +75,23 @@ func (m Model) Selected() *backend.Container {
 	}
 	c := m.filtered[m.cursor]
 	return &c
+}
+
+// MarkedIDs returns multi-selected container IDs.
+func (m Model) MarkedIDs() []string {
+	var out []string
+	for _, c := range m.filtered {
+		if m.marked[c.ID] {
+			out = append(out, c.ID)
+		}
+	}
+	return out
+}
+
+// ClearMarks clears multi-select.
+func (m Model) ClearMarks() Model {
+	m.marked = make(map[string]bool)
+	return m
 }
 
 // RunningCount returns how many containers are running.
@@ -80,6 +119,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m.handleKey(kp)
 }
 
+// MoveBy moves the cursor by delta (used by mouse wheel / page keys from root).
+func (m Model) MoveBy(delta int) Model {
+	m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), delta)
+	return m
+}
+
+// SetCursor sets an absolute cursor.
+func (m Model) SetCursor(i int) Model {
+	m.cursor = uiutil.MoveCursor(i, len(m.filtered), 0)
+	return m
+}
+
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	k := msg.String()
 
@@ -105,13 +156,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	switch k {
 	case "j", "down":
-		if m.cursor < len(m.filtered)-1 {
-			m.cursor++
-		}
+		m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), 1)
 	case "k", "up":
-		if m.cursor > 0 {
-			m.cursor--
-		}
+		m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), -1)
+	case "pgdown", "ctrl+d":
+		m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), uiutil.PageDelta(m.pageRows, k == "ctrl+d", true))
+	case "pgup", "ctrl+u":
+		m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), uiutil.PageDelta(m.pageRows, k == "ctrl+u", false))
 	case "g":
 		m.cursor = 0
 	case "G":
@@ -126,6 +177,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.filter = ""
 			m.filtered = m.items
 			m.cursor = 0
+		}
+	case " ":
+		if sel := m.Selected(); sel != nil {
+			if m.marked == nil {
+				m.marked = make(map[string]bool)
+			}
+			if m.marked[sel.ID] {
+				delete(m.marked, sel.ID)
+			} else {
+				m.marked[sel.ID] = true
+			}
 		}
 	}
 	return m, nil
