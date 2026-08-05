@@ -74,15 +74,6 @@ log_tail_lines = 100   # lines to show in log tail
 mouse_enabled = true
 ```
 
-## Development
-
-```bash
-make test          # unit tests (uses fake container CLI)
-make build
-go test -tags=live ./internal/backend -run Live -v   # against real Apple CLI
-./scripts/smoke.sh # unit tests, plus the live tests if `container` is available
-```
-
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) - all contributors must sign the CLA before their first PR is merged.

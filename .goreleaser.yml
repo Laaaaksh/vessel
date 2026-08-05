@@ -13,8 +13,8 @@ builds:
     goos:
       - darwin
     goarch:
+      # Apple's container CLI is Apple-silicon only; see README requirements.
       - arm64
-      - amd64
     env:
       - CGO_ENABLED=0
     ldflags:
