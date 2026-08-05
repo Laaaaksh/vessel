@@ -54,9 +54,9 @@ func helpBindings() []struct{ key, desc string } {
 		{"s", "stop container"},
 		{"u", "start container"},
 		{"r", "restart container"},
-		{"d", "remove container"},
+		{"d", "remove (confirm with y)"},
 		{"/", "filter containers"},
-		{"tab", "switch panel focus"},
+		{"tab / 1 2 3", "switch Containers / Images / Volumes"},
 		{"?", "toggle help"},
 		{"q / ctrl+c", "quit"},
 	}

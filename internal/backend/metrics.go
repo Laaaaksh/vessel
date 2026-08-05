@@ -8,12 +8,17 @@ import (
 	"time"
 )
 
-// cliMetrics is the raw JSON from `container stats --format json`.
+// Apple container stats JSON (container 1.2.x).
 type cliMetrics struct {
-	ID     string  `json:"id"`
-	CPU    float64 `json:"cpuPercent"`
-	MemUse uint64  `json:"memUsageBytes"`
-	MemLim uint64  `json:"memLimitBytes"`
+	ID               string `json:"id"`
+	CPUUsageUsec     uint64 `json:"cpuUsageUsec"`
+	MemoryUsageBytes uint64 `json:"memoryUsageBytes"`
+	MemoryLimitBytes uint64 `json:"memoryLimitBytes"`
+}
+
+type cpuSample struct {
+	usec uint64
+	at   time.Time
 }
 
 // MetricsSnapshot holds the latest metrics for all containers.
@@ -34,7 +39,6 @@ func (s *MetricsSnapshot) Get(id string) (Metrics, bool) {
 	return m, ok
 }
 
-// set replaces the entire metrics map atomically.
 func (s *MetricsSnapshot) set(data map[string]Metrics) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -46,6 +50,9 @@ type Poller struct {
 	client   *Client
 	snapshot *MetricsSnapshot
 	interval time.Duration
+
+	prevMu sync.Mutex
+	prev   map[string]cpuSample
 }
 
 // NewPoller creates a Poller with the given interval.
@@ -54,6 +61,7 @@ func NewPoller(client *Client, interval time.Duration) *Poller {
 		client:   client,
 		snapshot: newMetricsSnapshot(),
 		interval: interval,
+		prev:     make(map[string]cpuSample),
 	}
 }
 
@@ -64,6 +72,7 @@ func (p *Poller) Snapshot() *MetricsSnapshot { return p.snapshot }
 func (p *Poller) Run(ctx context.Context) {
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
+	p.poll(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -80,7 +89,6 @@ func (p *Poller) poll(ctx context.Context) {
 
 	out, err := p.client.run(pctx, "stats", "--no-stream", "--format", "json")
 	if err != nil {
-		// Metrics polling failures are non-fatal: the UI shows N/A.
 		return
 	}
 
@@ -89,14 +97,27 @@ func (p *Poller) poll(ctx context.Context) {
 		return
 	}
 
+	now := time.Now()
 	data := make(map[string]Metrics, len(raw))
+
+	p.prevMu.Lock()
+	defer p.prevMu.Unlock()
+
 	for _, r := range raw {
-		data[r.ID] = Metrics{
+		m := Metrics{
 			ContainerID: r.ID,
-			CPUPercent:  r.CPU,
-			MemUsage:    r.MemUse,
-			MemLimit:    r.MemLim,
+			MemUsage:    r.MemoryUsageBytes,
+			MemLimit:    r.MemoryLimitBytes,
 		}
+		if prev, ok := p.prev[r.ID]; ok && now.After(prev.at) && r.CPUUsageUsec >= prev.usec {
+			deltaCPU := float64(r.CPUUsageUsec - prev.usec)
+			deltaWall := now.Sub(prev.at).Seconds() * 1e6 // wall µs
+			if deltaWall > 0 {
+				m.CPUPercent = (deltaCPU / deltaWall) * 100
+			}
+		}
+		p.prev[r.ID] = cpuSample{usec: r.CPUUsageUsec, at: now}
+		data[r.ID] = m
 	}
 	p.snapshot.set(data)
 }

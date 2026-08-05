@@ -10,9 +10,9 @@ import (
 
 // Config holds all user configuration for vessel.
 type Config struct {
-	PollInterval  duration `toml:"poll_interval"`
-	LogTailLines  int      `toml:"log_tail_lines"`
-	MouseEnabled  bool     `toml:"mouse_enabled"`
+	PollInterval duration `toml:"poll_interval"`
+	LogTailLines int      `toml:"log_tail_lines"`
+	MouseEnabled bool     `toml:"mouse_enabled"`
 }
 
 // duration is a TOML-friendly time.Duration wrapper.

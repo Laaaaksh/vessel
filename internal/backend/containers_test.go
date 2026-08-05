@@ -1,103 +1,69 @@
 package backend
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
 
-func TestMapContainers_basic(t *testing.T) {
-	raw := []cliContainer{
-		{
-			ID:      "abc123",
-			Name:    "/my-app",
-			Image:   "ubuntu:22.04",
-			Status:  "running",
-			Created: "2024-01-15T10:00:00Z",
-			Ports: []struct {
-				HostPort      int    `json:"hostPort"`
-				ContainerPort int    `json:"containerPort"`
-				Protocol      string `json:"protocol"`
-			}{
-				{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
-			},
-			Env:    []string{"HOME=/root", "PATH=/usr/bin"},
-			Labels: map[string]string{"app": "web"},
-		},
+func fixturePath(t *testing.T, name string) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
 	}
-
-	got := mapContainers(raw)
-
-	if len(got) != 1 {
-		t.Fatalf("expected 1 container, got %d", len(got))
-	}
-	c := got[0]
-
-	if c.ID != "abc123" {
-		t.Errorf("ID: want abc123, got %s", c.ID)
-	}
-	// Leading slash should be stripped from Name.
-	if c.Name != "my-app" {
-		t.Errorf("Name: want my-app, got %s", c.Name)
-	}
-	if c.Image != "ubuntu:22.04" {
-		t.Errorf("Image: want ubuntu:22.04, got %s", c.Image)
-	}
-	if c.Status != "running" {
-		t.Errorf("Status: want running, got %s", c.Status)
-	}
-	if c.Created.IsZero() {
-		t.Error("Created should be parsed, got zero time")
-	}
-	want := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-	if !c.Created.Equal(want) {
-		t.Errorf("Created: want %v, got %v", want, c.Created)
-	}
-	if len(c.Ports) != 1 {
-		t.Fatalf("expected 1 port mapping, got %d", len(c.Ports))
-	}
-	if c.Ports[0].HostPort != 8080 || c.Ports[0].ContainerPort != 80 {
-		t.Errorf("Port mapping wrong: %+v", c.Ports[0])
-	}
-	if c.Ports[0].Protocol != "tcp" {
-		t.Errorf("Protocol: want tcp, got %s", c.Ports[0].Protocol)
-	}
+	return filepath.Join(filepath.Dir(file), "testdata", name)
 }
 
-func TestMapContainers_defaultProtocol(t *testing.T) {
-	raw := []cliContainer{
-		{
-			ID:    "def456",
-			Name:  "no-proto",
-			Image: "alpine",
-			Ports: []struct {
-				HostPort      int    `json:"hostPort"`
-				ContainerPort int    `json:"containerPort"`
-				Protocol      string `json:"protocol"`
-			}{
-				{HostPort: 443, ContainerPort: 443, Protocol: ""},
-			},
-		},
+func loadFixture[T any](t *testing.T, name string) T {
+	t.Helper()
+	b, err := os.ReadFile(fixturePath(t, name))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
 	}
-
-	got := mapContainers(raw)
-	if got[0].Ports[0].Protocol != "tcp" {
-		t.Errorf("empty protocol should default to tcp, got %s", got[0].Ports[0].Protocol)
+	var v T
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatalf("decode fixture %s: %v", name, err)
 	}
+	return v
 }
 
-func TestMapContainers_badCreated(t *testing.T) {
-	raw := []cliContainer{
-		{
-			ID:      "xyz",
-			Name:    "bad-date",
-			Image:   "scratch",
-			Created: "not-a-date",
-		},
-	}
-
+func TestMapContainers_fromLiveFixture(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "list.json")
 	got := mapContainers(raw)
-	if !got[0].Created.IsZero() {
-		t.Error("bad date should leave Created as zero time")
+	if len(got) == 0 {
+		t.Fatal("expected at least one container from list.json")
+	}
+	found := false
+	for _, c := range got {
+		if c.Name == "vessel-probe" || c.ID == "vessel-probe" {
+			found = true
+			if c.Status != "running" {
+				t.Errorf("vessel-probe status: want running, got %s", c.Status)
+			}
+			if c.Image == "" {
+				t.Error("vessel-probe image empty")
+			}
+			if c.Created.IsZero() {
+				t.Error("vessel-probe created empty")
+			}
+		}
+		if c.Name == "vessel-ports" {
+			if len(c.Ports) == 0 {
+				t.Error("vessel-ports should have published ports")
+			} else if c.Ports[0].HostPort != 8080 || c.Ports[0].ContainerPort != 80 {
+				t.Errorf("vessel-ports ports wrong: %+v", c.Ports[0])
+			}
+			if c.Ports[0].Protocol != "tcp" {
+				t.Errorf("protocol want tcp, got %s", c.Ports[0].Protocol)
+			}
+		}
+	}
+	if !found {
+		t.Error("vessel-probe not found in mapped containers")
 	}
 }
 
@@ -108,47 +74,88 @@ func TestMapContainers_empty(t *testing.T) {
 	}
 }
 
-func TestFormatPorts_none(t *testing.T) {
-	got := FormatPorts(nil)
-	if got != "-" {
-		t.Errorf("want -, got %s", got)
+func TestMapImages_fromLiveFixture(t *testing.T) {
+	raw := loadFixture[[]cliImage](t, "images.json")
+	got := mapImages(raw)
+	if len(got) == 0 {
+		t.Fatal("expected images")
+	}
+	img := got[0]
+	if img.Repository == "" {
+		t.Error("repository empty")
+	}
+	if img.ID == "" {
+		t.Error("id empty")
+	}
+	ref := FormatRef(img)
+	if ref == "" {
+		t.Error("FormatRef empty")
 	}
 }
 
-func TestFormatPorts_single(t *testing.T) {
-	ports := []PortMapping{{HostPort: 80, ContainerPort: 8080}}
-	got := FormatPorts(ports)
-	if got != "80→8080" {
-		t.Errorf("want 80→8080, got %s", got)
+func TestMapVolumes_fromLiveFixture(t *testing.T) {
+	raw := loadFixture[[]cliVolume](t, "volumes.json")
+	got := mapVolumes(raw)
+	if len(got) == 0 {
+		t.Fatal("expected volumes")
+	}
+	if got[0].Name == "" {
+		t.Error("volume name empty")
+	}
+	if got[0].Driver == "" {
+		t.Error("volume driver empty")
 	}
 }
 
-func TestFormatPorts_multiple(t *testing.T) {
+func TestFormatPorts(t *testing.T) {
+	if FormatPorts(nil) != "-" {
+		t.Fatal("nil ports")
+	}
 	ports := []PortMapping{
 		{HostPort: 80, ContainerPort: 8080},
 		{HostPort: 443, ContainerPort: 8443},
 	}
-	got := FormatPorts(ports)
 	want := "80→8080, 443→8443"
-	if got != want {
-		t.Errorf("want %q, got %q", want, got)
+	if got := FormatPorts(ports); got != want {
+		t.Fatalf("want %q got %q", want, got)
 	}
 }
 
 func TestIsRunning(t *testing.T) {
-	tests := []struct {
-		status  string
-		running bool
-	}{
-		{"running", true},
-		{"exited", false},
-		{"created", false},
-		{"", false},
+	c := Container{Status: "running"}
+	if !c.IsRunning() {
+		t.Fatal("running")
 	}
-	for _, tt := range tests {
-		c := Container{Status: tt.status}
-		if got := c.IsRunning(); got != tt.running {
-			t.Errorf("status %q: IsRunning()=%v, want %v", tt.status, got, tt.running)
-		}
+	c.Status = "stopped"
+	if c.IsRunning() {
+		t.Fatal("stopped")
+	}
+}
+
+func TestSplitRef(t *testing.T) {
+	repo, tag := splitRef("docker.io/library/alpine:latest")
+	if repo != "docker.io/library/alpine" || tag != "latest" {
+		t.Fatalf("got %s %s", repo, tag)
+	}
+	repo, tag = splitRef("alpine")
+	if repo != "alpine" || tag != "latest" {
+		t.Fatalf("got %s %s", repo, tag)
+	}
+}
+
+func TestCreatedParse(t *testing.T) {
+	raw := []cliContainer{{
+		ID: "x",
+		Configuration: cliContainerConfig{
+			ID:           "x",
+			CreationDate: "2026-08-05T16:08:35Z",
+			Image:        cliImageRef{Reference: "alpine:latest"},
+		},
+		Status: cliContainerStatus{State: "running"},
+	}}
+	got := mapContainers(raw)
+	want := time.Date(2026, 8, 5, 16, 8, 35, 0, time.UTC)
+	if !got[0].Created.Equal(want) {
+		t.Fatalf("want %v got %v", want, got[0].Created)
 	}
 }

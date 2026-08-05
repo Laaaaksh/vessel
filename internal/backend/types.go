@@ -46,7 +46,7 @@ type Volume struct {
 	Created    time.Time
 }
 
-// ContainerStatus wraps status classification.
-func (c *Container) IsRunning() bool {
+// IsRunning reports whether the container is in the running state.
+func (c Container) IsRunning() bool {
 	return c.Status == "running"
 }

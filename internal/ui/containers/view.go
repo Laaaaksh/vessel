@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+
 	"github.com/Laaaaksh/vessel/internal/backend"
 )
 
@@ -17,11 +18,11 @@ const (
 )
 
 // ListView renders the container list table.
-func (m Model) ListView(width, height int) string {
+func (m Model) ListView(width, height int, poller *backend.Poller) string {
 	header := m.renderHeader(width)
 	var rows []string
 	for i, c := range m.filtered {
-		rows = append(rows, m.renderRow(c, i == m.cursor, width))
+		rows = append(rows, m.renderRow(c, i == m.cursor, width, poller))
 	}
 	if len(m.filtered) == 0 {
 		if m.filter != "" {
@@ -68,7 +69,7 @@ func (m Model) renderHeader(width int) string {
 		Render(strings.Join(cols, " "))
 }
 
-func (m Model) renderRow(c backend.Container, selected bool, width int) string {
+func (m Model) renderRow(c backend.Container, selected bool, width int, poller *backend.Poller) string {
 	indicator := "○ "
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
 	if c.IsRunning() {
@@ -76,17 +77,27 @@ func (m Model) renderRow(c backend.Container, selected bool, width int) string {
 		statusStyle = m.styleRunning
 	}
 
+	cpu, mem := "-", "-"
+	if poller != nil {
+		metrics, ok := poller.Snapshot().Get(c.ID)
+		if ok {
+			cpu = backend.FormatCPU(metrics, true)
+			mem = backend.FormatMem(metrics, true)
+			if mem == "N/A" {
+				mem = "-"
+			}
+		}
+	}
+
 	name := truncate(indicator+c.Name, colName)
 	status := pad(c.Status, colStatus)
-	cpu := pad("-", colCPU)
-	mem := pad("-", colMem)
 	ports := backend.FormatPorts(c.Ports)
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top,
 		statusStyle.Render(name)+" ",
 		statusStyle.Render(status)+" ",
-		lipgloss.NewStyle().Width(colCPU).Render(cpu)+" ",
-		lipgloss.NewStyle().Width(colMem).Render(mem)+" ",
+		lipgloss.NewStyle().Width(colCPU).Render(pad(cpu, colCPU))+" ",
+		lipgloss.NewStyle().Width(colMem).Render(pad(mem, colMem))+" ",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Render(ports),
 	)
 
@@ -109,7 +120,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name))
 	lines = append(lines, "")
 	lines = append(lines, kv("Image", sel.Image))
-	lines = append(lines, kv("ID", truncate(sel.ID, 12)+"..."))
+	lines = append(lines, kv("ID", truncate(sel.ID, 12)))
 	if !sel.Created.IsZero() {
 		lines = append(lines, kv("Created", ago(sel.Created)))
 	}
@@ -147,12 +158,13 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 }
 
 func kv(key, val string) string {
-	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(key+":")
+	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(key + ":")
 	v := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).Render(val)
 	return lipgloss.JoinHorizontal(lipgloss.Top, k, " ", v)
 }
 
 func renderBar(label string, pct float64, width int) string {
+	_ = label
 	if pct < 0 {
 		pct = 0
 	}

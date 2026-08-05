@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Minimal fake of Apple's `container` CLI for unit/CI tests.
+# Emits JSON shapes matching container 1.2.x.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+DATA="${FAKE_CONTAINER_DATA:-$ROOT/../testdata}"
+STATE="${FAKE_CONTAINER_STATE:-/tmp/vessel-fake-container-state}"
+mkdir -p "$STATE"
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  list|ls)
+    if [[ -f "$STATE/list.json" ]]; then
+      cat "$STATE/list.json"
+    else
+      cat "$DATA/list.json"
+    fi
+    ;;
+  inspect)
+    # Return matching entry from list as a one-element array
+    id="${1:-}"
+    python3 - "$DATA/list.json" "$id" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1]))
+want=sys.argv[2]
+out=[c for c in data if c.get("id")==want or c.get("configuration",{}).get("id")==want]
+print(json.dumps(out))
+PY
+    ;;
+  start|stop)
+    id="${1:-}"
+    echo "ok $cmd $id" >&2
+    ;;
+  delete|rm)
+    # consume optional --force
+    while [[ "${1:-}" == --* ]]; do shift || true; done
+    id="${1:-}"
+    echo "ok delete $id" >&2
+    ;;
+  stats)
+    cat "$DATA/stats.json"
+    ;;
+  logs)
+    # support -n N and --follow
+    n=100
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -n) n="$2"; shift 2 ;;
+        --follow|-f) shift ;;
+        *) id="$1"; shift ;;
+      esac
+    done
+    for i in $(seq 1 "$n"); do
+      echo "fake log line $i for ${id:-unknown}"
+    done
+    ;;
+  image)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list|ls) cat "$DATA/images.json" ;;
+      delete|rm) echo "ok image delete ${1:-}" >&2 ;;
+      pull) echo "ok image pull ${1:-}" >&2 ;;
+      *) echo "unknown image subcommand: $sub" >&2; exit 1 ;;
+    esac
+    ;;
+  volume)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list|ls) cat "$DATA/volumes.json" ;;
+      delete|rm) echo "ok volume delete ${1:-}" >&2 ;;
+      *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
+    esac
+    ;;
+  exec)
+    echo "fake exec $*" >&2
+    ;;
+  *)
+    echo "fake-container: unknown command: $cmd $*" >&2
+    exit 1
+    ;;
+esac

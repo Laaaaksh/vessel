@@ -8,10 +8,10 @@ import (
 
 type styles struct {
 	// Base surfaces
-	appBg        lipgloss.Style
-	sidebarBg    lipgloss.Style
-	mainBg       lipgloss.Style
-	detailBg     lipgloss.Style
+	appBg     lipgloss.Style
+	sidebarBg lipgloss.Style
+	mainBg    lipgloss.Style
+	detailBg  lipgloss.Style
 
 	// Header / title
 	title        lipgloss.Style
@@ -24,9 +24,9 @@ type styles struct {
 	statStopped   lipgloss.Style
 
 	// Table
-	tableHeader   lipgloss.Style
+	tableHeader      lipgloss.Style
 	tableRowSelected lipgloss.Style
-	tableRow      lipgloss.Style
+	tableRow         lipgloss.Style
 
 	// Status colours
 	statusRunning lipgloss.Style
@@ -40,37 +40,36 @@ type styles struct {
 	logDim      lipgloss.Style
 
 	// Bars
-	barFill     lipgloss.Style
-	barEmpty    lipgloss.Style
+	barFill  lipgloss.Style
+	barEmpty lipgloss.Style
 
 	// Misc
-	dimText     lipgloss.Style
-	errorText   lipgloss.Style
-	helpText    lipgloss.Style
-	border      lipgloss.Style
-	footerHelp  lipgloss.Style
+	dimText    lipgloss.Style
+	errorText  lipgloss.Style
+	helpText   lipgloss.Style
+	border     lipgloss.Style
+	footerHelp lipgloss.Style
 }
 
 var (
-	colorPurple  = lipgloss.Color("#a78bfa")
-	colorGreen   = lipgloss.Color("#34d399")
-	colorYellow  = lipgloss.Color("#fbbf24")
-	colorRed     = lipgloss.Color("#f87171")
-	colorBlue    = lipgloss.Color("#60a5fa")
-	colorDim     = lipgloss.Color("#6b7280")
-	colorBase    = lipgloss.Color("#0d0d0d")
-	colorSurface = lipgloss.Color("#111827")
-	colorPanel   = lipgloss.Color("#1f2937")
+	colorPurple   = lipgloss.Color("#a78bfa")
+	colorGreen    = lipgloss.Color("#34d399")
+	colorYellow   = lipgloss.Color("#fbbf24")
+	colorRed      = lipgloss.Color("#f87171")
+	colorBlue     = lipgloss.Color("#60a5fa")
+	colorDim      = lipgloss.Color("#6b7280")
+	colorBase     = lipgloss.Color("#0d0d0d")
+	colorSurface  = lipgloss.Color("#111827")
 	colorSelected = lipgloss.Color("#2d1b69")
-	colorText    = lipgloss.Color("#e2e8f0")
-	colorBorder  = lipgloss.Color("#374151")
+	colorText     = lipgloss.Color("#e2e8f0")
+	colorBorder   = lipgloss.Color("#374151")
 )
 
 func newStyles() styles {
 	return styles{
-		appBg: lipgloss.NewStyle().Background(colorBase),
+		appBg:     lipgloss.NewStyle().Background(colorBase),
 		sidebarBg: lipgloss.NewStyle().Background(colorSurface),
-		mainBg: lipgloss.NewStyle().Background(colorBase),
+		mainBg:    lipgloss.NewStyle().Background(colorBase),
 		detailBg: lipgloss.NewStyle().Background(colorSurface).
 			BorderLeft(true).
 			BorderStyle(lipgloss.NormalBorder()).

@@ -43,7 +43,7 @@ func (c *Client) StreamLogs(ctx context.Context, id string, ch chan<- LogLine) e
 
 // TailLogs returns the last n lines of a container's logs synchronously.
 func (c *Client) TailLogs(ctx context.Context, id string, n int) ([]string, error) {
-	out, err := c.run(ctx, "logs", "--tail", fmt.Sprint(n), id)
+	out, err := c.run(ctx, "logs", "-n", fmt.Sprint(n), id)
 	if err != nil {
 		return nil, err
 	}

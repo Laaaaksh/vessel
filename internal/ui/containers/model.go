@@ -5,15 +5,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
 	"github.com/Laaaaksh/vessel/internal/backend"
 )
 
 // Model is the containers panel model.
 type Model struct {
-	items    []backend.Container
-	filtered []backend.Container
-	cursor   int
-	filter   string
+	items     []backend.Container
+	filtered  []backend.Container
+	cursor    int
+	filter    string
 	filtering bool
 
 	styleSelected lipgloss.Style
@@ -31,6 +32,9 @@ func New() Model {
 		styleExited:   lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")),
 	}
 }
+
+// Filtering reports whether the filter prompt is active.
+func (m Model) Filtering() bool { return m.filtering }
 
 // SetItems replaces the container list and reapplies the current filter.
 func (m Model) SetItems(items []backend.Container) Model {
@@ -67,7 +71,7 @@ func (m Model) StoppedCount() int {
 	return len(m.items) - m.RunningCount()
 }
 
-// Update handles keyboard events for the containers panel.
+// Update handles keyboard events for the containers panel (navigation/filter only).
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
@@ -117,6 +121,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.filter = ""
 		m.filtered = m.items
 		m.cursor = 0
+	case "esc":
+		if m.filter != "" {
+			m.filter = ""
+			m.filtered = m.items
+			m.cursor = 0
+		}
 	}
 	return m, nil
 }
@@ -135,4 +145,3 @@ func applyFilter(items []backend.Container, filter string) []backend.Container {
 	}
 	return out
 }
-
