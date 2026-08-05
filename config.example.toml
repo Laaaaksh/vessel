@@ -1,0 +1,20 @@
+# Example vessel config — copy to ~/.config/vessel/config.toml
+
+poll_interval = "2s"
+log_tail_lines = 100
+mouse_enabled = true
+shell = "/bin/sh"
+confirm_stop = false
+
+# Optional theme overrides (hex). Leave empty for defaults.
+# [theme]
+# selected_bg = "#2d1b69"
+# selected_fg = "#c4b5fd"
+# accent = "#a78bfa"
+
+# Custom commands appear in the action menu (x).
+# Templates: {{.ID}} {{.Name}} {{.Image}}
+# [[custom_commands]]
+# name = "inspect"
+# key = ""
+# command = "container inspect {{.ID}}"

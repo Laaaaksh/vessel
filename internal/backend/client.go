@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -13,12 +15,16 @@ const (
 	defaultTimeout = 10 * time.Second
 	// cliName is the Apple Mac containers binary.
 	cliName = "container"
+	cmdLogN = 40
 )
 
 // Client is the adapter that shells out to the container CLI.
 type Client struct {
 	binary  string
 	timeout time.Duration
+
+	logMu  sync.Mutex
+	cmdLog []string
 }
 
 // NewClient creates a Client with the system container binary.
@@ -35,8 +41,28 @@ func NewClientWithBinary(path string) *Client {
 	return &Client{binary: path, timeout: defaultTimeout}
 }
 
+// CommandLog returns a copy of recent CLI invocations (newest last).
+func (c *Client) CommandLog() []string {
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	out := make([]string, len(c.cmdLog))
+	copy(out, c.cmdLog)
+	return out
+}
+
+func (c *Client) recordCmd(args []string) {
+	line := "container " + strings.Join(args, " ")
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+	c.cmdLog = append(c.cmdLog, line)
+	if len(c.cmdLog) > cmdLogN {
+		c.cmdLog = c.cmdLog[len(c.cmdLog)-cmdLogN:]
+	}
+}
+
 // run executes a container CLI subcommand and returns its stdout.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	c.recordCmd(args)
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 

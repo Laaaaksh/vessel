@@ -24,14 +24,12 @@ func (m Model) ListView(width, height int, poller *backend.Poller) string {
 	var filterBar string
 	if m.filtering {
 		filterBar = lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).
-			Render(fmt.Sprintf("  filter: %s_", m.filter))
+			Render(fmt.Sprintf("  filter: %s_  (%d/%d)", m.filter, len(m.filtered), len(m.items)))
 	} else if m.filter != "" {
 		filterBar = lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-			Render(fmt.Sprintf("  filter: %s  (esc to clear)", m.filter))
+			Render(fmt.Sprintf("  filter: %s  (%d/%d, esc clear)", m.filter, len(m.filtered), len(m.items)))
 	}
 
-	// The header renders as two lines (text plus its bottom border), and the
-	// filter bar takes one more when shown.
 	rowsH := height - 2
 	if filterBar != "" {
 		rowsH--
@@ -80,10 +78,12 @@ func (m Model) renderHeader(width int) string {
 
 func (m Model) renderRow(c backend.Container, selected bool, width int, poller *backend.Poller) string {
 	indicator := "○ "
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
 	if c.IsRunning() {
 		indicator = "● "
-		statusStyle = m.styleRunning
+	}
+	mark := " "
+	if m.marked[c.ID] {
+		mark = "*"
 	}
 
 	cpu, mem := "-", "-"
@@ -98,22 +98,26 @@ func (m Model) renderRow(c backend.Container, selected bool, width int, poller *
 		}
 	}
 
-	name := uiutil.Pad(indicator+c.Name, colName)
-	status := uiutil.Pad(c.Status, colStatus)
-	ports := backend.FormatPorts(c.Ports)
-
-	row := lipgloss.JoinHorizontal(lipgloss.Top,
-		statusStyle.Render(name)+" ",
-		statusStyle.Render(status)+" ",
-		lipgloss.NewStyle().Width(colCPU).Render(uiutil.Pad(cpu, colCPU))+" ",
-		lipgloss.NewStyle().Width(colMem).Render(uiutil.Pad(mem, colMem))+" ",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Render(ports),
+	// Plain text first — one style pass avoids nested colour fights on selection.
+	line := fmt.Sprintf("%s%s %s %s %s %s",
+		mark,
+		uiutil.Pad(indicator+c.Name, colName-1),
+		uiutil.Pad(c.Status, colStatus),
+		uiutil.Pad(cpu, colCPU),
+		uiutil.Pad(mem, colMem),
+		backend.FormatPorts(c.Ports),
 	)
 
 	if selected {
-		return m.styleSelected.Width(width).Render(row)
+		return m.styleSelected.Width(width).Render(line)
 	}
-	return m.styleRow.Width(width).Render(row)
+	st := m.styleRow
+	if c.IsRunning() {
+		st = m.styleRunning
+	} else {
+		st = m.styleExited
+	}
+	return st.Width(width).Render(line)
 }
 
 // DetailView renders the right-hand detail panel for the selected container.
@@ -145,6 +149,21 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 			if m2.MemLimit > 0 {
 				lines = append(lines, renderBar(float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
 			}
+			if spark := poller.Sparkline(sel.ID, min(24, width-6)); spark != "" {
+				lines = append(lines, uiutil.KV("CPU hist", spark))
+			}
+		}
+	}
+
+	if len(sel.Labels) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Labels --"))
+		for k, v := range sel.Labels {
+			if len(lines) > height-4 {
+				break
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
+				Render("  "+uiutil.Truncate(k+"="+v, width-6)))
 		}
 	}
 
