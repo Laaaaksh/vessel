@@ -24,9 +24,8 @@ make test
 ## Requirements
 
 - Go 1.26+
-- The runtime requirements in [README.md](README.md#requirements) (macOS and the `container` CLI).
-  Unit tests use the fake CLI in `internal/backend/fakecli/`, so a real runtime is only
-  needed for the live tests.
+- The runtime requirements in [README.md](README.md#requirements) (macOS and the `container` CLI),
+  needed only for the live tests below.
 
 ## Development workflow
 
@@ -34,6 +33,14 @@ make test
 2. Make your changes with tests.
 3. Run `make lint` and `make test` - both must pass.
 4. Open a PR against `main`. The CLA bot will prompt you to sign the CLA if you haven't already.
+
+`make test` runs against the fake `container` CLI in `internal/backend/fakecli/`, so it needs
+no runtime. To exercise the real Apple CLI:
+
+```bash
+go test -tags=live ./internal/backend -run Live -v
+./scripts/smoke.sh   # unit tests, plus the live tests if `container` is available
+```
 
 ## Code style
 
