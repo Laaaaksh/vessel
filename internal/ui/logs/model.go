@@ -92,10 +92,9 @@ func (m Model) View() string {
 	header := lipgloss.JoinHorizontal(lipgloss.Top, title, hint)
 
 	bodyH := m.bodyHeight()
-	visible := m.visibleLines(bodyH)
 	body := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).
 		Width(m.width).Height(bodyH).
-		Render(strings.Join(visible, "\n"))
+		Render(strings.Join(m.visibleLines(), "\n"))
 
 	footer := ""
 	if m.errText != "" {
@@ -106,18 +105,15 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
-func (m Model) visibleLines(n int) []string {
+// visibleLines resolves offset against the current buffer and viewport. The
+// buffer trim in Append and a terminal resize can both leave a stored offset
+// past its bound, so the mapping clamps here rather than trusting the value.
+func (m Model) visibleLines() []string {
 	if len(m.lines) == 0 {
 		return []string{"  (no log output)"}
 	}
-	end := len(m.lines) - m.offset
-	if end < 1 {
-		end = 1
-	}
-	start := end - n
-	if start < 0 {
-		start = 0
-	}
+	end := len(m.lines) - min(m.offset, m.maxOffset())
+	start := max(0, end-m.bodyHeight())
 	out := make([]string, 0, end-start)
 	for _, line := range m.lines[start:end] {
 		if m.width > 4 {
