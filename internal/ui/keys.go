@@ -152,7 +152,9 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 		base = append([]struct{ key, desc string }{
 			{"enter", "open shell in running container"},
 			{"L", "view logs"},
-			{"s / u / r", "stop / start / restart"},
+			{"s", "stop container"},
+			{"u", "start container"},
+			{"r", "restart container"},
 			{"d", "delete marked (confirm)"},
 			{"P", "prune stopped containers (confirm)"},
 			{"c", "run new container (prompt image)"},
@@ -163,14 +165,31 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 	return withCustomBindings(base, keys, custom)
 }
 
-// withCustomBindings appends a row per reachable custom command and strips the
-// key it shadows from the built-in rows, so help never advertises a meaning a
-// key no longer has.
+// customCommandFor returns the command that fires when key k is pressed, or ""
+// when none does: no entry configured for k, k is reserved, or the entry that
+// claims k has no command. Dispatch and help both resolve through this, so they
+// can never disagree about which keys a custom command has taken over.
+func customCommandFor(custom []config.CustomCommand, keys KeyMap, k string) string {
+	if k == "" || keys.Reserved(k) {
+		return ""
+	}
+	for _, cc := range custom {
+		if cc.Key == k {
+			return cc.Command
+		}
+	}
+	return ""
+}
+
+// withCustomBindings appends a row per reachable custom command and drops the
+// built-in rows whose keys it took over, so help never advertises a meaning a
+// key no longer has. A row is dropped whole: its description is prose about the
+// keys it lists and cannot be split when only some of them are shadowed.
 func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom []config.CustomCommand) []struct{ key, desc string } {
 	names := map[string]string{}
 	var order []string
 	for _, cc := range custom {
-		if cc.Key == "" || keys.Reserved(cc.Key) {
+		if customCommandFor(custom, keys, cc.Key) == "" {
 			continue
 		}
 		if _, dup := names[cc.Key]; dup {
@@ -184,21 +203,15 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 	}
 	out := make([]struct{ key, desc string }, 0, len(base)+len(order))
 	for _, b := range base {
-		tokens := helpKeyTokens(b.key)
-		kept := make([]string, 0, len(tokens))
 		shadowed := false
-		for _, t := range tokens {
+		for _, t := range helpKeyTokens(b.key) {
 			if _, ok := names[t]; ok {
 				shadowed = true
-				continue
+				break
 			}
-			kept = append(kept, t)
 		}
-		switch {
-		case !shadowed:
+		if !shadowed {
 			out = append(out, b)
-		case len(kept) > 0:
-			out = append(out, struct{ key, desc string }{strings.Join(kept, " / "), b.desc})
 		}
 	}
 	for _, k := range order {
@@ -206,24 +219,20 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 		if names[k] != "" {
 			desc = "custom: " + names[k]
 		}
-		label := k
-		if label == " " {
-			label = "space"
-		}
-		out = append(out, struct{ key, desc string }{label, desc})
+		out = append(out, struct{ key, desc string }{k, desc})
 	}
 	return out
 }
 
-// helpKeyTokens splits a help row's key column ("s / u / r") into the single
-// keys it documents, mapping the "space" label back to the key it stands for.
+// helpKeyTokens splits a help row's key column ("pgup / pgdown", "tab / 1 2 3")
+// into the single keys it documents. Only " / " separates keys, so the filter
+// row ("/") yields the key itself rather than nothing. A token is already the
+// key as KeyPressMsg.String() reports it - "space" is the space bar's own name,
+// not a stand-in for a literal " " - so no token needs translating.
 func helpKeyTokens(s string) []string {
 	var out []string
-	for _, t := range strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == '/' }) {
-		if t == "space" {
-			t = " "
-		}
-		out = append(out, t)
+	for _, part := range strings.Split(s, " / ") {
+		out = append(out, strings.Fields(part)...)
 	}
 	return out
 }
