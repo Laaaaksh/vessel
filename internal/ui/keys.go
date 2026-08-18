@@ -180,6 +180,10 @@ var runtimeKeyNames = map[string]bool{
 	"f18": true, "f19": true, "f20": true,
 }
 
+// modifierOrder is the order tea.KeyPressMsg.String() always prints modifiers
+// in, whatever order they were pressed or configured in.
+var modifierOrder = []string{"ctrl", "alt", "shift", "meta", "hyper", "super"}
+
 // keyModifiers are the modifier prefixes tea.KeyPressMsg.String() emits, in the
 // "ctrl+shift+a" form.
 var keyModifiers = map[string]bool{
@@ -207,7 +211,7 @@ func normalizeKey(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "space"
 	}
-	prefix, base := "", strings.TrimSpace(s)
+	mods, base := map[string]bool{}, strings.TrimSpace(s)
 	for {
 		i := strings.IndexAny(base, "+-")
 		if i <= 0 || i == len(base)-1 {
@@ -217,7 +221,7 @@ func normalizeKey(s string) string {
 		if !keyModifiers[mod] {
 			break
 		}
-		prefix += mod + "+"
+		mods[mod] = true
 		base = base[i+1:]
 	}
 	if alias, ok := keyAliases[strings.ToLower(base)]; ok {
@@ -225,13 +229,19 @@ func normalizeKey(s string) string {
 	} else if utf8.RuneCountInString(base) > 1 {
 		base = strings.ToLower(base)
 	}
+	prefix := ""
+	for _, mod := range modifierOrder {
+		if mods[mod] {
+			prefix += mod + "+"
+		}
+	}
 	return prefix + base
 }
 
-// producibleKey reports whether a normalized key can ever be produced by a
-// keypress, so help never advertises a binding that cannot fire.
-func producibleKey(k string) bool {
-	base := k
+// splitKey separates a normalized key into its modifiers and the key they
+// modify.
+func splitKey(k string) (map[string]bool, string) {
+	mods, base := map[string]bool{}, k
 	for {
 		i := strings.Index(base, "+")
 		if i <= 0 || i == len(base)-1 {
@@ -240,9 +250,26 @@ func producibleKey(k string) bool {
 		if !keyModifiers[base[:i]] {
 			break
 		}
+		mods[base[:i]] = true
 		base = base[i+1:]
 	}
-	return runtimeKeyNames[base] || utf8.RuneCountInString(base) == 1
+	return mods, base
+}
+
+// producibleKey reports whether a normalized key can ever be produced by a
+// keypress, so help never advertises a binding that cannot fire. A printable
+// key pressed with shift alone arrives as the character it types ("Z", never
+// "shift+z"); any further modifier suppresses that text, so "ctrl+shift+a" is
+// real.
+func producibleKey(k string) bool {
+	mods, base := splitKey(k)
+	if runtimeKeyNames[base] {
+		return true
+	}
+	if utf8.RuneCountInString(base) != 1 {
+		return false
+	}
+	return !(mods["shift"] && len(mods) == 1)
 }
 
 // customKey returns the key a configured custom command fires on, or "" when it
@@ -271,10 +298,22 @@ func customCommandFor(custom []config.CustomCommand, keys KeyMap, k string) stri
 	return ""
 }
 
+// logViewKeys maps the keys the log view handles itself onto what they do
+// there. handleKey serves the log view before it ever reaches a custom command
+// key, so these keep working after a custom command takes them over in browse
+// mode, and their help row has to say so rather than disappear.
+func logViewKeys(k KeyMap) map[string]string {
+	return map[string]string{
+		k.Follow: "follow / freeze logs (log view)",
+		k.Yank:   "yank log line (log view)",
+	}
+}
+
 // withCustomBindings appends a row per reachable custom command and drops the
 // built-in rows whose keys it took over, so help never advertises a meaning a
 // key no longer has. A row is dropped whole: its description is prose about the
-// keys it lists and cannot be split when only some of them are shadowed.
+// keys it lists and cannot be split when only some of them are shadowed. A row
+// for a key the log view still answers keeps its line, restated for that view.
 func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom []config.CustomCommand) []struct{ key, desc string } {
 	names := map[string]string{}
 	var order []string
@@ -292,17 +331,22 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 	if len(order) == 0 {
 		return base
 	}
+	live := logViewKeys(keys)
 	out := make([]struct{ key, desc string }, 0, len(base)+len(order))
 	for _, b := range base {
-		shadowed := false
-		for _, t := range helpKeyTokens(b.key) {
+		tokens := helpKeyTokens(b.key)
+		shadowed := ""
+		for _, t := range tokens {
 			if _, ok := names[t]; ok {
-				shadowed = true
+				shadowed = t
 				break
 			}
 		}
-		if !shadowed {
+		switch {
+		case shadowed == "":
 			out = append(out, b)
+		case len(tokens) == 1 && live[shadowed] != "":
+			out = append(out, struct{ key, desc string }{b.key, live[shadowed]})
 		}
 	}
 	for _, k := range order {

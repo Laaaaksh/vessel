@@ -1455,24 +1455,35 @@ func (m Model) viewName() string {
 	}
 }
 
+// footerView renders the footer. layoutDims reserves exactly one row for it
+// (bodyH = m.height-2-cmdH) and lipgloss word-wraps rather than truncates, so
+// every path is flattened onto one line and cut to the terminal width here.
 func (m Model) footerView() string {
+	style, line := m.footerLine()
+	line = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, line)
+	return style.Width(m.width).Render(uiutil.Truncate(line, m.width))
+}
+
+func (m Model) footerLine() (lipgloss.Style, string) {
 	if m.lastErr != nil {
 		const prefix = "error: "
 		hint := ""
 		if backend.IsServicesDown(m.lastErr) {
 			hint = " — run `container system start` to start services"
 		}
-		// layoutDims reserves exactly one row for the footer, so the CLI's
-		// multi-line error is flattened onto one line and truncated to what is
-		// left beside the hint — otherwise either would wrap off screen.
+		// The raw CLI error is long and multi-line; collapse and truncate it to
+		// what is left beside the hint so the hint itself is never cut.
 		msg := strings.Join(strings.Fields(m.lastErr.Error()), " ")
 		msg = uiutil.Truncate(msg, max(0, m.width-len(prefix)-len([]rune(hint))))
-		line := uiutil.Truncate(prefix+msg+hint, m.width)
-		return m.st.errorText.Width(m.width).Render(line)
+		return m.st.errorText, prefix + msg + hint
 	}
 	if m.status != "" {
-		status := strings.Join(strings.Fields(m.status), " ")
-		return m.st.footerHelp.Width(m.width).Render(uiutil.Truncate(status, m.width))
+		return m.st.footerHelp, strings.Join(strings.Fields(m.status), " ")
 	}
 	cur, n := m.cursorInfo()
 	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)
@@ -1488,7 +1499,7 @@ func (m Model) footerView() string {
 	default:
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
-	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
+	return m.st.footerHelp, prefix + keys
 }
 
 func (m Model) cursorInfo() (int, int) {
