@@ -11,6 +11,11 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
+const (
+	colRef  = 40
+	colSize = 12
+)
+
 // Model is the images panel.
 type Model struct {
 	items     []backend.Image
@@ -180,7 +185,7 @@ func (m Model) ListView(width, height int) string {
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
 		BorderBottom(true).BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#374151")).Width(width).
-		Render(fmt.Sprintf("%-40s %-12s %s", "REPOSITORY:TAG", "SIZE", "CREATED"))
+		Render(fmt.Sprintf("%-*s %-*s %s", colRef, "REPOSITORY:TAG", colSize, "SIZE", "CREATED"))
 
 	sel := lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd"))
 	row := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0"))
@@ -207,10 +212,10 @@ func (m Model) ListView(width, height int) string {
 		if m.marked[img.ID] {
 			mark = "*"
 		}
-		line := fmt.Sprintf("%s %-40s %-12s %s",
+		line := fmt.Sprintf("%s%s %-*s %s",
 			mark,
-			uiutil.Truncate(backend.FormatRef(img), 40),
-			uiutil.HumanBytes(img.Size),
+			uiutil.Pad(backend.FormatRef(img), colRef-1),
+			colSize, uiutil.HumanBytes(img.Size),
 			uiutil.Ago(img.Created),
 		)
 		st := row

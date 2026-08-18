@@ -11,6 +11,11 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
+const (
+	colName   = 28
+	colDriver = 10
+)
+
 // Model is the volumes panel.
 type Model struct {
 	items     []backend.Volume
@@ -180,7 +185,7 @@ func (m Model) ListView(width, height int) string {
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
 		BorderBottom(true).BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#374151")).Width(width).
-		Render(fmt.Sprintf("%-28s %-10s %s", "NAME", "DRIVER", "CREATED"))
+		Render(fmt.Sprintf("%-*s %-*s %s", colName, "NAME", colDriver, "DRIVER", "CREATED"))
 
 	sel := lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd"))
 	row := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0"))
@@ -207,7 +212,7 @@ func (m Model) ListView(width, height int) string {
 		if m.marked[v.Name] {
 			mark = "*"
 		}
-		line := fmt.Sprintf("%s %-28s %-10s %s", mark, uiutil.Truncate(v.Name, 28), v.Driver, uiutil.Ago(v.Created))
+		line := fmt.Sprintf("%s%s %-*s %s", mark, uiutil.Pad(v.Name, colName-1), colDriver, v.Driver, uiutil.Ago(v.Created))
 		st := row
 		if i == m.cursor {
 			st = sel
