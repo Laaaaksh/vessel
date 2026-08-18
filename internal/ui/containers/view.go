@@ -111,11 +111,9 @@ func (m Model) renderRow(c backend.Container, selected bool, width int, poller *
 	if selected {
 		return m.styleSelected.Width(width).Render(line)
 	}
-	st := m.styleRow
+	st := m.styleExited
 	if c.IsRunning() {
 		st = m.styleRunning
-	} else {
-		st = m.styleExited
 	}
 	return st.Width(width).Render(line)
 }

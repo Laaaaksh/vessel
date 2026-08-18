@@ -31,7 +31,7 @@ func Run() int {
 		}
 	}
 
-	cfgPath := config.ConfigPath()
+	cfgPath := config.Path()
 	printf("config path: %s\n", cfgPath)
 	cfg, err := config.Load()
 	if err != nil {
