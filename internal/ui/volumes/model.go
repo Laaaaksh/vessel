@@ -26,6 +26,13 @@ type Model struct {
 	marked     map[string]bool
 	toggleMark string
 	pageRows   int
+
+	// inspect holds the latest VolumeInspect for inspectName, if it matches the
+	// currently selected volume. Carried separately so list info shows while
+	// inspection is in flight and a slow response never labels a wrong volume.
+	inspect     *backend.VolumeInspect
+	inspectName string
+	inspectErr  error
 }
 
 // New creates an empty volumes model.
@@ -102,6 +109,15 @@ func (m Model) MarkedIDs() []string {
 		}
 	}
 	return out
+}
+
+// SetInspect stores the inspected detail for the given volume name, keyed by
+// name so a slow response never labels the wrong volume.
+func (m Model) SetInspect(name string, ins *backend.VolumeInspect, err error) Model {
+	m.inspect = ins
+	m.inspectName = name
+	m.inspectErr = err
+	return m
 }
 
 // MoveBy moves the cursor by delta rows.
@@ -262,9 +278,46 @@ func (m Model) DetailView(width, height int) string {
 		uiutil.KV("Driver", sel.Driver),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
 		uiutil.KV("Path", uiutil.Truncate(sel.Mountpoint, width-12)),
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[c] create  [d] delete  [P] prune  [y] yank path"),
 	}
+
+	same := sel.Name == m.inspectName && m.inspect != nil
+	if same {
+		if m.inspect.Format != "" {
+			lines = append(lines, uiutil.KV("Format", m.inspect.Format))
+		}
+		if m.inspect.SizeBytes > 0 {
+			lines = append(lines, uiutil.KV("Size", uiutil.HumanBytes(int64(m.inspect.SizeBytes))))
+		}
+	}
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	if same {
+		if len(m.inspect.Labels) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, dim.Render("-- Labels --"))
+			for k, v := range m.inspect.Labels {
+				if len(lines) > height-4 {
+					break
+				}
+				lines = append(lines, dim.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
+			}
+		}
+		if len(m.inspect.Options) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, dim.Render("-- Options --"))
+			for k, v := range m.inspect.Options {
+				if len(lines) > height-4 {
+					break
+				}
+				lines = append(lines, dim.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
+			}
+		}
+	} else if m.inspectErr != nil && sel.Name == m.inspectName {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
+			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+	}
+
+	lines = append(lines, "", dim.Render("[c] create  [d] delete  [P] prune  [y] yank path"))
 	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }

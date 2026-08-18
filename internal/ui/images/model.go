@@ -26,6 +26,13 @@ type Model struct {
 	marked     map[string]bool
 	toggleMark string
 	pageRows   int
+
+	// inspect holds the latest ImageInspect for inspectRef, if it matches the
+	// currently selected image. It is carried separately from the list so the
+	// detail pane can keep showing list info while inspection is in flight.
+	inspect    *backend.ImageInspect
+	inspectRef string
+	inspectErr error
 }
 
 // New creates an empty images model.
@@ -111,6 +118,16 @@ func (m Model) MarkedIDs() []string {
 		}
 	}
 	return out
+}
+
+// SetInspect stores the inspected detail for the given image reference. The
+// panel keeps the result keyed by ref and only renders it while that image is
+// selected, so a slow response never labels the wrong image.
+func (m Model) SetInspect(ref string, ins *backend.ImageInspect, err error) Model {
+	m.inspect = ins
+	m.inspectRef = ref
+	m.inspectErr = err
+	return m
 }
 
 // MoveBy adjusts cursor.
@@ -277,9 +294,52 @@ func (m Model) DetailView(width, height int) string {
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
 		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[p] pull  [c] run  [d] delete  [P] prune"),
 	}
+
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	if m.inspect != nil && m.inspectRef == backend.FormatRef(*sel) {
+		if d := m.inspect.Digest; d != "" {
+			lines = append(lines, uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
+		}
+		if len(m.inspect.Cmd) > 0 {
+			lines = append(lines, uiutil.KV("Cmd", uiutil.Truncate(strings.Join(m.inspect.Cmd, " "), width-10)))
+		}
+		if m.inspect.WorkingDir != "" {
+			lines = append(lines, uiutil.KV("Workdir", uiutil.Truncate(m.inspect.WorkingDir, width-10)))
+		}
+		if m.inspect.LayerCount > 0 {
+			lines = append(lines, uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
+		}
+
+		if len(m.inspect.Env) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, dim.Render("-- Env --"))
+			for _, e := range m.inspect.Env {
+				if len(lines) > height-4 {
+					break
+				}
+				lines = append(lines, dim.Render("  "+uiutil.Truncate(e, width-6)))
+			}
+		}
+
+		if len(m.inspect.Platforms) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, dim.Render("-- Platforms --"))
+			for _, p := range m.inspect.Platforms {
+				if len(lines) > height-4 {
+					break
+				}
+				line := p.OS + "/" + p.Architecture + "  " + uiutil.HumanBytes(p.Size)
+				lines = append(lines, dim.Render("  "+uiutil.Truncate(line, width-6)))
+			}
+		}
+	} else if m.inspectErr != nil && m.inspectRef == backend.FormatRef(*sel) {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
+			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+	}
+
+	lines = append(lines, "", dim.Render("[p] pull  [c] run  [d] delete  [P] prune"))
 	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
