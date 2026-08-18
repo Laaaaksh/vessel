@@ -1,0 +1,19 @@
+[
+  {
+    "configuration" : {
+      "creationDate" : "2026-08-18T07:45:04Z",
+      "driver" : "local",
+      "format" : "ext4",
+      "labels" : {
+
+      },
+      "name" : "p2-live-probe",
+      "options" : {
+
+      },
+      "sizeInBytes" : 549755813888,
+      "source" : "\/Users\/laaaaksh\/Library\/Application Support\/com.apple.container\/volumes\/p2-live-probe\/volume.img"
+    },
+    "id" : "p2-live-probe"
+  }
+]

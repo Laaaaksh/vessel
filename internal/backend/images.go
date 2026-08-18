@@ -27,11 +27,32 @@ type cliImage struct {
 
 // cliImageVariant is one per-platform manifest beneath a multi-arch index.
 type cliImageVariant struct {
+	Config cliVariantConfig `json:"config"`
+	// Digest is the manifest digest of this variant.
+	Digest   string `json:"digest"`
 	Platform struct {
 		OS           string `json:"os"`
 		Architecture string `json:"architecture"`
+		Variant      string `json:"variant"`
 	} `json:"platform"`
 	Size int64 `json:"size"`
+}
+
+// cliVariantConfig is the OCI config blob of a single-image manifest.
+type cliVariantConfig struct {
+	Architecture string `json:"architecture"`
+	OS           string `json:"os"`
+	Variant      string `json:"variant"`
+	Created      string `json:"created"`
+	Config       struct {
+		Cmd        []string `json:"Cmd"`
+		Env        []string `json:"Env"`
+		WorkingDir string   `json:"WorkingDir"`
+	} `json:"config"`
+	RootFS struct {
+		Type    string   `json:"type"`
+		DiffIDs []string `json:"diff_ids"`
+	} `json:"rootfs"`
 }
 
 // ListImages returns all local images.
@@ -41,6 +62,20 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 		return nil, fmt.Errorf("list images: %w", err)
 	}
 	return mapImages(raw), nil
+}
+
+// ImageInspect returns the full inspection of a single image identified by its
+// reference (name or name:tag). The CLI reports unknown numeric IDs as not
+// found, so callers should pass the reference.
+func (c *Client) ImageInspect(ctx context.Context, ref string) (*ImageInspect, error) {
+	var raw []cliImage
+	if err := c.runJSON(ctx, &raw, "image", "inspect", ref); err != nil {
+		return nil, fmt.Errorf("inspect image %s: %w", ref, err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("image not found: %s", ref)
+	}
+	return mapImageInspect(raw[0]), nil
 }
 
 // RemoveImage removes one or more images by ID or name in a single call.
@@ -80,6 +115,47 @@ func mapImages(raw []cliImage) []Image {
 		out = append(out, img)
 	}
 	return out
+}
+
+// mapImageInspect maps one inspected image to the enriched domain type. The
+// per-variant config that matters (digest, size, cmd, env, working directory,
+// layer count) is taken from the variant matching this host, mirroring the
+// running-platform choice in imageSize.
+func mapImageInspect(r cliImage) *ImageInspect {
+	repo, tag := splitRef(r.Configuration.Name)
+	ins := &ImageInspect{
+		ID:         r.ID,
+		Repository: repo,
+		Tag:        tag,
+	}
+	if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
+		ins.Created = t
+	}
+	for _, v := range r.Variants {
+		p := v.Platform
+		if p.OS == "unknown" || p.Architecture == "unknown" {
+			continue
+		}
+		ins.Platforms = append(ins.Platforms, ImagePlatform{
+			OS:           p.OS,
+			Architecture: p.Architecture,
+			Variant:      p.Variant,
+			Digest:       v.Digest,
+			Size:         v.Size,
+		})
+		if p.OS == guestOS && p.Architecture == runtime.GOARCH && ins.Digest == "" {
+			ins.Digest = v.Digest
+			ins.Size = v.Size
+			if t, err := time.Parse(time.RFC3339, v.Config.Created); err == nil {
+				ins.Created = t
+			}
+			ins.Cmd = v.Config.Config.Cmd
+			ins.WorkingDir = v.Config.Config.WorkingDir
+			ins.Env = v.Config.Config.Env
+			ins.LayerCount = len(v.Config.RootFS.DiffIDs)
+		}
+	}
+	return ins
 }
 
 // imageSize reports the size of the manifest this host would actually run.
