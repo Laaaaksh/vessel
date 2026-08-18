@@ -272,21 +272,18 @@ func (m Model) ListView(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
-// DetailView renders image details.
+// DetailView renders image details. Height is a floor for lipgloss, never a
+// cap, so the pane is capped explicitly: anything longer would grow the body row
+// and push the header off the alt-screen. The notice sits above the metadata so
+// that on a pane too small for both it is the static fields that get cut.
 func (m Model) DetailView(width, height int) string {
+	pane := lipgloss.NewStyle().Width(width).Height(height).MaxHeight(max(1, height))
 	sel := m.Selected()
 	if sel == nil {
-		return lipgloss.NewStyle().Width(width).Height(height).
-			Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
+		return pane.Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
 	lines := []string{
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
-		"",
-		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
-		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
-		uiutil.KV("Created", uiutil.Ago(sel.Created)),
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[p] pull  [c] run  [d] delete  [P] prune"),
 	}
 	if m.notice != "" {
 		lines = append(lines, "", lipgloss.NewStyle().
@@ -294,6 +291,14 @@ func (m Model) DetailView(width, height int) string {
 			Width(max(1, width-2)).
 			Render(m.notice))
 	}
-	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
+	lines = append(lines,
+		"",
+		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
+		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
+		uiutil.KV("Created", uiutil.Ago(sel.Created)),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[p] pull  [c] run  [d] delete  [P] prune"),
+	)
+	return pane.PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
