@@ -338,13 +338,13 @@ func (m Model) DetailView(width, height int) string {
 
 	if m.inspect != nil && m.inspectRef == backend.FormatRef(*sel) {
 		if d := m.inspect.Digest; d != "" {
-			p.Add(uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
+			p.Add(uiutil.KVFit("Digest", d, width))
 		}
 		if len(m.inspect.Cmd) > 0 {
-			p.Add(uiutil.KV("Cmd", uiutil.Truncate(strings.Join(m.inspect.Cmd, " "), width-10)))
+			p.Add(uiutil.KVFit("Cmd", strings.Join(m.inspect.Cmd, " "), width))
 		}
 		if m.inspect.WorkingDir != "" {
-			p.Add(uiutil.KV("Workdir", uiutil.Truncate(m.inspect.WorkingDir, width-10)))
+			p.Add(uiutil.KVFit("Workdir", m.inspect.WorkingDir, width))
 		}
 		if m.inspect.LayerCount > 0 {
 			p.Add(uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))

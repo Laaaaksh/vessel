@@ -163,7 +163,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 		p.Add(uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
 	}
 	if len(sel.Networks) > 0 {
-		p.Add(uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
+		p.Add(uiutil.KVFit("Networks", backend.FormatNetworks(sel.Networks), width))
 	}
 
 	mounts := make([]string, 0, len(sel.Mounts))

@@ -163,3 +163,23 @@ func TestPane_dropsEverythingAfterTheFirstRowThatDoesNotFit(t *testing.T) {
 		t.Errorf("Grow must reopen the pane for its reserved content, got %v", got)
 	}
 }
+
+func TestKVFit_occupiesOneRenderedRow(t *testing.T) {
+	digest := "sha256:e7a1a92a5bfeee40966aea60f0796b0e6d4b2c1a9f8e7d6c5b4a39281706f5e4"
+	for _, width := range []int{18, 20, 40, 60} {
+		row := KVFit("Digest", digest, width)
+		if got := RowsFor(row, width); got != 1 {
+			t.Errorf("KVFit at width %d occupies %d rendered rows, want 1: %q", width, got, row)
+		}
+	}
+}
+
+func TestKVFit_keepsAsMuchOfTheValueAsFits(t *testing.T) {
+	row := KVFit("Digest", "sha256:abcdefghijklmnop", 40)
+	if !strings.Contains(row, "sha256:abcdefghijklmnop") {
+		t.Errorf("a value that fits must not be truncated: %q", row)
+	}
+	if got := RowsFor(row, 40); got != 1 {
+		t.Errorf("row occupies %d rendered rows, want 1", got)
+	}
+}
