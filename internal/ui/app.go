@@ -619,7 +619,14 @@ func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cm
 	if msg.err != nil {
 		m.lastErr = msg.err
 	} else {
-		m.lastErr = nil
+		// `container list` is a top-level verb that keeps working while the
+		// plugin-gated prune/create verbs report services-down, so a successful
+		// poll is not evidence the services came back. Keep a services-down hint
+		// visible until the user acts or a different failure replaces it, rather
+		// than wiping it on the next refresh.
+		if !backend.IsServicesDown(m.lastErr) {
+			m.lastErr = nil
+		}
 		m.cntPanel = m.cntPanel.SetItems(msg.items)
 	}
 	return m, nil
