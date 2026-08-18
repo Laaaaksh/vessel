@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
@@ -674,7 +675,11 @@ func TestHelpBindingsCoverAllKeys(t *testing.T) {
 		if val == "" {
 			continue
 		}
-		if !tokens[val] {
+		needle := val
+		if val == " " {
+			needle = "space"
+		}
+		if !tokens[needle] {
 			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
 		}
 	}
@@ -690,7 +695,7 @@ func TestHelpKeyTokens_separatorIsNotAKey(t *testing.T) {
 		t.Fatalf("the filter row documents the / key itself, got %q", got)
 	}
 	if got := helpKeyTokens("space"); !reflect.DeepEqual(got, []string{"space"}) {
-		t.Fatalf("space is the key's own name, not a label for %q: got %q", " ", got)
+		t.Fatalf("the space key is spelled %q by a keypress, got %q", "space", got)
 	}
 }
 
@@ -841,6 +846,104 @@ func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
 	}
 	if !strings.Contains(m.status, "prune") {
 		t.Fatalf("running prune must show progress in the footer, status=%q", m.status)
+	}
+}
+
+func TestHelpView_fitsTerminalHeight(t *testing.T) {
+	custom := []config.CustomCommand{
+		{Name: "one", Key: "z", Command: "echo 1"},
+		{Name: "two", Key: "Z", Command: "echo 2"},
+	}
+	for _, size := range []struct{ w, h int }{{80, 24}, {80, 12}, {120, 40}, {200, 60}} {
+		for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+			m := New()
+			m.width, m.height = size.w, size.h
+			m.activeView = v
+			m.cfg.CustomCommands = custom
+			m.showHelp = true
+			got := lipgloss.Height(viewString(m.View()))
+			if got > size.h {
+				t.Fatalf("%dx%d view=%d: help renders %d lines, alt screen only shows %d",
+					size.w, size.h, v, got, size.h)
+			}
+		}
+	}
+}
+
+func TestHelpView_scrollsToTheLastBinding(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.showHelp = true
+	bindings := m.helpBindings()
+	last := bindings[len(bindings)-1]
+
+	first := ansi.Strip(viewString(m.View()))
+	if strings.Contains(first, last.desc) {
+		t.Skip("help already fits, nothing to scroll")
+	}
+	if !strings.Contains(first, bindings[0].desc) {
+		t.Fatalf("help must start at the first binding, got %q", first)
+	}
+
+	next, _ := m.handleKey(keyMsg("G"))
+	m = next.(Model)
+	bottom := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(bottom, last.desc) {
+		t.Fatalf("every binding must be reachable in help, %q missing after scrolling:\n%s", last.desc, bottom)
+	}
+	if lines := lipgloss.Height(viewString(m.View())); lines > m.height {
+		t.Fatalf("scrolled help renders %d lines for a %d-row screen", lines, m.height)
+	}
+
+	next, _ = m.handleKey(keyMsg("?"))
+	next, _ = next.(Model).handleKey(keyMsg("?"))
+	if got := next.(Model).helpScroll; got != 0 {
+		t.Fatalf("reopening help must start at the top, scroll=%d", got)
+	}
+}
+
+func TestCustomCommandKeySpellings(t *testing.T) {
+	cases := []struct {
+		name      string
+		configKey string
+		press     string
+	}{
+		{"literal space", " ", "space"},
+		{"named space", "space", "space"},
+		{"dash modifier", "ctrl-z", "ctrl+z"},
+		{"uppercase name", "Enter", "enter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			custom := []config.CustomCommand{{Name: "probe", Key: tc.configKey, Command: "echo probe"}}
+			if got := customCommandFor(custom, DefaultKeyMap(), tc.press); got != "echo probe" {
+				t.Fatalf("config key %q must fire on %q, got %q", tc.configKey, tc.press, got)
+			}
+			rows := map[string]int{}
+			for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+				for _, k := range helpKeyTokens(b.key) {
+					rows[k]++
+				}
+			}
+			if rows[tc.press] != 1 {
+				t.Fatalf("key %q must have exactly one help row, got %d", tc.press, rows[tc.press])
+			}
+		})
+	}
+}
+
+func TestCustomCommandUnusableKeyIsNotAdvertised(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "phantom", Key: "not-a-key", Command: "echo nope"}}
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		if strings.Contains(b.desc, "phantom") {
+			t.Fatalf("a key no keypress produces must not appear in help: %q -> %q", b.key, b.desc)
+		}
+	}
+}
+
+func TestStopTimeoutMatchesUnconfirmedStop(t *testing.T) {
+	if _, _, timeout := pendingAction(stopContainer); timeout != lifecycleTimeout {
+		t.Fatalf("confirming a stop must not change its budget: got %v want %v", timeout, lifecycleTimeout)
 	}
 }
 
