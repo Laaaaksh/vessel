@@ -676,15 +676,56 @@ func TestImagesAction_Load_missingFile(t *testing.T) {
 	}
 }
 
-func TestImagesAction_Push_flow(t *testing.T) {
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"}})
+// beginPush selects Push from the images action menu and returns the model
+// sitting in the confirmation it must open before anything is published.
+func beginPush(t *testing.T, m Model) Model {
+	t.Helper()
 	run := findAction(m.buildActions(), "Push")
+	if run == nil {
+		t.Fatal("Push action missing")
+	}
 	next, cmd := run(m)
+	if cmd != nil {
+		t.Fatal("Push must not start work before the user confirms")
+	}
+	if next.mode != modeConfirmDelete {
+		t.Fatalf("Push must open the confirm modal, mode=%v", next.mode)
+	}
+	if got := lastCLICommand(next); got != "" {
+		t.Fatalf("Push must not shell out before confirmation, recorded %q", got)
+	}
+	return next
+}
+
+func TestImagesAction_Push_confirmNamesImageAndDestination(t *testing.T) {
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "ghcr.io/vessel/alpine", Tag: "probe"},
+	}))
+	view := ansi.Strip(viewString(m.View()))
+	for _, want := range []string{"Push", "ghcr.io/vessel/alpine:probe", "ghcr.io"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("confirm modal must name %q, got: %q", want, view)
+		}
+	}
+	if strings.Contains(view, "Delete ghcr.io") {
+		t.Fatalf("push confirmation must not read as a delete: %q", view)
+	}
+}
+
+func TestImagesAction_Push_confirmedRunsPush(t *testing.T) {
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
+	mm := next.(Model)
+	if mm.mode != modeBrowse {
+		t.Fatalf("confirming should return to browse, got %v", mm.mode)
+	}
 	done := cmd().(actionDoneMsg)
 	if done.err != nil {
 		t.Fatal(done.err)
 	}
-	out, _ := next.Update(done)
+	out, _ := mm.Update(done)
 	om := out.(Model)
 	if om.status != "push vessel/alpine:probe ok" {
 		t.Fatalf("status: got %q", om.status)
@@ -694,11 +735,29 @@ func TestImagesAction_Push_flow(t *testing.T) {
 	}
 }
 
+func TestImagesAction_Push_cancelledDoesNotPush(t *testing.T) {
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
+	}))
+	next, cmd := m.handleKey(keyMsg("n"))
+	mm := next.(Model)
+	if mm.mode != modeBrowse {
+		t.Fatalf("cancel should return to browse, got %v", mm.mode)
+	}
+	if cmd != nil {
+		t.Fatal("cancelling must not publish anything")
+	}
+	if got := lastCLICommand(mm); got != "" {
+		t.Fatalf("cancelled push must not shell out, recorded %q", got)
+	}
+}
+
 func TestImagesAction_Push_authFailureNamesLogin(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
-	run := findAction(m.buildActions(), "Push")
-	next, cmd := run(m)
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
 	done := cmd().(actionDoneMsg)
 	if done.err == nil {
 		t.Fatal("expected an auth failure")

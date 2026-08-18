@@ -99,8 +99,9 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 
 // pushAuthHint tells the user how to authenticate when a push is rejected for
 // credentials. Container registry login is intentionally out of vessel's scope:
-// the user owns their registry session.
-const pushAuthHint = "\n\nImage registry rejected the push with an authentication error. Log in to the registry first, then retry:\n\n    container registry login"
+// the user owns their registry session. The hint stays on one line because the
+// footer that renders it budgets exactly one row.
+const pushAuthHint = " — registry rejected these credentials; run `container registry login`, then retry"
 
 // isPushAuthError reports whether a push error looks like a credentials problem.
 func isPushAuthError(err error) bool {
@@ -108,6 +109,22 @@ func isPushAuthError(err error) bool {
 	return strings.Contains(s, "unauthorized") ||
 		strings.Contains(s, "no credentials found") ||
 		strings.Contains(s, "authentication")
+}
+
+// defaultRegistry is where a reference that names no registry host is pushed.
+const defaultRegistry = "docker.io"
+
+// PushTarget returns the registry host that pushing ref would publish to, so a
+// confirmation can name the destination rather than only the image.
+func PushTarget(ref string) string {
+	head, rest, ok := strings.Cut(ref, "/")
+	if !ok || rest == "" {
+		return defaultRegistry
+	}
+	if head == "localhost" || strings.ContainsAny(head, ".:") {
+		return head
+	}
+	return defaultRegistry
 }
 
 func mapImages(raw []cliImage) []Image {
