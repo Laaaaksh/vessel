@@ -871,16 +871,71 @@ func assertOneRow(t *testing.T, m Model, what string) {
 	}
 }
 
-func TestFooterView_keyHintsFitOneRow(t *testing.T) {
+func TestFooterView_keyHintsKeepTheirGrouping(t *testing.T) {
+	m := New()
+	m.width, m.height = 120, 24
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
+	if m.status != "" || m.lastErr != nil {
+		t.Fatal("precondition: the key-hint branch needs no status and no error")
+	}
+	footer := ansi.Strip(m.footerView())
+	if !strings.Contains(footer, "[d] remove  [/] filter") {
+		t.Fatalf("key hints must keep their authored double-space grouping, got %q", footer)
+	}
+	if strings.Contains(footer, "…") {
+		t.Fatalf("key hints must not be truncated when they fit, got %q", footer)
+	}
+}
+
+func TestHelpView_imagesFitsAnEightyByTwentyFourTerminal(t *testing.T) {
 	for _, view := range []View{ViewContainers, ViewImages, ViewVolumes} {
 		m := New()
 		m.width, m.height = 80, 24
 		m.activeView = view
-		m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
-		if m.status != "" || m.lastErr != nil {
-			t.Fatal("precondition: the key-hint branch needs no status and no error")
+		rendered := ansi.Strip(m.helpView())
+		if rows := len(strings.Split(strings.TrimRight(rendered, "\n"), "\n")); rows > m.height {
+			t.Errorf("%s help renders %d rows into a %d-row screen", m.viewName(), rows, m.height)
 		}
-		assertOneRow(t, m, "key hints at width 80")
+	}
+}
+
+func TestImagesDetail_showsRegistryLoginAfterAuthFailure(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected an auth failure")
+	}
+	out, _ := next.(Model).Update(done)
+	om := out.(Model)
+
+	// The footer is clamped to one row, so it cannot be the only surface.
+	detail := squash(ansi.Strip(om.imgPanel.DetailView(40, 20)))
+	if !strings.Contains(detail, squash("container registry login")) {
+		t.Fatalf("detail pane must name the login command, got: %q", detail)
+	}
+
+	// A later success clears the standing notice.
+	cleared, _ := om.Update(actionDoneMsg{msg: "pull ok"})
+	after := squash(ansi.Strip(cleared.(Model).imgPanel.DetailView(40, 20)))
+	if strings.Contains(after, squash("container registry login")) {
+		t.Fatalf("notice should clear once an action succeeds, got: %q", after)
+	}
+}
+
+func TestImagesAction_Tag_promptNamesSourceAndWantsNewRef(t *testing.T) {
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	run := findAction(m.buildActions(), "Tag…")
+	next, _ := run(m)
+	if next.mode != modePrompt {
+		t.Fatalf("Tag… should open a prompt, got mode %v", next.mode)
+	}
+	view := modalText(t, next)
+	if !strings.Contains(view, "tag alpine:latest as (new reference)") {
+		t.Fatalf("tag prompt must name the source image and ask for the new reference, got: %q", view)
 	}
 }
 
