@@ -398,6 +398,53 @@ func TestInspect_doesNotReissueWhileOneIsInFlight(t *testing.T) {
 	}
 }
 
+func TestInspect_selectionJitterDoesNotDoubleUpTheSameInspect(t *testing.T) {
+	// Cursor jitter A->B->A->B inside the debounce window arms one timer per
+	// change; when they land in order, only the first may reach the CLI.
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+	})
+
+	var timers []tea.Cmd
+	for _, delta := range []int{1, -1, 1} {
+		next, cmd := m.handleMouseWheel(wheel(delta))
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("each selection change must schedule an inspect")
+		}
+		timers = append(timers, cmd)
+	}
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection settled on %q, want nginx:1.27", got)
+	}
+
+	launched := 0
+	for i, timer := range timers {
+		msg, ok := timer().(inspectSettledMsg)
+		if !ok {
+			t.Fatalf("timer %d: expected inspectSettledMsg, got %T", i, timer())
+		}
+		next, load := m.Update(msg)
+		m = next.(Model)
+		if load != nil {
+			launched++
+		}
+	}
+	if launched != 1 {
+		t.Errorf("jitter launched %d inspects for one settled selection, want 1", launched)
+	}
+}
+
+func wheel(delta int) tea.MouseWheelMsg {
+	button := tea.MouseWheelDown
+	if delta < 0 {
+		button = tea.MouseWheelUp
+	}
+	return tea.MouseWheelMsg(tea.Mouse{Button: button})
+}
+
 func TestLoadImageInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
 	m := imagesModel(t)
 	if cmd := m.loadImageInspectCmd(); cmd == nil {

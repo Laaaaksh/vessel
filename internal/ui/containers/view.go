@@ -173,8 +173,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 	}
 	p.Section(dim.Render("-- Mounts --"), mounts)
 
-	p.Grow(reserved)
-	p.Add(metrics...)
+	p.AddReserved(reserved, metrics...)
 
 	p.Section(dim.Render("-- Labels --"), pairRows(sel.Labels, dim, width))
 

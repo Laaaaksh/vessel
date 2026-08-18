@@ -335,8 +335,7 @@ func (m Model) DetailView(width, height int) string {
 			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
 	}
 
-	p.Grow(reserved)
-	p.Add("", keybar)
+	p.AddReserved(reserved, "", keybar)
 	return uiutil.RenderPane(width, height, p.Lines())
 }
 

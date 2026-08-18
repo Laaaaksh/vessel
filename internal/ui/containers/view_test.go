@@ -174,3 +174,29 @@ func TestDetailView_narrowPaneRendersRowsInOrder(t *testing.T) {
 		t.Errorf("Platform rendered while the earlier Hostname row was dropped: %q", v)
 	}
 }
+
+func TestDetailView_sectionsDoNotJumpAheadOfDroppedRows(t *testing.T) {
+	// A long image reference fills the pane before the identity rows are in;
+	// the live metrics still render because room was reserved for them, but a
+	// Labels section must not appear above rows that were dropped for space.
+	m := New().SetItems([]backend.Container{{
+		ID:     "abc123456789",
+		Name:   "web",
+		Image:  "docker.io/library/postgres:16.2alpine",
+		Status: "running",
+		Labels: map[string]string{"app": "db"},
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	v := ansi.Strip(m.DetailView(18, 7, poller))
+
+	if got := strings.Count(v, "\n") + 1; got > 7 {
+		t.Errorf("pane rendered %d lines into 18x7", got)
+	}
+	if !strings.Contains(v, "CPU") {
+		t.Fatalf("the reserved metrics rows must still render: %q", v)
+	}
+	if strings.Contains(v, "-- Labels --") && !strings.Contains(v, "Status") {
+		t.Errorf("Labels rendered while the earlier identity rows were dropped: %q", v)
+	}
+}

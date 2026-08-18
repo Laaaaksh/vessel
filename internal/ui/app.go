@@ -244,7 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.key == m.inspectKey {
 			m.inspectKey = ""
 		}
-		if msg.key != m.selectionKey() {
+		if msg.key != m.selectionKey() || msg.key == m.inspectRun {
 			return m, nil
 		}
 		var cmd tea.Cmd
