@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,6 +72,50 @@ func TestMapContainers_empty(t *testing.T) {
 	got := mapContainers(nil)
 	if len(got) != 0 {
 		t.Errorf("expected empty slice, got %d", len(got))
+	}
+}
+
+func TestMapContainers_mountsNetworksResources(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-mounts.json")
+	got := mapContainers(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(got))
+	}
+	c := got[0]
+	if c.Hostname == "" {
+		t.Error("hostname empty")
+	}
+	if c.Platform != "linux/arm64" {
+		t.Errorf("platform want linux/arm64, got %q", c.Platform)
+	}
+	if c.CPUs != 4 {
+		t.Errorf("cpus want 4, got %d", c.CPUs)
+	}
+	if c.MemoryBytes != 1073741824 {
+		t.Errorf("memory want 1073741824, got %d", c.MemoryBytes)
+	}
+	if len(c.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(c.Mounts))
+	}
+	mt := c.Mounts[0]
+	if mt.Destination != "/data" {
+		t.Errorf("mount destination want /data, got %q", mt.Destination)
+	}
+	if mt.Source == "" {
+		t.Error("mount source empty")
+	}
+	if len(c.Networks) != 1 {
+		t.Fatalf("expected 1 network, got %d", len(c.Networks))
+	}
+	net := c.Networks[0]
+	if net.Name != "default" {
+		t.Errorf("network name want default, got %q", net.Name)
+	}
+	if net.IP == "" || !strings.Contains(net.IP, ".") {
+		t.Errorf("network ip missing or malformed: %q", net.IP)
+	}
+	if len(c.Ports) != 1 || c.Ports[0].HostPort != 18080 {
+		t.Errorf("published ports wrong: %+v", c.Ports)
 	}
 }
 

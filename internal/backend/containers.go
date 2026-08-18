@@ -22,6 +22,10 @@ type cliContainerConfig struct {
 	InitProcess    cliInitProcess     `json:"initProcess"`
 	Labels         map[string]string  `json:"labels"`
 	PublishedPorts []cliPublishedPort `json:"publishedPorts"`
+	Mounts         []cliMount         `json:"mounts"`
+	Networks       []cliNetConfig     `json:"networks"`
+	Platform       cliPlatform        `json:"platform"`
+	Resources      cliResources       `json:"resources"`
 }
 
 type cliImageRef struct {
@@ -38,9 +42,43 @@ type cliPublishedPort struct {
 	Protocol      string `json:"proto"`
 }
 
+type cliMount struct {
+	Destination string `json:"destination"`
+	Source      string `json:"source"`
+	Type        struct {
+		Volume struct {
+			Name string `json:"name"`
+		} `json:"volume"`
+	} `json:"type"`
+}
+
+type cliNetConfig struct {
+	Network string `json:"network"`
+	Options struct {
+		Hostname string `json:"hostname"`
+	} `json:"options"`
+}
+
+type cliNetStatus struct {
+	Hostname    string `json:"hostname"`
+	IPv4Address string `json:"ipv4Address"`
+	Network     string `json:"network"`
+}
+
+type cliPlatform struct {
+	OS           string `json:"os"`
+	Architecture string `json:"architecture"`
+}
+
+type cliResources struct {
+	CPUs          int    `json:"cpus"`
+	MemoryInBytes uint64 `json:"memoryInBytes"`
+}
+
 type cliContainerStatus struct {
-	State       string `json:"state"`
-	StartedDate string `json:"startedDate"`
+	State       string         `json:"state"`
+	StartedDate string         `json:"startedDate"`
+	Networks    []cliNetStatus `json:"networks"`
 }
 
 // ListContainers returns all containers (running and stopped).
@@ -131,6 +169,30 @@ func mapContainers(raw []cliContainer) []Container {
 			Status: r.Status.State,
 			Env:    r.Configuration.InitProcess.Environment,
 			Labels: r.Configuration.Labels,
+			CPUs:   r.Configuration.Resources.CPUs,
+		}
+		c.MemoryBytes = r.Configuration.Resources.MemoryInBytes
+		if p := r.Configuration.Platform; p.OS != "" && p.Architecture != "" {
+			c.Platform = p.OS + "/" + p.Architecture
+		}
+		for _, n := range r.Configuration.Networks {
+			if c.Hostname == "" && n.Options.Hostname != "" {
+				c.Hostname = n.Options.Hostname
+			}
+		}
+		for _, n := range r.Status.Networks {
+			net := Network{Name: n.Network, IP: n.IPv4Address}
+			c.Networks = append(c.Networks, net)
+			if c.Hostname == "" {
+				c.Hostname = n.Hostname
+			}
+		}
+		for _, mt := range r.Configuration.Mounts {
+			src := mt.Source
+			if src == "" {
+				src = mt.Type.Volume.Name
+			}
+			c.Mounts = append(c.Mounts, Mount{Source: src, Destination: mt.Destination})
 		}
 		if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
 			c.Created = t
@@ -161,4 +223,28 @@ func FormatPorts(ports []PortMapping) string {
 		parts = append(parts, fmt.Sprintf("%d→%d", p.HostPort, p.ContainerPort))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// FormatNetworks returns a compact networks string like "default (192.168.64.2)".
+func FormatNetworks(nets []Network) string {
+	if len(nets) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(nets))
+	for _, n := range nets {
+		s := n.Name
+		if n.IP != "" {
+			s = n.Name + " (" + n.IP + ")"
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// FormatMemoryBytes renders a byte count using the human-readable helper.
+func FormatMemoryBytes(b uint64) string {
+	if b == 0 {
+		return "-"
+	}
+	return humanBytes(b)
 }
