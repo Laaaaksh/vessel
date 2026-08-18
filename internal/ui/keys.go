@@ -115,6 +115,9 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 			{"P", "prune unused images"},
 			{"d", "delete marked (confirm)"},
 			{"c", "run container from image"},
+			{"x → Tag/Save/Load", "retag, write, or read an OCI tar archive"},
+			{"x → Push", "push to the registry in the ref (confirm)"},
+			{"", "caution: save/load/push of a large image can be killed by the shared 10s CLI timeout (issue vessel-shared-run-timeout)"},
 		}, base...)
 	case ViewVolumes:
 		base = append([]struct{ key, desc string }{

@@ -138,7 +138,9 @@ func TestClient_TailLogs_fake(t *testing.T) {
 	}
 }
 
-func lastCmd(c *Client) string {
+// lastCmdOrEmpty is lastCmd's non-fatal twin: an empty log is a legitimate
+// expectation here, because a guard that rejects its input must not shell out.
+func lastCmdOrEmpty(c *Client) string {
 	log := c.CommandLog()
 	if len(log) == 0 {
 		return ""
@@ -153,7 +155,7 @@ func TestClient_TagImage_fake(t *testing.T) {
 	if err := c.TagImage(ctx, "alpine:latest", "vessel/alpine:probe"); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastCmd(c); got != "container image tag alpine:latest vessel/alpine:probe" {
+	if got := lastCmdOrEmpty(c); got != "container image tag alpine:latest vessel/alpine:probe" {
 		t.Fatalf("tag argument order: got %q", got)
 	}
 }
@@ -165,7 +167,7 @@ func TestClient_SaveImage_fake(t *testing.T) {
 	if err := c.SaveImage(ctx, "alpine:latest", "/tmp/vessel-out.tar"); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastCmd(c); got != "container image save --output /tmp/vessel-out.tar alpine:latest" {
+	if got := lastCmdOrEmpty(c); got != "container image save --output /tmp/vessel-out.tar alpine:latest" {
 		t.Fatalf("save argument order: got %q", got)
 	}
 }
@@ -181,7 +183,7 @@ func TestClient_LoadImage_fake(t *testing.T) {
 	if err := c.LoadImage(ctx, path); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastCmd(c); got != "container image load --input "+path {
+	if got := lastCmdOrEmpty(c); got != "container image load --input "+path {
 		t.Fatalf("load argument order: got %q", got)
 	}
 }
@@ -198,7 +200,7 @@ func TestClient_LoadImage_missingFile(t *testing.T) {
 	if !strings.Contains(err.Error(), "no such file") {
 		t.Fatalf("want a clear no-such-file error, got: %v", err)
 	}
-	if got := lastCmd(c); got != "" {
+	if got := lastCmdOrEmpty(c); got != "" {
 		t.Fatalf("missing path must not shell out, but recorded %q", got)
 	}
 }
@@ -210,7 +212,7 @@ func TestClient_PushImage_fake(t *testing.T) {
 	if err := c.PushImage(ctx, "vessel/alpine:probe"); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastCmd(c); got != "container image push vessel/alpine:probe" {
+	if got := lastCmdOrEmpty(c); got != "container image push vessel/alpine:probe" {
 		t.Fatalf("push argument order: got %q", got)
 	}
 }
@@ -240,5 +242,26 @@ func TestClient_PushImage_genericFailureNoHint(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "container registry login") {
 		t.Fatalf("non-auth push error must not carry the login hint, got: %v", err)
+	}
+}
+
+func TestClient_PushImage_authHintStaysOnOneLine(t *testing.T) {
+	push := func(mode string) error {
+		t.Setenv("FAKE_CONTAINER_FAIL_PUSH", mode)
+		c := NewClientWithBinary(fakeBinary(t))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return c.PushImage(ctx, "alpine:latest")
+	}
+	authErr, plainErr := push("auth"), push("generic")
+	if authErr == nil || plainErr == nil {
+		t.Fatal("expected both fake pushes to fail")
+	}
+	if !strings.Contains(authErr.Error(), "container registry login") {
+		t.Fatalf("auth error must name the login command, got: %v", authErr)
+	}
+	got, want := strings.Count(authErr.Error(), "\n"), strings.Count(plainErr.Error(), "\n")
+	if got != want {
+		t.Fatalf("auth hint added %d line breaks to a footer that renders one row (auth=%d, plain=%d)", got-want, got, want)
 	}
 }
