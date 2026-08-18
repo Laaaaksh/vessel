@@ -43,9 +43,10 @@ type volumesLoadedMsg struct {
 
 // inspectSettledMsg fires once the images/volumes selection has stopped
 // moving, so holding a cursor key spawns one inspect subprocess instead of one
-// per step. Only the newest generation is acted on.
+// per step. It is keyed by selection rather than by a counter, so a repeated
+// request for the selection already pending cannot supersede its own timer.
 type inspectSettledMsg struct {
-	gen int
+	key string
 }
 
 type imageInspectMsg struct {
@@ -147,7 +148,7 @@ type Model struct {
 	pollCancel  context.CancelFunc
 	tickPaused  bool
 
-	inspectGen  int
+	inspectKey  string
 	actionIdx   int
 	actionItems []actionItem
 	promptKind  string
@@ -239,7 +240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.scheduleInspect()
 	case inspectSettledMsg:
-		if msg.gen != m.inspectGen {
+		if msg.key == m.inspectKey {
+			m.inspectKey = ""
+		}
+		if msg.key != m.selectionKey() {
 			return m, nil
 		}
 		switch m.activeView {
@@ -486,17 +490,34 @@ func (m Model) loadVolumesCmd() tea.Cmd {
 // inspected.
 const inspectDebounce = 120 * time.Millisecond
 
-// scheduleInspect coalesces inspect requests: every call supersedes the
-// pending one, so a burst of cursor movement results in a single inspect of
-// the selection the user settled on.
+// selectionKey identifies what the active view would inspect right now. It is
+// empty for views and selections that have nothing to inspect.
+func (m Model) selectionKey() string {
+	switch m.activeView {
+	case ViewImages:
+		if sel := m.imgPanel.Selected(); sel != nil {
+			return "image:" + backend.FormatRef(*sel)
+		}
+	case ViewVolumes:
+		if sel := m.volPanel.Selected(); sel != nil {
+			return "volume:" + sel.Name
+		}
+	}
+	return ""
+}
+
+// scheduleInspect coalesces inspect requests: a burst of cursor movement
+// results in a single inspect of the selection the user settled on, and a
+// request for the selection already awaiting its timer is a no-op rather than
+// a fresh timer, so a fast poll interval cannot starve the inspect.
 func (m Model) scheduleInspect() (tea.Model, tea.Cmd) {
-	if m.client == nil {
+	key := m.selectionKey()
+	if m.client == nil || key == "" || key == m.inspectKey {
 		return m, nil
 	}
-	m.inspectGen++
-	gen := m.inspectGen
+	m.inspectKey = key
 	return m, tea.Tick(inspectDebounce, func(time.Time) tea.Msg {
-		return inspectSettledMsg{gen: gen}
+		return inspectSettledMsg{key: key}
 	})
 }
 
