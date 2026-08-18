@@ -717,7 +717,8 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 
 // beginDelete stages a confirmation for ids of the given kind. Every delete
 // path funnels through here so a target is always paired with the panel that
-// owns it, and through confirmDelete so marks are always cleared once.
+// owns it. Marks are not touched: the panels' SetItems prunes them on the next
+// refresh, so a delete that fails stays retryable.
 func (m Model) beginDelete(kind deleteKind, ids []string, label string) (tea.Model, tea.Cmd) {
 	if len(ids) == 0 {
 		return m, nil
