@@ -675,11 +675,12 @@ func TestHelpBindingsCoverAllKeys(t *testing.T) {
 		if val == "" {
 			continue
 		}
-		needle := val
-		if val == " " {
-			needle = "space"
+		if field.Name == "ToggleMark" {
+			// A space keypress reports "space", so this binding never fires;
+			// multi-select and its help entry belong to a later phase.
+			continue
 		}
-		if !tokens[needle] {
+		if !tokens[val] {
 			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
 		}
 	}
@@ -1043,6 +1044,26 @@ func TestCustomCommandKeyModifierSpellings(t *testing.T) {
 			if strings.Contains(b.desc, "phantom") {
 				t.Fatalf("a binding that can never fire must not appear in help: %q -> %q", b.key, b.desc)
 			}
+		}
+	})
+	t.Run("modified character is lowercased", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "ctrl+Z", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "ctrl+z"); got != "echo probe" {
+			t.Fatalf("a modifier suppresses the typed text, so ctrl+Z must fire on ctrl+z, got %q", got)
+		}
+		rows := 0
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			for _, k := range helpKeyTokens(b.key) {
+				if k == "ctrl+Z" {
+					t.Fatalf("help must advertise the key a keypress reports, not %q", k)
+				}
+				if k == "ctrl+z" {
+					rows++
+				}
+			}
+		}
+		if rows != 1 {
+			t.Fatalf("want one ctrl+z help row, got %d", rows)
 		}
 	})
 	t.Run("shift plus a named key stays usable", func(t *testing.T) {

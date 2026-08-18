@@ -199,21 +199,14 @@ var keyAliases = map[string]string{
 	"pageup": "pgup", "bs": "backspace",
 }
 
-// normalizeKey rewrites a configured key onto the spelling
-// tea.KeyPressMsg.String() produces, so config.toml and the runtime agree: a
-// literal space and "space" are the same key, "ctrl-x" is "ctrl+x", and named
-// keys are case-insensitive (single characters stay case-sensitive, since G and
-// g are different keys).
-func normalizeKey(s string) string {
-	if s == "" {
-		return ""
-	}
-	if strings.TrimSpace(s) == "" {
-		return "space"
-	}
-	mods, base := map[string]bool{}, strings.TrimSpace(s)
+// splitKey separates a key into the modifiers it names and the key they modify.
+// seps lists the characters that may join a modifier to the rest, so both the
+// spellings a config may use ("ctrl-x") and the canonical one ("ctrl+x") parse
+// through here.
+func splitKey(s, seps string) (map[string]bool, string) {
+	mods, base := map[string]bool{}, s
 	for {
-		i := strings.IndexAny(base, "+-")
+		i := strings.IndexAny(base, seps)
 		if i <= 0 || i == len(base)-1 {
 			break
 		}
@@ -224,9 +217,28 @@ func normalizeKey(s string) string {
 		mods[mod] = true
 		base = base[i+1:]
 	}
-	if alias, ok := keyAliases[strings.ToLower(base)]; ok {
-		base = alias
-	} else if utf8.RuneCountInString(base) > 1 {
+	return mods, base
+}
+
+// normalizeKey rewrites a configured key onto the spelling
+// tea.KeyPressMsg.String() produces, so config.toml and the runtime agree: a
+// literal space and "space" are the same key, "ctrl-x" is "ctrl+x", modifiers
+// come out in the runtime's order, and named keys are case-insensitive. A bare
+// character stays case-sensitive (G and g are different keys), but a modified
+// one is lowercased, because a modifier suppresses the typed text and the
+// runtime then reports the unshifted rune ("ctrl+z", never "ctrl+Z").
+func normalizeKey(s string) string {
+	if s == "" {
+		return ""
+	}
+	if strings.TrimSpace(s) == "" {
+		return "space"
+	}
+	mods, base := splitKey(strings.TrimSpace(s), "+-")
+	switch {
+	case keyAliases[strings.ToLower(base)] != "":
+		base = keyAliases[strings.ToLower(base)]
+	case utf8.RuneCountInString(base) > 1, len(mods) > 0:
 		base = strings.ToLower(base)
 	}
 	prefix := ""
@@ -238,31 +250,13 @@ func normalizeKey(s string) string {
 	return prefix + base
 }
 
-// splitKey separates a normalized key into its modifiers and the key they
-// modify.
-func splitKey(k string) (map[string]bool, string) {
-	mods, base := map[string]bool{}, k
-	for {
-		i := strings.Index(base, "+")
-		if i <= 0 || i == len(base)-1 {
-			break
-		}
-		if !keyModifiers[base[:i]] {
-			break
-		}
-		mods[base[:i]] = true
-		base = base[i+1:]
-	}
-	return mods, base
-}
-
 // producibleKey reports whether a normalized key can ever be produced by a
 // keypress, so help never advertises a binding that cannot fire. A printable
 // key pressed with shift alone arrives as the character it types ("Z", never
 // "shift+z"); any further modifier suppresses that text, so "ctrl+shift+a" is
 // real.
 func producibleKey(k string) bool {
-	mods, base := splitKey(k)
+	mods, base := splitKey(k, "+")
 	if runtimeKeyNames[base] {
 		return true
 	}
