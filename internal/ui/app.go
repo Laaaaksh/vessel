@@ -16,7 +16,6 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
-	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -264,7 +263,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case shellDoneMsg:
-		m.mode = modeBrowse
+		m = m.clearPending()
 		m.tickPaused = false
 		if msg.err != nil {
 			m.lastErr = msg.err
@@ -723,12 +722,9 @@ func (m Model) beginDelete(kind deleteKind, ids []string, label string) (tea.Mod
 	if len(ids) == 0 {
 		return m, nil
 	}
-	m.mode = modeConfirmDelete
+	m = m.beginConfirm("Delete", label, nil)
 	m.pendingKind = kind
 	m.pendingIDs = ids
-	m.pendingLbl = label
-	m.pendingVerb = ""
-	m.pendingAct = nil
 	return m, nil
 }
 
@@ -768,10 +764,12 @@ func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 
 // beginConfirm parks an action behind the confirm modal, labelled with the
 // concrete target it will act on. Delete stages its targets as pendingIDs; the
-// image actions carry more than one value, so they hand over a closure.
+// image actions carry more than one value, so they hand over a closure. Every
+// confirmation opens through here, so a closure can never outlive its modal and
+// be picked up by the next one.
 func (m Model) beginConfirm(verb, label string, act func(Model) (Model, tea.Cmd)) Model {
+	m = m.clearPending()
 	m.mode = modeConfirmDelete
-	m.pendingIDs = nil
 	m.pendingLbl = label
 	m.pendingVerb = verb
 	m.pendingAct = act
@@ -1073,7 +1071,7 @@ func (m Model) imageActionRef() (Model, string, bool) {
 	}
 	ref, ok := backend.ExactRef(*sel)
 	if !ok {
-		m.status = "image has no tag — tag it first"
+		m.status = "digest-pinned image has no named reference — tag, save and push cannot address it"
 		return m, "", false
 	}
 	return m, ref, true
@@ -1309,19 +1307,35 @@ func (m Model) footerView() string {
 	default:
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
-	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
+	return m.st.footerHelp.Width(m.width).Render(m.clampToRow(prefix + keys))
 }
 
 // clampToRow flattens s onto one row no wider than the frame. layoutDims
 // budgets the footer exactly one row, and CLI errors arrive with embedded
 // newlines and hundreds of characters of stderr, so anything unclamped pushes
-// the header off the alt-screen.
+// the header off the alt-screen. Measurement is by display cell, matching what
+// lipgloss wraps on: a rune count lets wide glyphs through and still overflows.
 func (m Model) clampToRow(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if m.width <= 0 {
+	if m.width <= 0 || lipgloss.Width(s) <= m.width {
 		return s
 	}
-	return uiutil.Truncate(s, m.width)
+	ellipsis := "…"
+	budget := m.width - lipgloss.Width(ellipsis)
+	if budget <= 0 {
+		return ellipsis
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		w := lipgloss.Width(string(r))
+		if used+w > budget {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	return b.String() + ellipsis
 }
 
 func (m Model) cursorInfo() (int, int) {
