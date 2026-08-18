@@ -60,8 +60,11 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the volume list and drops marks for volumes it no longer
-// contains, so a mark can never outlive the row it points at.
+// SetItems replaces the volume list. Marks for volumes the list no longer
+// contains are dropped, so a mark can never outlive the row it points at. So
+// is a cached inspect whose volume is gone from the list, or whose list row no
+// longer agrees with it (the volume was resized or recreated under the same
+// name), so the detail pane cannot pair a fresh list row with a stale inspect.
 func (m Model) SetItems(items []backend.Volume) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
@@ -75,7 +78,21 @@ func (m Model) SetItems(items []backend.Volume) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+	if m.inspect != nil && !inspectMatchesList(items, m.inspectName, *m.inspect) {
+		m.inspect = nil
+		m.inspectName = ""
+		m.inspectErr = nil
+	}
 	return m
+}
+
+func inspectMatchesList(items []backend.Volume, name string, ins backend.VolumeInspect) bool {
+	for _, it := range items {
+		if it.Name == name {
+			return it.SizeBytes == ins.SizeBytes && it.Created.Equal(ins.Created)
+		}
+	}
+	return false
 }
 
 // Selected returns the highlighted volume.
@@ -112,8 +129,14 @@ func (m Model) MarkedIDs() []string {
 }
 
 // SetInspect stores the inspected detail for the given volume name, keyed by
-// name so a slow response never labels the wrong volume.
+// name so a slow response never labels the wrong volume. A result for a volume
+// that is no longer selected is discarded rather than replacing the cache, so
+// it cannot evict a valid inspect for the current selection.
 func (m Model) SetInspect(name string, ins *backend.VolumeInspect, err error) Model {
+	sel := m.Selected()
+	if sel == nil || sel.Name != name {
+		return m
+	}
 	m.inspect = ins
 	m.inspectName = name
 	m.inspectErr = err

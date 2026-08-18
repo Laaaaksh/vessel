@@ -147,7 +147,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 		lines = append(lines, uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
 	}
 	if sel.MemoryBytes > 0 {
-		lines = append(lines, uiutil.KV("Memory", backend.FormatMemoryBytes(sel.MemoryBytes)))
+		lines = append(lines, uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
 	}
 	if len(sel.Networks) > 0 {
 		lines = append(lines, uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))

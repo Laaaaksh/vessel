@@ -3,9 +3,11 @@ package volumes
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
@@ -219,5 +221,84 @@ func TestRenderRowAlignsWithHeader(t *testing.T) {
 		if got := column(t, r, "local"); got != want {
 			t.Errorf("row %d: driver at column %d, header DRIVER at %d", i, got, want)
 		}
+	}
+}
+
+var created = time.Date(2026, 8, 5, 16, 8, 41, 0, time.UTC)
+
+func volumeRow(size uint64, at time.Time) backend.Volume {
+	return backend.Volume{Name: "data", Driver: "local", SizeBytes: size, Created: at}
+}
+
+func volumeInspect(size uint64, at time.Time) *backend.VolumeInspect {
+	return &backend.VolumeInspect{
+		Name:      "data",
+		Driver:    "local",
+		SizeBytes: size,
+		Created:   at,
+		Format:    "ext4",
+	}
+}
+
+func TestSetItems_dropsInspectWhenVolumeChanged(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+	if m.InspectedName() != "data" {
+		t.Fatalf("inspect not cached: %q", m.InspectedName())
+	}
+
+	m = m.SetItems([]backend.Volume{volumeRow(2<<30, created)})
+
+	if got := m.InspectedName(); got != "" {
+		t.Errorf("inspect kept after the volume was resized: %q", got)
+	}
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "ext4") {
+		t.Errorf("stale inspect still rendered after resize: %q", v)
+	}
+}
+
+func TestSetItems_dropsInspectWhenVolumeRecreated(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created.Add(time.Hour))})
+
+	if got := m.InspectedName(); got != "" {
+		t.Errorf("inspect kept after the volume was recreated: %q", got)
+	}
+}
+
+func TestSetItems_keepsInspectForUnchangedVolume(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created)})
+
+	if got := m.InspectedName(); got != "data" {
+		t.Errorf("inspect dropped for unchanged volume: %q", got)
+	}
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "ext4") {
+		t.Errorf("format missing after unchanged refresh: %q", v)
+	}
+}
+
+func TestSetInspect_lateResultForOtherVolumeKeepsCurrentCache(t *testing.T) {
+	m := New().SetItems([]backend.Volume{
+		volumeRow(1<<30, created),
+		{Name: "cache", Driver: "local"},
+	})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+
+	m = m.SetInspect("cache", &backend.VolumeInspect{Name: "cache", Format: "xfs"}, nil)
+
+	if got := m.InspectedName(); got != "data" {
+		t.Errorf("late foreign result evicted the cache: %q", got)
+	}
+	v := ansi.Strip(m.DetailView(60, 40))
+	if !strings.Contains(v, "ext4") {
+		t.Errorf("current volume's format lost: %q", v)
+	}
+	if strings.Contains(v, "xfs") {
+		t.Errorf("foreign format rendered: %q", v)
 	}
 }
