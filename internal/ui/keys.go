@@ -1,5 +1,11 @@
 package ui
 
+import (
+	"strings"
+
+	"github.com/Laaaaksh/vessel/internal/config"
+)
+
 // KeyMap documents all keybindings for vessel.
 // Matching is done via tea.KeyPressMsg.String() in Update().
 type KeyMap struct {
@@ -91,8 +97,26 @@ func (k KeyMap) NavDown(s string) bool { return Match(s, k.Down, "j") }
 // NavUp matches up / k.
 func (k KeyMap) NavUp(s string) bool { return Match(s, k.Up, "k") }
 
-// helpBindings returns contextual (key, description) pairs.
-func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string } {
+// Reserved reports whether s is a navigation, filtering, layout or global
+// binding. Update() dispatches those before user-configured custom command
+// keys, so a custom command can never shadow them: binding "j" to a command
+// must not make the list unscrollable.
+func (k KeyMap) Reserved(s string) bool {
+	if k.NavUp(s) || k.NavDown(s) {
+		return true
+	}
+	if Match(s, k.Left, k.Right, k.FocusNext, k.FocusPrev,
+		k.PageUp, k.PageDown, k.HalfUp, k.HalfDown,
+		k.GotoTop, k.GotoBottom, k.Filter, k.Escape, k.Tab,
+		k.Quit, k.Help, k.LayoutNext, k.LayoutPrev) {
+		return true
+	}
+	return Match(s, "1", "2", "3", "`", "ctrl+c")
+}
+
+// helpBindings returns contextual (key, description) pairs, including the
+// custom commands reachable by their configured key.
+func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []config.CustomCommand) []struct{ key, desc string } {
 	base := []struct{ key, desc string }{
 		{"h / l / left / right", "move focus (sidebar / list / detail)"},
 		{"j / k / up / down", "move up / down (in list)"},
@@ -136,5 +160,70 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 	}
 	_ = focus
 	_ = mode
-	return base
+	return withCustomBindings(base, keys, custom)
+}
+
+// withCustomBindings appends a row per reachable custom command and strips the
+// key it shadows from the built-in rows, so help never advertises a meaning a
+// key no longer has.
+func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom []config.CustomCommand) []struct{ key, desc string } {
+	names := map[string]string{}
+	var order []string
+	for _, cc := range custom {
+		if cc.Key == "" || keys.Reserved(cc.Key) {
+			continue
+		}
+		if _, dup := names[cc.Key]; dup {
+			continue
+		}
+		names[cc.Key] = cc.Name
+		order = append(order, cc.Key)
+	}
+	if len(order) == 0 {
+		return base
+	}
+	out := make([]struct{ key, desc string }, 0, len(base)+len(order))
+	for _, b := range base {
+		tokens := helpKeyTokens(b.key)
+		kept := make([]string, 0, len(tokens))
+		shadowed := false
+		for _, t := range tokens {
+			if _, ok := names[t]; ok {
+				shadowed = true
+				continue
+			}
+			kept = append(kept, t)
+		}
+		switch {
+		case !shadowed:
+			out = append(out, b)
+		case len(kept) > 0:
+			out = append(out, struct{ key, desc string }{strings.Join(kept, " / "), b.desc})
+		}
+	}
+	for _, k := range order {
+		desc := "custom command"
+		if names[k] != "" {
+			desc = "custom: " + names[k]
+		}
+		label := k
+		if label == " " {
+			label = "space"
+		}
+		out = append(out, struct{ key, desc string }{label, desc})
+	}
+	return out
+}
+
+// helpKeyTokens splits a help row's key column ("s / u / r") into the single
+// keys it documents, mapping the "space" label back to the key it stands for.
+func helpKeyTokens(s string) []string {
+	var out []string
+	for _, t := range strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == '/' }) {
+		if t == "space" {
+			t = " "
+		}
+		out = append(out, t)
+	}
+	return out
 }
