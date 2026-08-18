@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -526,6 +529,198 @@ func assertMarked(t *testing.T, pane string, got []string, want ...string) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("%s MarkedIDs = %v, want %v", pane, got, want)
+		}
+	}
+}
+
+func fakeCLI(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("caller")
+	}
+	bin := filepath.Join(filepath.Dir(file), "..", "backend", "fakecli", "container")
+	if _, err := os.Stat(bin); err != nil {
+		t.Fatalf("fake cli missing: %v", err)
+	}
+	return bin
+}
+
+func imagesModel(t *testing.T, items []backend.Image) Model {
+	t.Helper()
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems(items)
+	m.client = backend.NewClientWithBinary(fakeCLI(t))
+	return m
+}
+
+func findAction(items []actionItem, label string) func(Model) (Model, tea.Cmd) {
+	for _, it := range items {
+		if it.label == label {
+			return it.run
+		}
+	}
+	return nil
+}
+
+func lastCLICommand(m Model) string {
+	if m.client == nil {
+		return ""
+	}
+	log := m.client.CommandLog()
+	if len(log) == 0 {
+		return ""
+	}
+	return log[len(log)-1]
+}
+
+func TestImagesActionsMenu_listsImageMobility(t *testing.T) {
+	m := imagesModel(t, nil)
+	for _, label := range []string{"Tag…", "Save…", "Load…", "Push"} {
+		if findAction(m.buildActions(), label) == nil {
+			t.Fatalf("images actions menu missing %q", label)
+		}
+	}
+}
+
+func TestImagesAction_Tag_flow(t *testing.T) {
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	run := findAction(m.buildActions(), "Tag…")
+	if run == nil {
+		t.Fatal("Tag action missing")
+	}
+	x, _ := run(m)
+	mm := x
+	if mm.promptKind != "tag" || mm.promptRef != "alpine:latest" {
+		t.Fatalf("tag prompt state: kind=%q ref=%q", mm.promptKind, mm.promptRef)
+	}
+	next, cmd := mm.handlePrompt(promptDoneMsg{kind: "tag", text: "alpine:probe"})
+	msg := cmd()
+	done := msg.(actionDoneMsg)
+	if done.err != nil {
+		t.Fatal(done.err)
+	}
+	res, _ := next.Update(done)
+	out := res.(Model)
+	if out.status != "tag alpine:probe ok" {
+		t.Fatalf("status: got %q", out.status)
+	}
+	if got := lastCLICommand(out); got != "container image tag alpine:latest alpine:probe" {
+		t.Fatalf("tag argument order: got %q", got)
+	}
+}
+
+func TestImagesAction_Save_flow(t *testing.T) {
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	run := findAction(m.buildActions(), "Save…")
+	next, _ := run(m)
+	mm := next
+	if mm.promptKind != "save to" || mm.promptRef != "alpine:latest" {
+		t.Fatalf("save prompt state: kind=%q ref=%q", mm.promptKind, mm.promptRef)
+	}
+	res, cmd2 := mm.handlePrompt(promptDoneMsg{kind: "save to", text: "/tmp/out.tar"})
+	done := cmd2().(actionDoneMsg)
+	if done.err != nil {
+		t.Fatal(done.err)
+	}
+	out, _ := res.Update(done)
+	om := out.(Model)
+	if got := lastCLICommand(om); got != "container image save --output /tmp/out.tar alpine:latest" {
+		t.Fatalf("save argument order: got %q", got)
+	}
+}
+
+func TestImagesAction_Load_flow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "in.tar")
+	if err := os.WriteFile(path, []byte("oci-archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := imagesModel(t, nil)
+	run := findAction(m.buildActions(), "Load…")
+	next, _ := run(m)
+	mm := next
+	res, cmd2 := mm.handlePrompt(promptDoneMsg{kind: "load from", text: path})
+	done := cmd2().(actionDoneMsg)
+	if done.err != nil {
+		t.Fatal(done.err)
+	}
+	out, _ := res.Update(done)
+	om := out.(Model)
+	if got := lastCLICommand(om); got != "container image load --input "+path {
+		t.Fatalf("load argument order: got %q", got)
+	}
+}
+
+func TestImagesAction_Load_missingFile(t *testing.T) {
+	m := imagesModel(t, nil)
+	run := findAction(m.buildActions(), "Load…")
+	next, _ := run(m)
+	mm := next
+	res, cmd := mm.handlePrompt(promptDoneMsg{kind: "load from", text: "/no/such/archive.tar"})
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected a missing-file error")
+	}
+	if !strings.Contains(done.err.Error(), "no such file") {
+		t.Fatalf("want a clear no-such-file error, got: %v", done.err)
+	}
+	out, _ := res.Update(done)
+	om := out.(Model)
+	if om.lastErr == nil || !strings.Contains(om.lastErr.Error(), "no such file") {
+		t.Fatalf("footer error must surface the missing file, got: %v", om.lastErr)
+	}
+	if got := lastCLICommand(om); got != "" {
+		t.Fatalf("missing path must not shell out, but recorded %q", got)
+	}
+}
+
+func TestImagesAction_Push_flow(t *testing.T) {
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"}})
+	run := findAction(m.buildActions(), "Push")
+	next, cmd := run(m)
+	done := cmd().(actionDoneMsg)
+	if done.err != nil {
+		t.Fatal(done.err)
+	}
+	out, _ := next.Update(done)
+	om := out.(Model)
+	if om.status != "push vessel/alpine:probe ok" {
+		t.Fatalf("status: got %q", om.status)
+	}
+	if got := lastCLICommand(om); got != "container image push vessel/alpine:probe" {
+		t.Fatalf("push argument order: got %q", got)
+	}
+}
+
+func TestImagesAction_Push_authFailureNamesLogin(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	run := findAction(m.buildActions(), "Push")
+	next, cmd := run(m)
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected an auth failure")
+	}
+	out, _ := next.Update(done)
+	om := out.(Model)
+	if om.lastErr == nil || !strings.Contains(om.lastErr.Error(), "container registry login") {
+		t.Fatalf("push auth error must name the login command, got: %v", om.lastErr)
+	}
+}
+
+func TestImagesAction_nilSelectionGuards(t *testing.T) {
+	m := imagesModel(t, nil)
+	for _, label := range []string{"Tag…", "Save…", "Push"} {
+		run := findAction(m.buildActions(), label)
+		if run == nil {
+			t.Fatalf("missing action %q", label)
+		}
+		next, _ := run(m)
+		mm := next
+		if mm.status != "nothing selected" {
+			t.Fatalf("%s with no selection: status=%q want nothing selected", label, mm.status)
 		}
 	}
 }
