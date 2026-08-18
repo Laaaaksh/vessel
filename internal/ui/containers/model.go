@@ -58,10 +58,19 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the container list and reapplies the current filter.
+// SetItems replaces the container list, reapplies the current filter, and drops
+// marks for containers it no longer contains, so a mark can never outlive the
+// row it points at.
 func (m Model) SetItems(items []backend.Container) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
+	marked := make(map[string]bool, len(m.marked))
+	for _, c := range items {
+		if m.marked[c.ID] {
+			marked[c.ID] = true
+		}
+	}
+	m.marked = marked
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}

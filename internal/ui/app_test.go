@@ -196,11 +196,11 @@ func enterKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 }
 
-// Marks key off identities that outlive a delete (an image digest, a volume
-// name), so a confirmed delete must drop them: otherwise recreating the same
-// image or volume resurfaces the marks and re-arms a bulk delete nobody asked
-// for.
-func TestImageConfirmedDeleteClearsMarks(t *testing.T) {
+// Marks key off identities that outlive a removal (an image digest, a volume
+// name). The refresh that follows a delete is what drops them, so recreating
+// the same image or volume cannot resurface a mark and re-arm a bulk delete
+// nobody asked for.
+func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
@@ -209,19 +209,17 @@ func TestImageConfirmedDeleteClearsMarks(t *testing.T) {
 		{ID: "b", Repository: "busybox", Tag: "latest"},
 	}
 	m.imgPanel = m.imgPanel.SetItems(items)
-	next, _ := m.handleKey(spaceKey())
+	m = markRows(t, m, 2)
+	next, _ := m.handleKey(keyMsg("d"))
 	m = next.(Model)
-	next, _ = m.handleKey(keyMsg("j"))
-	m = next.(Model)
-	next, _ = m.handleKey(spaceKey())
-	m = next.(Model)
-	next, _ = m.handleKey(keyMsg("d"))
-	m = next.(Model)
+	assertPending(t, m, deleteImages, "a", "b")
 	next, _ = m.handleKey(keyMsg("y"))
 	m = next.(Model)
 	if m.mode != modeBrowse {
 		t.Fatalf("mode=%v want browse after confirm", m.mode)
 	}
+	// The delete lands and the refresh reports both images gone.
+	m.imgPanel = m.imgPanel.SetItems(nil)
 	if got := m.imgPanel.MarkedIDs(); len(got) != 0 {
 		t.Fatalf("marks survived the delete: %v", got)
 	}
@@ -235,22 +233,19 @@ func TestImageConfirmedDeleteClearsMarks(t *testing.T) {
 	}
 }
 
-func TestVolumeConfirmedDeleteClearsMarks(t *testing.T) {
+func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
 	m.volPanel = m.volPanel.SetItems(items)
-	next, _ := m.handleKey(spaceKey())
+	m = markRows(t, m, 2)
+	next, _ := m.handleKey(keyMsg("d"))
 	m = next.(Model)
-	next, _ = m.handleKey(keyMsg("j"))
-	m = next.(Model)
-	next, _ = m.handleKey(spaceKey())
-	m = next.(Model)
-	next, _ = m.handleKey(keyMsg("d"))
-	m = next.(Model)
+	assertPending(t, m, deleteVolumes, "data", "logs")
 	next, _ = m.handleKey(keyMsg("y"))
 	m = next.(Model)
+	m.volPanel = m.volPanel.SetItems(nil)
 	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
 		t.Fatalf("marks survived the delete: %v", got)
 	}
@@ -260,7 +255,7 @@ func TestVolumeConfirmedDeleteClearsMarks(t *testing.T) {
 	}
 }
 
-func TestContainerConfirmedDeleteClearsMarks(t *testing.T) {
+func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
 	items := []backend.Container{
@@ -268,29 +263,106 @@ func TestContainerConfirmedDeleteClearsMarks(t *testing.T) {
 		{ID: "2", Name: "db", Status: "running"},
 	}
 	m.cntPanel = m.cntPanel.SetItems(items)
-	next, _ := m.handleKey(spaceKey())
-	m = next.(Model)
-	next, _ = m.handleKey(keyMsg("j"))
-	m = next.(Model)
-	next, _ = m.handleKey(spaceKey())
-	m = next.(Model)
-	next, _ = m.handleKey(keyMsg("d"))
+	m = markRows(t, m, 2)
+	next, _ := m.handleKey(keyMsg("d"))
 	m = next.(Model)
 	assertPending(t, m, deleteContainers, "1", "2")
 	next, _ = m.handleKey(keyMsg("y"))
 	m = next.(Model)
+	m.cntPanel = m.cntPanel.SetItems(nil)
 	if got := m.cntPanel.MarkedIDs(); len(got) != 0 {
 		t.Fatalf("marks survived the delete: %v", got)
 	}
+	m.cntPanel = m.cntPanel.SetItems(items)
+	if got := m.cntPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks resurfaced after recreate: %v", got)
+	}
 }
 
-// A mark hidden behind an active filter is not a delete target, but it must
-// still be dropped: it would otherwise reappear the moment the filter clears.
-func TestVolumeConfirmedDeleteClearsMarksHiddenByFilter(t *testing.T) {
+// Prune removes the same objects without passing through the confirmation, so
+// the mark drop has to hold there too.
+func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
+	m := New()
+	m.activeView = ViewVolumes
+	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
+	m.volPanel = m.volPanel.SetItems(items)
+	m = markRows(t, m, 2)
+	// `p` prunes both volumes; the refresh it triggers reports an empty list.
+	m.volPanel = m.volPanel.SetItems(nil)
+	// Both are recreated under the same names.
+	m.volPanel = m.volPanel.SetItems(items)
+	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks resurfaced after prune + recreate: %v", got)
+	}
+	next, _ := m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteVolumes, "data")
+	if m.pendingLbl != "data" {
+		t.Fatalf("pendingLbl=%q: a resurfaced mark turned d into a bulk delete", m.pendingLbl)
+	}
+}
+
+// A delete that fails leaves its objects in place, so the marks must still be
+// there afterwards and the action must stay retryable without re-marking.
+func TestFailedDeleteKeepsMarks(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	items := []backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	}
+	m.imgPanel = m.imgPanel.SetItems(items)
+	m = markRows(t, m, 2)
+	next, _ := m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	// The delete failed (image still referenced), so the refresh returns both.
+	m.imgPanel = m.imgPanel.SetItems(items)
+	got := m.imgPanel.MarkedIDs()
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("MarkedIDs after a failed delete = %v, want [a b]", got)
+	}
+}
+
+// The cursor row wins over a single mark, so this delete never touches "b" -
+// and a mark on an object the delete left alone must survive it.
+func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	items := []backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	}
+	m.imgPanel = m.imgPanel.SetItems(items)
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("k"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteImages, "a")
+	next, _ = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	m.imgPanel = m.imgPanel.SetItems(items[1:])
+	got := m.imgPanel.MarkedIDs()
+	if len(got) != 1 || got[0] != "b" {
+		t.Fatalf("MarkedIDs = %v, want [b]: deleting alpine must not drop busybox's mark", got)
+	}
+}
+
+// A mark hidden behind an active filter is not a delete target: it survives a
+// delete of something else, and disappears only when its own volume does.
+func TestVolumeMarkHiddenByFilterTracksItsOwnVolume(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
-	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
+	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
+	m.volPanel = m.volPanel.SetItems(items)
 	m.volPanel, _ = m.volPanel.Update(spaceKey())
 	m.volPanel, _ = m.volPanel.Update(keyMsg("j"))
 	m.volPanel, _ = m.volPanel.Update(spaceKey())
@@ -304,10 +376,34 @@ func TestVolumeConfirmedDeleteClearsMarksHiddenByFilter(t *testing.T) {
 	assertPending(t, m, deleteVolumes, "data")
 	next, _ = m.handleKey(keyMsg("y"))
 	m = next.(Model)
+	// "data" is gone, "logs" is untouched behind the filter.
+	m.volPanel = m.volPanel.SetItems(items[1:])
 	m.volPanel, _ = m.volPanel.Update(keyMsg("esc"))
-	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
-		t.Fatalf("mark hidden by the filter survived the delete: %v", got)
+	got := m.volPanel.MarkedIDs()
+	if len(got) != 1 || got[0] != "logs" {
+		t.Fatalf("MarkedIDs = %v, want [logs]", got)
 	}
+	// Now "logs" goes away too, then both come back.
+	m.volPanel = m.volPanel.SetItems(nil)
+	m.volPanel = m.volPanel.SetItems(items)
+	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks resurfaced after recreate: %v", got)
+	}
+}
+
+// markRows marks the first n rows of the active panel with space, moving the
+// cursor down between presses the way a user would.
+func markRows(t *testing.T, m Model, n int) Model {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			next, _ := m.handleKey(keyMsg("j"))
+			m = next.(Model)
+		}
+		next, _ := m.handleKey(spaceKey())
+		m = next.(Model)
+	}
+	return m
 }
 
 func TestCancelledDeleteKeepsMarks(t *testing.T) {

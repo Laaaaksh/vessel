@@ -94,6 +94,48 @@ func TestVolumeMarksDropWhenRefreshRemovesThem(t *testing.T) {
 	if got := m.MarkedIDs(); len(got) != 0 {
 		t.Fatalf("stale mark survived refresh: %v", got)
 	}
+	// data is recreated under the same name: the old mark must not resurface,
+	// whichever path removed it (delete, prune, another terminal).
+	m = m.SetItems([]backend.Volume{vol("data"), vol("logs")})
+	if got := m.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("mark resurfaced after the volume was recreated: %v", got)
+	}
+	if strings.Contains(m.ListView(80, 10), "*") {
+		t.Fatal("recreated volume still renders a mark")
+	}
+}
+
+func TestVolumeMarksSurviveARefreshThatKeepsThem(t *testing.T) {
+	items := []backend.Volume{vol("data"), vol("logs")}
+	m := New().SetItems(items)
+	m, _ = m.Update(spaceKey())
+	m = m.SetItems(items)
+	got := m.MarkedIDs()
+	if len(got) != 1 || got[0] != "data" {
+		t.Fatalf("MarkedIDs = %v, want [data]", got)
+	}
+}
+
+// A mark hidden by an active filter still tracks its own volume: it survives a
+// refresh that keeps the volume, and dies with one that drops it.
+func TestVolumeMarksHiddenByFilterStillTrackTheirVolume(t *testing.T) {
+	m := New().SetItems([]backend.Volume{vol("data"), vol("logs")})
+	m, _ = m.Update(spaceKey())
+	m, _ = m.Update(keyMsg("j"))
+	m, _ = m.Update(spaceKey())
+	m = typeFilter(m, "data")
+	m = m.SetItems([]backend.Volume{vol("data"), vol("logs")})
+	m, _ = m.Update(keyMsg("esc"))
+	if got := m.MarkedIDs(); len(got) != 2 {
+		t.Fatalf("MarkedIDs = %v, want both marks kept across the refresh", got)
+	}
+	m = typeFilter(m, "data")
+	m = m.SetItems([]backend.Volume{vol("data")})
+	m, _ = m.Update(keyMsg("esc"))
+	got := m.MarkedIDs()
+	if len(got) != 1 || got[0] != "data" {
+		t.Fatalf("MarkedIDs = %v, want [data]: the hidden logs mark outlived its volume", got)
+	}
 }
 
 func TestVolumeMarksOnlySurfaceItemsInFilteredView(t *testing.T) {

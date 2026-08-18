@@ -49,12 +49,12 @@ func img(id, repo string) backend.Image {
 func TestImageSpaceTogglesMarkOnSelected(t *testing.T) {
 	m := New().SetItems([]backend.Image{img("a", "alpine"), img("b", "busybox")})
 	m, _ = m.Update(spaceKey())
-	if got := m.marked["a"]; !got {
-		t.Fatal("space should mark the selected image")
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("space should mark the selected image, got %v", got)
 	}
 	m, _ = m.Update(spaceKey())
-	if m.marked["a"] {
-		t.Fatal("space on a marked image should unmark it")
+	if got := m.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("space on a marked image should unmark it, got %v", got)
 	}
 }
 
@@ -93,6 +93,65 @@ func TestImageMarksDropWhenRefreshRemovesThem(t *testing.T) {
 	m = m.SetItems([]backend.Image{img("b", "busybox")})
 	if got := m.MarkedIDs(); len(got) != 0 {
 		t.Fatalf("stale mark survived refresh: %v", got)
+	}
+	// Alpine is pulled again under the same digest: the old mark must not
+	// resurface, whichever path removed it (delete, prune, another terminal).
+	m = m.SetItems([]backend.Image{img("a", "alpine"), img("b", "busybox")})
+	if got := m.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("mark resurfaced after the image was recreated: %v", got)
+	}
+	if strings.Contains(m.ListView(80, 10), "*") {
+		t.Fatal("recreated image still renders a mark")
+	}
+}
+
+func TestImageMarksSurviveARefreshThatKeepsThem(t *testing.T) {
+	items := []backend.Image{img("a", "alpine"), img("b", "busybox")}
+	m := New().SetItems(items)
+	m, _ = m.Update(spaceKey())
+	m = m.SetItems(items)
+	got := m.MarkedIDs()
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("MarkedIDs = %v, want [a]", got)
+	}
+}
+
+// Two references can resolve to one digest, so marks key on digest+reference:
+// marking alpine:latest must not also mark alpine:3.22.
+func TestImageSharedDigestMarksOneRowAtATime(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		{ID: "sha256:same", Repository: "alpine", Tag: "latest"},
+		{ID: "sha256:same", Repository: "alpine", Tag: "3.22"},
+	})
+	m, _ = m.Update(spaceKey())
+	if n := strings.Count(m.ListView(80, 10), "*"); n != 1 {
+		t.Fatalf("%d rows marked, want 1: one press must mark one row", n)
+	}
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "sha256:same" {
+		t.Fatalf("MarkedIDs = %v, want [sha256:same]", got)
+	}
+	// Marking the second reference too must not repeat the digest: the delete
+	// takes digests, and `image delete <d> <d>` fails on its second argument.
+	m, _ = m.Update(keyMsg("j"))
+	m, _ = m.Update(spaceKey())
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "sha256:same" {
+		t.Fatalf("MarkedIDs = %v, want the digest exactly once", got)
+	}
+}
+
+// Dangling images all render as an empty reference, so the reference alone is
+// not a usable key either: each row keeps its own mark.
+func TestImageDanglingRowsMarkIndependently(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		{ID: "sha256:one"},
+		{ID: "sha256:two"},
+	})
+	m, _ = m.Update(spaceKey())
+	if n := strings.Count(m.ListView(80, 10), "*"); n != 1 {
+		t.Fatalf("%d dangling rows marked, want 1", n)
+	}
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "sha256:one" {
+		t.Fatalf("MarkedIDs = %v, want [sha256:one]", got)
 	}
 }
 

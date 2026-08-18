@@ -52,10 +52,18 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the volume list.
+// SetItems replaces the volume list and drops marks for volumes it no longer
+// contains, so a mark can never outlive the row it points at.
 func (m Model) SetItems(items []backend.Volume) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
+	marked := make(map[string]bool, len(m.marked))
+	for _, v := range items {
+		if m.marked[v.Name] {
+			marked[v.Name] = true
+		}
+	}
+	m.marked = marked
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}

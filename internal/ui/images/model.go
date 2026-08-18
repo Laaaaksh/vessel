@@ -52,10 +52,24 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the image list.
+// markKey identifies a row for multi-select. Two references can resolve to the
+// same digest, so the id alone would key both rows to a single mark.
+func markKey(img backend.Image) string {
+	return img.ID + "\x00" + backend.FormatRef(img)
+}
+
+// SetItems replaces the image list and drops marks for images it no longer
+// contains, so a mark can never outlive the row it points at.
 func (m Model) SetItems(items []backend.Image) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
+	marked := make(map[string]bool, len(m.marked))
+	for _, img := range items {
+		if k := markKey(img); m.marked[k] {
+			marked[k] = true
+		}
+	}
+	m.marked = marked
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
@@ -71,11 +85,14 @@ func (m Model) Selected() *backend.Image {
 	return &img
 }
 
-// MarkedIDs returns multi-selected image IDs.
+// MarkedIDs returns multi-selected image IDs, each at most once: several
+// references can share one digest, and the delete takes digests.
 func (m Model) MarkedIDs() []string {
 	var out []string
+	seen := make(map[string]bool)
 	for _, img := range m.filtered {
-		if m.marked[img.ID] {
+		if m.marked[markKey(img)] && !seen[img.ID] {
+			seen[img.ID] = true
 			out = append(out, img.ID)
 		}
 	}
@@ -155,10 +172,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.marked == nil {
 				m.marked = make(map[string]bool)
 			}
-			if m.marked[sel.ID] {
-				delete(m.marked, sel.ID)
+			k := markKey(*sel)
+			if m.marked[k] {
+				delete(m.marked, k)
 			} else {
-				m.marked[sel.ID] = true
+				m.marked[k] = true
 			}
 		}
 	}
@@ -209,7 +227,7 @@ func (m Model) ListView(width, height int) string {
 	for i := start; i < end; i++ {
 		img := m.filtered[i]
 		mark := " "
-		if m.marked[img.ID] {
+		if m.marked[markKey(img)] {
 			mark = "*"
 		}
 		line := fmt.Sprintf("%s%s %-*s %s",
