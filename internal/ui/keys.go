@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Laaaaksh/vessel/internal/config"
 )
@@ -165,16 +166,105 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 	return withCustomBindings(base, keys, custom)
 }
 
+// runtimeKeyNames are the multi-rune key names tea.KeyPressMsg.String() emits.
+// Anything else it emits is a single rune (the key's own text), so a configured
+// key outside this set that is longer than one rune can never match a keypress.
+var runtimeKeyNames = map[string]bool{
+	"enter": true, "tab": true, "backspace": true, "esc": true, "space": true,
+	"up": true, "down": true, "left": true, "right": true, "begin": true,
+	"find": true, "insert": true, "delete": true, "select": true,
+	"pgup": true, "pgdown": true, "home": true, "end": true,
+	"f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true,
+	"f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true,
+	"f13": true, "f14": true, "f15": true, "f16": true, "f17": true,
+	"f18": true, "f19": true, "f20": true,
+}
+
+// keyModifiers are the modifier prefixes tea.KeyPressMsg.String() emits, in the
+// "ctrl+shift+a" form.
+var keyModifiers = map[string]bool{
+	"ctrl": true, "alt": true, "shift": true,
+	"meta": true, "hyper": true, "super": true,
+}
+
+// keyAliases maps spellings a user plausibly writes in config.toml onto the one
+// the runtime produces.
+var keyAliases = map[string]string{
+	"spacebar": "space", "escape": "esc", "return": "enter", "del": "delete",
+	"pgdn": "pgdown", "pagedown": "pgdown", "pagedn": "pgdown",
+	"pageup": "pgup", "bs": "backspace",
+}
+
+// normalizeKey rewrites a configured key onto the spelling
+// tea.KeyPressMsg.String() produces, so config.toml and the runtime agree: a
+// literal space and "space" are the same key, "ctrl-x" is "ctrl+x", and named
+// keys are case-insensitive (single characters stay case-sensitive, since G and
+// g are different keys).
+func normalizeKey(s string) string {
+	if s == "" {
+		return ""
+	}
+	if strings.TrimSpace(s) == "" {
+		return "space"
+	}
+	prefix, base := "", strings.TrimSpace(s)
+	for {
+		i := strings.IndexAny(base, "+-")
+		if i <= 0 || i == len(base)-1 {
+			break
+		}
+		mod := strings.ToLower(base[:i])
+		if !keyModifiers[mod] {
+			break
+		}
+		prefix += mod + "+"
+		base = base[i+1:]
+	}
+	if alias, ok := keyAliases[strings.ToLower(base)]; ok {
+		base = alias
+	} else if utf8.RuneCountInString(base) > 1 {
+		base = strings.ToLower(base)
+	}
+	return prefix + base
+}
+
+// producibleKey reports whether a normalized key can ever be produced by a
+// keypress, so help never advertises a binding that cannot fire.
+func producibleKey(k string) bool {
+	base := k
+	for {
+		i := strings.Index(base, "+")
+		if i <= 0 || i == len(base)-1 {
+			break
+		}
+		if !keyModifiers[base[:i]] {
+			break
+		}
+		base = base[i+1:]
+	}
+	return runtimeKeyNames[base] || utf8.RuneCountInString(base) == 1
+}
+
+// customKey returns the key a configured custom command fires on, or "" when it
+// can never fire: no key, a spelling no keypress produces, a reserved key, or
+// no command to run. Dispatch and help both resolve through this, so they can
+// never disagree about which keys a custom command has taken over.
+func customKey(cc config.CustomCommand, keys KeyMap) string {
+	k := normalizeKey(cc.Key)
+	if k == "" || cc.Command == "" || !producibleKey(k) || keys.Reserved(k) {
+		return ""
+	}
+	return k
+}
+
 // customCommandFor returns the command that fires when key k is pressed, or ""
-// when none does: no entry configured for k, k is reserved, or the entry that
-// claims k has no command. Dispatch and help both resolve through this, so they
-// can never disagree about which keys a custom command has taken over.
+// when none does.
 func customCommandFor(custom []config.CustomCommand, keys KeyMap, k string) string {
-	if k == "" || keys.Reserved(k) {
+	if k == "" {
 		return ""
 	}
 	for _, cc := range custom {
-		if cc.Key == k {
+		if customKey(cc, keys) == k {
 			return cc.Command
 		}
 	}
@@ -189,14 +279,15 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 	names := map[string]string{}
 	var order []string
 	for _, cc := range custom {
-		if customCommandFor(custom, keys, cc.Key) == "" {
+		k := customKey(cc, keys)
+		if k == "" {
 			continue
 		}
-		if _, dup := names[cc.Key]; dup {
+		if _, dup := names[k]; dup {
 			continue
 		}
-		names[cc.Key] = cc.Name
-		order = append(order, cc.Key)
+		names[k] = cc.Name
+		order = append(order, k)
 	}
 	if len(order) == 0 {
 		return base
@@ -225,10 +316,9 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 }
 
 // helpKeyTokens splits a help row's key column ("pgup / pgdown", "tab / 1 2 3")
-// into the single keys it documents. Only " / " separates keys, so the filter
-// row ("/") yields the key itself rather than nothing. A token is already the
-// key as KeyPressMsg.String() reports it - "space" is the space bar's own name,
-// not a stand-in for a literal " " - so no token needs translating.
+// into the keys it documents, spelled the way a keypress spells them. Only
+// " / " separates keys, so the filter row ("/") yields the key itself rather
+// than nothing.
 func helpKeyTokens(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, " / ") {

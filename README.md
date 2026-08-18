@@ -87,6 +87,7 @@ shell = "/bin/sh"
 
 # [[custom_commands]]
 # name = "inspect"
+# key = "z"          # optional: "z", "space", "enter", "f5", "ctrl+z"
 # command = "container inspect {{.ID}}"
 ```
 

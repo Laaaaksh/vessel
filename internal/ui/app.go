@@ -127,7 +127,10 @@ func (k deleteKind) isPrune() bool {
 }
 
 const (
-	// confirmTimeout bounds a confirmed single-resource action (delete, stop).
+	// lifecycleTimeout bounds a container lifecycle verb (stop, start, restart),
+	// whether or not it went through the confirm modal.
+	lifecycleTimeout = 30 * time.Second
+	// confirmTimeout bounds a confirmed removal.
 	confirmTimeout = 60 * time.Second
 	// globalTimeout bounds whole-store verbs such as prune, which sweep every
 	// container/image/volume and take far longer than a single removal.
@@ -149,6 +152,7 @@ type Model struct {
 	layout     LayoutMode
 	mode       Mode
 	showHelp   bool
+	helpScroll int
 	showCmdLog bool
 
 	cntPanel containers.Model
@@ -684,6 +688,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case Match(k, m.keys.Help):
 		m.showHelp = !m.showHelp
+		m.helpScroll = 0
 		return m, nil
 	case Match(k, m.keys.Escape):
 		if m.showHelp {
@@ -722,6 +727,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.showHelp {
+		page := helpVisibleRows(m.height)
+		switch {
+		case m.keys.NavDown(k):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll + 1)
+		case m.keys.NavUp(k):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll - 1)
+		case Match(k, m.keys.PageDown, m.keys.HalfDown):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll + page)
+		case Match(k, m.keys.PageUp, m.keys.HalfUp):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll - page)
+		case Match(k, m.keys.GotoTop):
+			m.helpScroll = 0
+		case Match(k, m.keys.GotoBottom):
+			m.helpScroll = m.clampHelpScroll(len(m.helpBindings()))
+		}
 		return m, nil
 	}
 
@@ -1016,7 +1036,7 @@ func pendingAction(kind deleteKind) (label, done string, timeout time.Duration) 
 	case pruneVolumes:
 		return "prune volumes", "pruned", globalTimeout
 	case stopContainer:
-		return "stop", "stopped", confirmTimeout
+		return "stop", "stopped", lifecycleTimeout
 	default:
 		return "delete", "deleted", confirmTimeout
 	}
@@ -1078,7 +1098,7 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 	name := sel.Name
 	m.status = verb + " " + name + "…"
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancel()
 		if err := fn(ctx, id); err != nil {
 			return actionDoneMsg{err: err}
@@ -1528,17 +1548,49 @@ func (m Model) cmdLogView(height int) string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
+// helpVisibleRows is how many binding rows fit beside helpView's fixed chrome
+// (title, view/focus line, blank, blank, close hint). lipgloss pads a box to its
+// declared height but never truncates, so a help list longer than this would
+// render past the alt screen and lose its last rows.
+func helpVisibleRows(height int) int {
+	return max(1, height-5)
+}
+
+func (m Model) helpBindings() []struct{ key, desc string } {
+	return helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands)
+}
+
+func (m Model) clampHelpScroll(v int) int {
+	overflow := max(0, len(m.helpBindings())-helpVisibleRows(m.height))
+	return max(0, min(v, overflow))
+}
+
 func (m Model) helpView() string {
+	bindings := m.helpBindings()
+	start := m.clampHelpScroll(m.helpScroll)
+	end := min(len(bindings), start+helpVisibleRows(m.height))
+
+	keyW := 0
+	for _, b := range bindings {
+		keyW = max(keyW, lipgloss.Width(b.key))
+	}
+	keyW = min(keyW, max(1, m.width/2))
+	descW := max(1, m.width-keyW-1)
+
 	var rows []string
 	rows = append(rows, m.st.title.Render("vessel — keybindings"))
 	rows = append(rows, m.st.dimText.Render(fmt.Sprintf("view=%s focus=%s", m.viewName(), m.focus.String())))
 	rows = append(rows, "")
-	for _, b := range helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands) {
-		key := m.st.helpText.Width(22).Render(b.key)
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, key, b.desc))
+	for _, b := range bindings[start:end] {
+		key := m.st.helpText.Render(uiutil.Pad(b.key, keyW))
+		rows = append(rows, key+" "+uiutil.Truncate(b.desc, descW))
 	}
 	rows = append(rows, "")
-	rows = append(rows, m.st.dimText.Render("press ? or esc to close"))
+	hint := "press ? or esc to close"
+	if end-start < len(bindings) {
+		hint = fmt.Sprintf("%d-%d of %d — j/k scroll — press ? or esc to close", start+1, end, len(bindings))
+	}
+	rows = append(rows, m.st.dimText.Render(uiutil.Truncate(hint, m.width)))
 	return lipgloss.NewStyle().
 		Width(m.width).Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center).
