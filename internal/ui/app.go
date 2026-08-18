@@ -592,6 +592,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ViewImages:
 		switch {
 		case Match(k, m.keys.Remove):
+			marked := m.imgPanel.MarkedIDs()
+			if len(marked) > 1 {
+				m.mode = modeConfirmDelete
+				m.pending = "bulkimg:" + strings.Join(marked, ",")
+				m.pendingLbl = fmt.Sprintf("%d images", len(marked))
+				return m, nil
+			}
 			sel := m.imgPanel.Selected()
 			if sel == nil {
 				return m, nil
@@ -619,6 +626,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ViewVolumes:
 		switch {
 		case Match(k, m.keys.Remove):
+			marked := m.volPanel.MarkedIDs()
+			if len(marked) > 1 {
+				m.mode = modeConfirmDelete
+				m.pending = "bulkvol:" + strings.Join(marked, ",")
+				m.pendingLbl = fmt.Sprintf("%d volumes", len(marked))
+				return m, nil
+			}
 			sel := m.volPanel.Selected()
 			if sel == nil {
 				return m, nil
@@ -742,6 +756,12 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 			err = client.RemoveImage(ctx, strings.TrimPrefix(pending, "image:"))
 		case strings.HasPrefix(pending, "volume:"):
 			err = client.RemoveVolume(ctx, strings.TrimPrefix(pending, "volume:"))
+		case strings.HasPrefix(pending, "bulkimg:"):
+			ids := strings.Split(strings.TrimPrefix(pending, "bulkimg:"), ",")
+			err = client.RemoveImage(ctx, ids...)
+		case strings.HasPrefix(pending, "bulkvol:"):
+			names := strings.Split(strings.TrimPrefix(pending, "bulkvol:"), ",")
+			err = client.RemoveVolume(ctx, names...)
 		case strings.HasPrefix(pending, "bulk:"):
 			ids := strings.Split(strings.TrimPrefix(pending, "bulk:"), ",")
 			for _, id := range ids {

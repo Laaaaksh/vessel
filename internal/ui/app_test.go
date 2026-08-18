@@ -75,6 +75,90 @@ func TestConfirmModalMode(t *testing.T) {
 	}
 }
 
+func TestImageBulkDeleteConfirm(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	})
+	var cmd tea.Cmd
+	next, stepCmd := m.handleKey(spaceKey())
+	cmd = stepCmd
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("space should not issue a command, got %v", cmd)
+	}
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("mode=%v want confirm delete", m.mode)
+	}
+	if m.pending != "bulkimg:a,b" {
+		t.Fatalf("pending=%q want bulkimg:a,b", m.pending)
+	}
+	if m.pendingLbl != "2 images" {
+		t.Fatalf("pendingLbl=%q want '2 images'", m.pendingLbl)
+	}
+	if !strings.Contains(ansi.Strip(viewString(m.View())), "Delete 2 images?") {
+		t.Fatalf("confirm modal should name the count, got %q", ansi.Strip(viewString(m.View())))
+	}
+	next, _ = m.handleKey(keyMsg("n"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("cancel should return to browse, got %v", m.mode)
+	}
+}
+
+func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
+	m := New()
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "a", Repository: "alpine", Tag: "latest"}})
+	next, _ := m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("mode=%v want confirm delete", m.mode)
+	}
+	if m.pending != "image:a" {
+		t.Fatalf("pending=%q want image:a", m.pending)
+	}
+}
+
+func TestVolumeBulkDeleteConfirm(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewVolumes
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
+	var next tea.Model
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("mode=%v want confirm delete", m.mode)
+	}
+	if m.pending != "bulkvol:data,logs" {
+		t.Fatalf("pending=%q want bulkvol:data,logs", m.pending)
+	}
+	if m.pendingLbl != "2 volumes" {
+		t.Fatalf("pendingLbl=%q want '2 volumes'", m.pendingLbl)
+	}
+	if !strings.Contains(ansi.Strip(viewString(m.View())), "Delete 2 volumes?") {
+		t.Fatalf("confirm modal should name the count, got %q", ansi.Strip(viewString(m.View())))
+	}
+}
+
 func viewString(v tea.View) string {
 	return v.Content
 }
@@ -88,4 +172,10 @@ func keyMsg(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg(tea.Key{Code: r, Text: s})
 	}
 	return tea.KeyPressMsg(tea.Key{Text: s})
+}
+
+// spaceKey mirrors a real space bar press: KeyPressMsg.String() returns
+// "space", never a literal space.
+func spaceKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "})
 }
