@@ -151,3 +151,23 @@ func TestImageSize_descriptorFallbackWhenVariantsSizeless(t *testing.T) {
 		t.Errorf("imageSize = %d, want descriptor fallback 777", got)
 	}
 }
+
+func TestClient_ImageInspectIDMatchesListID(t *testing.T) {
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	list, err := c.ListImages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) == 0 {
+		t.Fatal("expected at least one image")
+	}
+	ins, err := c.ImageInspect(ctx, FormatRef(list[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ins.ID != list[0].ID {
+		t.Errorf("inspect ID %q != list ID %q; the UI keys its inspect cache on this identity", ins.ID, list[0].ID)
+	}
+}

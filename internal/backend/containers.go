@@ -240,11 +240,3 @@ func FormatNetworks(nets []Network) string {
 	}
 	return strings.Join(parts, ", ")
 }
-
-// FormatMemoryBytes renders a byte count using the human-readable helper.
-func FormatMemoryBytes(b uint64) string {
-	if b == 0 {
-		return "-"
-	}
-	return humanBytes(b)
-}
