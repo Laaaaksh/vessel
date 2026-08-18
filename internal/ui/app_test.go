@@ -660,12 +660,8 @@ func TestHelpBindingsCoverAllKeys(t *testing.T) {
 	tokens := map[string]bool{}
 	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
 		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
-			for _, tok := range strings.FieldsFunc(b.key, func(r rune) bool {
-				return r == ' ' || r == '←' || r == '→' || r == '↑' || r == '↓'
-			}) {
-				if tok != "" {
-					tokens[tok] = true
-				}
+			for _, tok := range helpKeyTokens(b.key) {
+				tokens[tok] = true
 			}
 		}
 	}
@@ -678,13 +674,23 @@ func TestHelpBindingsCoverAllKeys(t *testing.T) {
 		if val == "" {
 			continue
 		}
-		needle := val
-		if val == " " {
-			needle = "space"
-		}
-		if !tokens[needle] {
+		if !tokens[val] {
 			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
 		}
+	}
+}
+
+func TestHelpKeyTokens_separatorIsNotAKey(t *testing.T) {
+	got := helpKeyTokens("g / G")
+	want := []string{"g", "G"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the / between keys is a separator, not a key: got %q want %q", got, want)
+	}
+	if got := helpKeyTokens("/"); !reflect.DeepEqual(got, []string{"/"}) {
+		t.Fatalf("the filter row documents the / key itself, got %q", got)
+	}
+	if got := helpKeyTokens("space"); !reflect.DeepEqual(got, []string{"space"}) {
+		t.Fatalf("space is the key's own name, not a label for %q: got %q", " ", got)
 	}
 }
 
@@ -701,6 +707,58 @@ func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
 		if !strings.Contains(all, k) {
 			t.Fatalf("reachable key %q missing from help", k)
 		}
+	}
+}
+
+func TestHelpBindings_shadowedRowNeverMislabelsSiblingKeys(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "up", Key: "u", Command: "echo up"}}
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		keys := helpKeyTokens(b.key)
+		for _, k := range keys {
+			if k == "u" && !strings.HasPrefix(b.desc, "custom:") {
+				t.Fatalf("shadowed key u still documented as %q", b.desc)
+			}
+		}
+		if len(keys) == 1 && keys[0] == "r" && !strings.Contains(b.desc, "restart") {
+			t.Fatalf("r documents restart, help says %q", b.desc)
+		}
+	}
+	for _, want := range []struct{ key, desc string }{{"s", "stop"}, {"r", "restart"}} {
+		found := false
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			if b.key == want.key && strings.Contains(b.desc, want.desc) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("key %q must keep its own %q entry when a sibling key is shadowed", want.key, want.desc)
+		}
+	}
+}
+
+func TestCustomCommandWithoutCommandKeepsBuiltin(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "empty", Key: "y", Command: ""}}
+
+	var listed []string
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		listed = append(listed, b.key+"\t"+b.desc)
+	}
+	all := strings.Join(listed, "\n")
+	if strings.Contains(all, "custom: empty") {
+		t.Fatalf("a custom command with no command never fires, so help must omit it:\n%s", all)
+	}
+	if !strings.Contains(all, "yank id/name to clipboard") {
+		t.Fatalf("the built-in y must keep its help entry:\n%s", all)
+	}
+
+	m := New()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = custom
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web"}})
+	next, _ := m.handleKey(keyMsg("y"))
+	if status := next.(Model).status; strings.HasPrefix(status, "custom:") {
+		t.Fatalf("empty custom command must fall through to the built-in, status=%q", status)
 	}
 }
 

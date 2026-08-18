@@ -1374,15 +1374,7 @@ func (m Model) handleActionsKey(k string) (tea.Model, tea.Cmd) {
 // reserved navigation/filter/global keys, which stay usable no matter what the
 // config binds.
 func (m Model) customCommandForKey(k string) string {
-	if m.keys.Reserved(k) {
-		return ""
-	}
-	for _, cc := range m.cfg.CustomCommands {
-		if cc.Key != "" && cc.Key == k {
-			return cc.Command
-		}
-	}
-	return ""
+	return customCommandFor(m.cfg.CustomCommands, m.keys, k)
 }
 
 func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
