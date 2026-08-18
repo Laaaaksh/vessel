@@ -99,9 +99,7 @@ func TestImageBulkDeleteConfirm(t *testing.T) {
 	if m.mode != modeConfirmDelete {
 		t.Fatalf("mode=%v want confirm delete", m.mode)
 	}
-	if m.pending != "bulkimg:a,b" {
-		t.Fatalf("pending=%q want bulkimg:a,b", m.pending)
-	}
+	assertPending(t, m, deleteImages, "a", "b")
 	if m.pendingLbl != "2 images" {
 		t.Fatalf("pendingLbl=%q want '2 images'", m.pendingLbl)
 	}
@@ -126,9 +124,7 @@ func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
 	if m.mode != modeConfirmDelete {
 		t.Fatalf("mode=%v want confirm delete", m.mode)
 	}
-	if m.pending != "image:a" {
-		t.Fatalf("pending=%q want image:a", m.pending)
-	}
+	assertPending(t, m, deleteImages, "a")
 }
 
 func TestVolumeBulkDeleteConfirm(t *testing.T) {
@@ -148,14 +144,29 @@ func TestVolumeBulkDeleteConfirm(t *testing.T) {
 	if m.mode != modeConfirmDelete {
 		t.Fatalf("mode=%v want confirm delete", m.mode)
 	}
-	if m.pending != "bulkvol:data,logs" {
-		t.Fatalf("pending=%q want bulkvol:data,logs", m.pending)
-	}
+	assertPending(t, m, deleteVolumes, "data", "logs")
 	if m.pendingLbl != "2 volumes" {
 		t.Fatalf("pendingLbl=%q want '2 volumes'", m.pendingLbl)
 	}
 	if !strings.Contains(ansi.Strip(viewString(m.View())), "Delete 2 volumes?") {
 		t.Fatalf("confirm modal should name the count, got %q", ansi.Strip(viewString(m.View())))
+	}
+}
+
+// assertPending checks the staged delete targets the given panel with exactly
+// these ids, in list order.
+func assertPending(t *testing.T, m Model, kind deleteKind, ids ...string) {
+	t.Helper()
+	if m.pendingKind != kind {
+		t.Fatalf("pendingKind=%v want %v", m.pendingKind, kind)
+	}
+	if len(m.pendingIDs) != len(ids) {
+		t.Fatalf("pendingIDs=%v want %v", m.pendingIDs, ids)
+	}
+	for i := range ids {
+		if m.pendingIDs[i] != ids[i] {
+			t.Fatalf("pendingIDs=%v want %v", m.pendingIDs, ids)
+		}
 	}
 }
 
@@ -178,4 +189,146 @@ func keyMsg(s string) tea.KeyPressMsg {
 // "space", never a literal space.
 func spaceKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "})
+}
+
+// enterKey mirrors a real enter press (KeyPressMsg.String() == "enter").
+func enterKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+}
+
+// Marks key off identities that outlive a delete (an image digest, a volume
+// name), so a confirmed delete must drop them: otherwise recreating the same
+// image or volume resurfaces the marks and re-arms a bulk delete nobody asked
+// for.
+func TestImageConfirmedDeleteClearsMarks(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	items := []backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	}
+	m.imgPanel = m.imgPanel.SetItems(items)
+	next, _ := m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("mode=%v want browse after confirm", m.mode)
+	}
+	if got := m.imgPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks survived the delete: %v", got)
+	}
+	// Both images are pulled again under the same digests.
+	m.imgPanel = m.imgPanel.SetItems(items)
+	if got := m.imgPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks resurfaced after recreate: %v", got)
+	}
+	if strings.Contains(ansi.Strip(m.imgPanel.ListView(100, 10)), "*") {
+		t.Fatal("recreated images still render a mark")
+	}
+}
+
+func TestVolumeConfirmedDeleteClearsMarks(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewVolumes
+	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
+	m.volPanel = m.volPanel.SetItems(items)
+	next, _ := m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks survived the delete: %v", got)
+	}
+	m.volPanel = m.volPanel.SetItems(items)
+	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks resurfaced after recreate: %v", got)
+	}
+}
+
+func TestContainerConfirmedDeleteClearsMarks(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	items := []backend.Container{
+		{ID: "1", Name: "web", Status: "running"},
+		{ID: "2", Name: "db", Status: "running"},
+	}
+	m.cntPanel = m.cntPanel.SetItems(items)
+	next, _ := m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteContainers, "1", "2")
+	next, _ = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if got := m.cntPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("marks survived the delete: %v", got)
+	}
+}
+
+// A mark hidden behind an active filter is not a delete target, but it must
+// still be dropped: it would otherwise reappear the moment the filter clears.
+func TestVolumeConfirmedDeleteClearsMarksHiddenByFilter(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewVolumes
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
+	m.volPanel, _ = m.volPanel.Update(spaceKey())
+	m.volPanel, _ = m.volPanel.Update(keyMsg("j"))
+	m.volPanel, _ = m.volPanel.Update(spaceKey())
+	m.volPanel, _ = m.volPanel.Update(keyMsg("/"))
+	for _, r := range "data" {
+		m.volPanel, _ = m.volPanel.Update(keyMsg(string(r)))
+	}
+	m.volPanel, _ = m.volPanel.Update(enterKey())
+	next, _ := m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteVolumes, "data")
+	next, _ = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	m.volPanel, _ = m.volPanel.Update(keyMsg("esc"))
+	if got := m.volPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("mark hidden by the filter survived the delete: %v", got)
+	}
+}
+
+func TestCancelledDeleteKeepsMarks(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	})
+	next, _ := m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("n"))
+	m = next.(Model)
+	if got := m.imgPanel.MarkedIDs(); len(got) != 2 {
+		t.Fatalf("cancelling a delete must keep marks, got %v", got)
+	}
 }

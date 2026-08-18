@@ -3,8 +3,10 @@ package images
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
 )
@@ -124,5 +126,45 @@ func TestImageListViewShowsMark(t *testing.T) {
 	v := m.ListView(60, 10)
 	if !strings.Contains(v, "*") {
 		t.Fatalf("expected a mark column in list view, got %q", v)
+	}
+}
+
+// column returns the rune offset of sub within s, ignoring styling escapes.
+func column(t *testing.T, s, sub string) int {
+	t.Helper()
+	i := strings.Index(s, sub)
+	if i < 0 {
+		t.Fatalf("%q not found in %q", sub, s)
+	}
+	return utf8.RuneCountInString(s[:i])
+}
+
+// The mark cell is absorbed into the first column, so a marked row and an
+// unmarked one both keep SIZE under its header instead of sliding right.
+func TestRenderRowAlignsWithHeader(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest", Size: 3 * 1024 * 1024},
+		{ID: "b", Repository: "a-very-long-registry.example.com/team/service", Tag: "v1", Size: 3 * 1024 * 1024},
+	})
+	m, _ = m.Update(spaceKey())
+
+	var header string
+	var rows []string
+	for _, ln := range strings.Split(ansi.Strip(m.ListView(100, 10)), "\n") {
+		switch {
+		case strings.Contains(ln, "REPOSITORY:TAG"):
+			header = ln
+		case strings.Contains(ln, "MiB"):
+			rows = append(rows, ln)
+		}
+	}
+	if header == "" || len(rows) != 2 {
+		t.Fatalf("expected a header and 2 rows, got header=%q rows=%v", header, rows)
+	}
+	want := column(t, header, "SIZE")
+	for i, r := range rows {
+		if got := column(t, r, "3 MiB"); got != want {
+			t.Errorf("row %d: size at column %d, header SIZE at %d", i, got, want)
+		}
 	}
 }
