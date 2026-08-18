@@ -18,9 +18,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Vessel deliberately does NOT own registry login: `image push` auth failures
   tell the user to run `container registry login` (see `internal/backend/images.go`).
-- On this container 1.2.x build, `image save/load/tag/push` are core subcommands,
-  but `image pull` is a plugin (`container-pull` is absent): probe live, don't
-  assume. Live probe results live in `docs/APPLE_CONTAINER_MATRIX.md`.
+- On the installed 1.2.2 build (services running) `image save/load/tag/push` are
+  core subcommands and `image pull` works live; honour the plugin gate only when
+  a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
 - `image tag <source> <target>` and `image save --output <path> <ref>` argument
   order is asserted in tests via `Client.CommandLog`; don't swap the order.
 
