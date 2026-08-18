@@ -474,6 +474,11 @@ func (m Model) loadImageInspectCmd() tea.Cmd {
 		return nil
 	}
 	ref := backend.FormatRef(*sel)
+	// The panel already holds a successful inspect for this exact image, so
+	// re-running the subprocess on every poll tick would only reproduce it.
+	if m.imgPanel.InspectedRef() == ref {
+		return nil
+	}
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -494,6 +499,9 @@ func (m Model) loadVolumeInspectCmd() tea.Cmd {
 		return nil
 	}
 	name := sel.Name
+	if m.volPanel.InspectedName() == name {
+		return nil
+	}
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -769,9 +777,17 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	m.focus = FocusList
 	switch m.activeView {
 	case ViewImages:
+		before := m.imgPanel.Selected()
 		m.imgPanel = m.imgPanel.SetCursor(row)
+		if selectionRefChanged(before, m.imgPanel.Selected()) {
+			return m, m.loadImageInspectCmd()
+		}
 	case ViewVolumes:
+		before := m.volPanel.Selected()
 		m.volPanel = m.volPanel.SetCursor(row)
+		if selectionNameChanged(before, m.volPanel.Selected()) {
+			return m, m.loadVolumeInspectCmd()
+		}
 	default:
 		m.cntPanel = m.cntPanel.SetCursor(row)
 	}
@@ -789,9 +805,17 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	m.focus = FocusList
 	switch m.activeView {
 	case ViewImages:
+		before := m.imgPanel.Selected()
 		m.imgPanel = m.imgPanel.MoveBy(delta)
+		if selectionRefChanged(before, m.imgPanel.Selected()) {
+			return m, m.loadImageInspectCmd()
+		}
 	case ViewVolumes:
+		before := m.volPanel.Selected()
 		m.volPanel = m.volPanel.MoveBy(delta)
+		if selectionNameChanged(before, m.volPanel.Selected()) {
+			return m, m.loadVolumeInspectCmd()
+		}
 	default:
 		m.cntPanel = m.cntPanel.MoveBy(delta)
 	}

@@ -130,6 +130,17 @@ func (m Model) SetInspect(ref string, ins *backend.ImageInspect, err error) Mode
 	return m
 }
 
+// InspectedRef returns the image reference the panel already holds a
+// successful inspect for, or "" when the last inspect failed or none has
+// arrived. The app uses it to avoid re-inspecting an unchanged selection on
+// every poll tick.
+func (m Model) InspectedRef() string {
+	if m.inspect == nil || m.inspectErr != nil {
+		return ""
+	}
+	return m.inspectRef
+}
+
 // MoveBy adjusts cursor.
 func (m Model) MoveBy(delta int) Model {
 	m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), delta)

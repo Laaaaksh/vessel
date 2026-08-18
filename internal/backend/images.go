@@ -119,7 +119,7 @@ func mapImages(raw []cliImage) []Image {
 
 // mapImageInspect maps one inspected image to the enriched domain type. The
 // per-variant config that matters (digest, size, cmd, env, working directory,
-// layer count) is taken from the variant matching this host, mirroring the
+// layer count) is taken from the variant this host would run, mirroring the
 // running-platform choice in imageSize.
 func mapImageInspect(r cliImage) *ImageInspect {
 	repo, tag := splitRef(r.Configuration.Name)
@@ -143,40 +143,49 @@ func mapImageInspect(r cliImage) *ImageInspect {
 			Digest:       v.Digest,
 			Size:         v.Size,
 		})
-		if p.OS == guestOS && p.Architecture == runtime.GOARCH && ins.Digest == "" {
-			ins.Digest = v.Digest
-			ins.Size = v.Size
-			if t, err := time.Parse(time.RFC3339, v.Config.Created); err == nil {
-				ins.Created = t
-			}
-			ins.Cmd = v.Config.Config.Cmd
-			ins.WorkingDir = v.Config.Config.WorkingDir
-			ins.Env = v.Config.Config.Env
-			ins.LayerCount = len(v.Config.RootFS.DiffIDs)
+	}
+	if v := runVariant(r); v != nil {
+		ins.Digest = v.Digest
+		ins.Size = v.Size
+		if t, err := time.Parse(time.RFC3339, v.Config.Created); err == nil {
+			ins.Created = t
 		}
+		ins.Cmd = v.Config.Config.Cmd
+		ins.WorkingDir = v.Config.Config.WorkingDir
+		ins.Env = v.Config.Config.Env
+		ins.LayerCount = len(v.Config.RootFS.DiffIDs)
 	}
 	return ins
+}
+
+// runVariant returns the manifest variant this host would actually run: the
+// one matching linux/GOARCH, else the largest remaining image variant, so a
+// single-arch image still resolves to real data. Returns nil when the image
+// carries no image manifest at all.
+func runVariant(r cliImage) *cliImageVariant {
+	var largest *cliImageVariant
+	for i := range r.Variants {
+		v := &r.Variants[i]
+		// "unknown/unknown" variants are attestation manifests, not images.
+		if v.Platform.OS == "unknown" || v.Platform.Architecture == "unknown" {
+			continue
+		}
+		if v.Platform.OS == guestOS && v.Platform.Architecture == runtime.GOARCH {
+			return v
+		}
+		if largest == nil || v.Size > largest.Size {
+			largest = v
+		}
+	}
+	return largest
 }
 
 // imageSize reports the size of the manifest this host would actually run.
 // configuration.descriptor.size is the size of the index manifest itself — a
 // few KiB — not of the image, so it is only a last resort.
 func imageSize(r cliImage) int64 {
-	var largest int64
-	for _, v := range r.Variants {
-		// "unknown/unknown" variants are attestation manifests, not images.
-		if v.Platform.OS == "unknown" || v.Platform.Architecture == "unknown" {
-			continue
-		}
-		if v.Platform.OS == guestOS && v.Platform.Architecture == runtime.GOARCH {
-			return v.Size
-		}
-		if v.Size > largest {
-			largest = v.Size
-		}
-	}
-	if largest > 0 {
-		return largest
+	if v := runVariant(r); v != nil && v.Size > 0 {
+		return v.Size
 	}
 	return r.Configuration.Descriptor.Size
 }
