@@ -1,6 +1,6 @@
 # Contributing to vessel
 
-Thank you for your interest in contributing. vessel is open source under the Apache 2.0 license.
+Thank you for your interest in contributing. vessel is open source under the MIT license.
 
 ## Contributor License Agreement (CLA)
 
