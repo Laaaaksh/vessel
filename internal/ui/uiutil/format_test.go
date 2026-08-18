@@ -1,6 +1,9 @@
 package uiutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTruncate(t *testing.T) {
 	cases := []struct {
@@ -80,13 +83,53 @@ func TestClampHeight(t *testing.T) {
 	}
 }
 
-func TestSection_skippedWhenHeaderAndRowDoNotFit(t *testing.T) {
-	lines := []string{"one", "two"}
-	if got := Section(lines, 4, "-- Labels --", []string{"a=1"}); len(got) != 2 {
+func TestPane_sectionSkippedWhenHeaderAndRowDoNotFit(t *testing.T) {
+	p := NewPane(20, 4)
+	p.Add("one", "two")
+	p.Section("-- Labels --", []string{"a=1"})
+	if got := p.Lines(); len(got) != 2 {
 		t.Errorf("section must be dropped whole when it cannot fit, got %v", got)
 	}
-	got := Section(lines, 5, "-- Labels --", []string{"a=1", "b=2"})
+
+	p = NewPane(20, 5)
+	p.Add("one", "two")
+	p.Section("-- Labels --", []string{"a=1", "b=2"})
+	got := p.Lines()
 	if len(got) != 5 || got[3] != "-- Labels --" || got[4] != "a=1" {
 		t.Errorf("section must fill exactly the budget, got %v", got)
+	}
+}
+
+func TestPane_chargesWrappedRowsAgainstTheBudget(t *testing.T) {
+	// 30 columns of text in a 20-column pane occupies two rendered rows.
+	wide := strings.Repeat("x", 30)
+	p := NewPane(20, 3)
+	p.Add(wide, "short", "dropped")
+	got := p.Lines()
+	if len(got) != 2 || got[1] != "short" {
+		t.Fatalf("a wrapped row must cost two rows, got %v", got)
+	}
+	if p.Remaining() != 0 {
+		t.Errorf("remaining = %d, want 0", p.Remaining())
+	}
+}
+
+func TestRowsFor_countsWrappedRows(t *testing.T) {
+	if got := RowsFor("short", 20); got != 1 {
+		t.Errorf("RowsFor(short) = %d, want 1", got)
+	}
+	if got := RowsFor(strings.Repeat("x", 30), 20); got != 2 {
+		t.Errorf("RowsFor(30 cols in a 20-col pane) = %d, want 2", got)
+	}
+}
+
+func TestRenderPane_neverExceedsHeight(t *testing.T) {
+	lines := make([]string, 10)
+	for i := range lines {
+		lines[i] = strings.Repeat("y", 30)
+	}
+	out := RenderPane(20, 6, lines)
+	if got := strings.Count(out, "\n") + 1; got != 6 {
+		t.Errorf("RenderPane rendered %d rows into 6", got)
 	}
 }

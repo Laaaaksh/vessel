@@ -130,58 +130,59 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
 	metrics := metricRows(sel, poller, width)
-	budget := max(0, height-len(metrics))
+	reserved := 0
+	for _, r := range metrics {
+		reserved += uiutil.RowsFor(r, width)
+	}
 
-	lines := uiutil.AppendLines(nil, budget,
+	p := uiutil.NewPane(width, height-reserved)
+	p.Add(
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
 		"",
 		uiutil.KV("Image", sel.Image),
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)),
 	)
 	if !sel.Created.IsZero() {
-		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Created", uiutil.Ago(sel.Created)))
+		p.Add(uiutil.KV("Created", uiutil.Ago(sel.Created)))
 	}
-	lines = uiutil.AppendLines(lines, budget,
+	p.Add(
 		uiutil.KV("Status", sel.Status),
 		uiutil.KV("Ports", backend.FormatPorts(sel.Ports)),
 	)
 	if sel.Hostname != "" {
-		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Hostname", sel.Hostname))
+		p.Add(uiutil.KV("Hostname", sel.Hostname))
 	}
 	if sel.Platform != "" {
-		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Platform", sel.Platform))
+		p.Add(uiutil.KV("Platform", sel.Platform))
 	}
 	if sel.CPUs > 0 {
-		lines = uiutil.AppendLines(lines, budget, uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
+		p.Add(uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
 	}
 	if sel.MemoryBytes > 0 {
-		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
+		p.Add(uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
 	}
 	if len(sel.Networks) > 0 {
-		lines = uiutil.AppendLines(lines, budget,
-			uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
+		p.Add(uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
 	}
 
 	mounts := make([]string, 0, len(sel.Mounts))
 	for _, mt := range sel.Mounts {
 		mounts = append(mounts, dim.Render("  "+uiutil.Truncate(mt.Source+" → "+mt.Destination, width-6)))
 	}
-	lines = uiutil.Section(lines, budget, dim.Render("-- Mounts --"), mounts)
-	lines = uiutil.AppendLines(lines, height, metrics...)
+	p.Section(dim.Render("-- Mounts --"), mounts)
 
-	lines = uiutil.Section(lines, height, dim.Render("-- Labels --"), pairRows(sel.Labels, dim, width))
+	p.Grow(reserved)
+	p.Add(metrics...)
+
+	p.Section(dim.Render("-- Labels --"), pairRows(sel.Labels, dim, width))
 
 	env := make([]string, 0, len(sel.Env))
 	for _, e := range sel.Env {
 		env = append(env, dim.Render("  "+uiutil.Truncate(e, width-6)))
 	}
-	lines = uiutil.Section(lines, height, dim.Render("-- Env --"), env)
+	p.Section(dim.Render("-- Env --"), env)
 
-	body := lipgloss.NewStyle().
-		Width(width).
-		PaddingLeft(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
-	return lipgloss.NewStyle().Height(height).Render(uiutil.ClampHeight(body, height))
+	return uiutil.RenderPane(width, height, p.Lines())
 }
 
 func metricRows(sel *backend.Container, poller *backend.Poller, width int) []string {

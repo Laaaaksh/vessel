@@ -1,34 +1,37 @@
 package uiutil
 
-import "strings"
+import (
+	"strings"
 
-// AppendLines appends as many of more as the budget allows and drops the rest,
-// so a pane never renders taller than the height it was given.
-func AppendLines(lines []string, budget int, more ...string) []string {
-	for _, l := range more {
-		if len(lines) >= budget {
-			return lines
-		}
-		lines = append(lines, l)
-	}
-	return lines
+	"charm.land/lipgloss/v2"
+)
+
+// paneStyle is the geometry every detail pane renders with. Budgeting and
+// rendering share it, so a row is charged exactly the number of rows it will
+// occupy once wrapped.
+func paneStyle(width int) lipgloss.Style {
+	return lipgloss.NewStyle().Width(width).PaddingLeft(1)
 }
 
-// Section appends a blank spacer, a header and as many items as the budget
-// allows. The whole section is skipped when the spacer, the header and at
-// least one item do not fit, so a full pane never shows a dangling heading.
-func Section(lines []string, budget int, header string, items []string) []string {
-	if len(items) == 0 || len(lines)+3 > budget {
-		return lines
+// RowsFor reports how many rendered rows s occupies in a pane of that width.
+// A row wider than the pane wraps and costs more than one.
+func RowsFor(s string, width int) int {
+	if width < 2 {
+		return lipgloss.Height(s)
 	}
-	lines = append(lines, "", header)
-	return AppendLines(lines, budget, items...)
+	return lipgloss.Height(paneStyle(width).Render(s))
+}
+
+// RenderPane renders the rows of a detail pane: short content is padded up to
+// height and anything still taller is clipped, so the pane can never push the
+// rest of the layout off screen.
+func RenderPane(width, height int, lines []string) string {
+	body := paneStyle(width).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.NewStyle().Height(height).Render(ClampHeight(body, height))
 }
 
 // ClampHeight trims a rendered block to at most height lines. lipgloss pads
-// short content up to a style's Height but never clips content that is taller,
-// so a pane whose rows wrapped at a narrow width would otherwise push the rest
-// of the layout off screen.
+// short content up to a style's Height but never clips content that is taller.
 func ClampHeight(s string, height int) string {
 	if height <= 0 {
 		return ""
@@ -39,3 +42,55 @@ func ClampHeight(s string, height int) string {
 	}
 	return strings.Join(lines[:height], "\n")
 }
+
+// Pane accumulates detail-pane rows within a budget counted in rendered rows.
+type Pane struct {
+	width  int
+	budget int
+	used   int
+	lines  []string
+}
+
+// NewPane starts a pane of the given width that may occupy budget rendered
+// rows. Reserve room for trailing content by passing a reduced budget and
+// releasing it with Grow once the earlier rows are in.
+func NewPane(width, budget int) *Pane {
+	return &Pane{width: width, budget: max(0, budget)}
+}
+
+// Grow raises the budget by n rendered rows, releasing a reservation made for
+// content that is about to be added.
+func (p *Pane) Grow(n int) { p.budget += n }
+
+// Remaining reports how many rendered rows are still free.
+func (p *Pane) Remaining() int { return p.budget - p.used }
+
+// Add appends rows while the budget allows and drops the rest.
+func (p *Pane) Add(more ...string) {
+	for _, l := range more {
+		n := RowsFor(l, p.width)
+		if p.used+n > p.budget {
+			return
+		}
+		p.used += n
+		p.lines = append(p.lines, l)
+	}
+}
+
+// Section appends a spacer, a header and as many items as fit. The section is
+// skipped whole when the header and at least one item do not fit, so a full
+// pane never shows a dangling heading.
+func (p *Pane) Section(header string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	need := 1 + RowsFor(header, p.width) + RowsFor(items[0], p.width)
+	if p.used+need > p.budget {
+		return
+	}
+	p.Add("", header)
+	p.Add(items...)
+}
+
+// Lines returns the accumulated rows.
+func (p *Pane) Lines() []string { return p.lines }
