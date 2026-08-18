@@ -30,9 +30,11 @@ func (m Model) Filtering() bool { return m.filtering }
 // Filter returns the filter string.
 func (m Model) Filter() string { return m.filter }
 
-// Cursor / Len for footer.
+// Cursor returns the highlighted row index, for the footer.
 func (m Model) Cursor() int { return m.cursor }
-func (m Model) Len() int    { return len(m.filtered) }
+
+// Len returns the number of visible rows, for the footer.
+func (m Model) Len() int { return len(m.filtered) }
 
 // SetPageRows sets page scroll size.
 func (m Model) SetPageRows(n int) Model {

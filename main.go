@@ -16,7 +16,7 @@ func main() {
 		case "doctor":
 			os.Exit(doctor.Run())
 		case "help", "-h", "--help":
-			fmt.Fprintf(os.Stdout, "usage: vessel [doctor]\n")
+			fmt.Println("usage: vessel [doctor]")
 			os.Exit(0)
 		}
 	}
