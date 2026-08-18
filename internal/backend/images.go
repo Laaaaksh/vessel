@@ -129,23 +129,27 @@ func FileExists(path string) bool {
 // PushImage pushes an image to its registry.
 func (c *Client) PushImage(ctx context.Context, ref string) error {
 	_, err := c.run(ctx, "image", "push", ref)
-	if err != nil && isPushAuthError(err) {
+	if err != nil && IsPushAuthError(err) {
 		return fmt.Errorf("%w%s", err, pushAuthHint)
 	}
 	return err
 }
 
-// pushAuthHint tells the user how to authenticate when a push is rejected for
+// PushAuthNotice tells the user how to authenticate when a push is rejected for
 // credentials. Container registry login is intentionally out of vessel's scope:
-// the user owns their registry session. The hint stays on one line because the
-// footer that renders it budgets exactly one row.
-const pushAuthHint = " — registry rejected these credentials; run `container registry login`, then retry"
+// the user owns their registry session. It is exported so the images panel can
+// show it on a surface that is not truncated to a single footer row.
+const PushAuthNotice = "registry rejected these credentials; run `container registry login`, then retry"
 
-// isPushAuthError reports whether a push error looks like a credentials
+// pushAuthHint is the same instruction appended to the error itself. It stays on
+// one line because the footer that renders errors budgets exactly one row.
+const pushAuthHint = " — " + PushAuthNotice
+
+// IsPushAuthError reports whether a push error looks like a credentials
 // problem. It reads only what the CLI printed: the full error text also carries
 // the arguments, so an image whose own name contains "unauthorized" or
 // "authentication" would otherwise be misdiagnosed.
-func isPushAuthError(err error) bool {
+func IsPushAuthError(err error) bool {
 	var cliErr *CLIError
 	if !errors.As(err, &cliErr) {
 		return false
