@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
-	"github.com/charmbracelet/x/ansi"
 )
 
 func TestView_shellModeEmpty(t *testing.T) {

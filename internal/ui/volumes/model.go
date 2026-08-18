@@ -24,11 +24,19 @@ type Model struct {
 // New creates an empty volumes model.
 func New() Model { return Model{pageRows: 10} }
 
+// Filtering reports whether the filter prompt is active.
 func (m Model) Filtering() bool { return m.filtering }
-func (m Model) Filter() string  { return m.filter }
-func (m Model) Cursor() int     { return m.cursor }
-func (m Model) Len() int        { return len(m.filtered) }
 
+// Filter returns the filter string.
+func (m Model) Filter() string { return m.filter }
+
+// Cursor returns the highlighted row index, for the footer.
+func (m Model) Cursor() int { return m.cursor }
+
+// Len returns the number of visible rows, for the footer.
+func (m Model) Len() int { return len(m.filtered) }
+
+// SetPageRows sets page scroll size.
 func (m Model) SetPageRows(n int) Model {
 	if n > 0 {
 		m.pageRows = n
@@ -55,11 +63,13 @@ func (m Model) Selected() *backend.Volume {
 	return &v
 }
 
+// MoveBy moves the cursor by delta rows.
 func (m Model) MoveBy(delta int) Model {
 	m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), delta)
 	return m
 }
 
+// SetCursor moves the cursor to row i, clamped to the visible rows.
 func (m Model) SetCursor(i int) Model {
 	m.cursor = uiutil.MoveCursor(i, len(m.filtered), 0)
 	return m

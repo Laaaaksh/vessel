@@ -59,7 +59,7 @@ func Default() Config {
 // If the file does not exist, Default() is returned with no error.
 func Load() (Config, error) {
 	cfg := Default()
-	path := ConfigPath()
+	path := Path()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return cfg, nil
 	}
@@ -75,8 +75,8 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// ConfigPath returns the path to the user config file.
-func ConfigPath() string {
+// Path returns the path to the user config file.
+func Path() string {
 	if dir, ok := os.LookupEnv("XDG_CONFIG_HOME"); ok {
 		return filepath.Join(dir, "vessel", "config.toml")
 	}
