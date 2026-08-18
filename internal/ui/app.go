@@ -759,16 +759,6 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	m.mode = modeBrowse
 	m.pendingIDs = nil
 	m.pendingLbl = ""
-	// Marks key off identities that outlive the delete (a volume name, an image
-	// digest), so they must not survive it and re-arm a later bulk delete.
-	switch kind {
-	case deleteImages:
-		m.imgPanel = m.imgPanel.ClearMarks()
-	case deleteVolumes:
-		m.volPanel = m.volPanel.ClearMarks()
-	default:
-		m.cntPanel = m.cntPanel.ClearMarks()
-	}
 	if len(ids) == 0 {
 		return m, nil
 	}
