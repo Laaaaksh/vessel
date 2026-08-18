@@ -133,6 +133,7 @@ type Model struct {
 	actionIdx   int
 	actionItems []actionItem
 	promptKind  string
+	promptLabel string
 	promptBuf   string
 	promptRef   string
 }
@@ -225,9 +226,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastErr = msg.err
 			m.status = ""
+			if backend.IsPushAuthError(msg.err) {
+				m.imgPanel = m.imgPanel.SetNotice(backend.PushAuthNotice)
+			}
 		} else {
 			m.lastErr = nil
 			m.status = msg.msg
+			m.imgPanel = m.imgPanel.SetNotice("")
 		}
 		m = m.clearPending()
 		return m, m.refreshCmd()
@@ -953,18 +958,21 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) beginPrompt(kind, _ string) (tea.Model, tea.Cmd) {
+func (m Model) beginPrompt(kind, label string) (tea.Model, tea.Cmd) {
 	m.mode = modePrompt
 	m.promptKind = kind
+	m.promptLabel = label
 	m.promptBuf = ""
 	return m, nil
 }
 
 // beginPromptForImage opens a prompt that remembers a selected image ref so the
-// submitted text can be combined with it (e.g. a live image + a new tag).
-func (m Model) beginPromptForImage(kind, ref string) (tea.Model, tea.Cmd) {
+// submitted text can be combined with it (e.g. a live image + a new tag). The
+// label names both halves, since the field wants the other one.
+func (m Model) beginPromptForImage(kind, label, ref string) (tea.Model, tea.Cmd) {
 	m.mode = modePrompt
 	m.promptKind = kind
+	m.promptLabel = label
 	m.promptBuf = ""
 	m.promptRef = ref
 	return m, nil
@@ -976,6 +984,7 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowse
 		m.promptBuf = ""
 		m.promptRef = ""
+		m.promptLabel = ""
 		m.status = "cancelled"
 		return m, nil
 	case "enter":
@@ -1118,7 +1127,7 @@ func (m Model) buildActions() []actionItem {
 	case ViewImages:
 		items = append(items,
 			actionItem{"Pull…", func(m Model) (Model, tea.Cmd) {
-				x, c := m.beginPrompt("pull", "image")
+				x, c := m.beginPrompt("pull", "image to pull")
 				return x.(Model), c
 			}},
 			actionItem{"Run", func(m Model) (Model, tea.Cmd) {
@@ -1137,7 +1146,7 @@ func (m Model) buildActions() []actionItem {
 				if !ok {
 					return m, nil
 				}
-				x, c := m.beginPromptForImage("tag", ref)
+				x, c := m.beginPromptForImage("tag", "tag "+ref+" as (new reference)", ref)
 				return x.(Model), c
 			}},
 			actionItem{"Save…", func(m Model) (Model, tea.Cmd) {
@@ -1145,11 +1154,11 @@ func (m Model) buildActions() []actionItem {
 				if !ok {
 					return m, nil
 				}
-				x, c := m.beginPromptForImage("save to", ref)
+				x, c := m.beginPromptForImage("save to", "save "+ref+" to (path)", ref)
 				return x.(Model), c
 			}},
 			actionItem{"Load…", func(m Model) (Model, tea.Cmd) {
-				x, c := m.beginPrompt("load from", "tar archive path")
+				x, c := m.beginPrompt("load from", "load from (tar archive path)")
 				return x.(Model), c
 			}},
 			actionItem{"Push", func(m Model) (Model, tea.Cmd) {
@@ -1175,7 +1184,7 @@ func (m Model) buildActions() []actionItem {
 	case ViewVolumes:
 		items = append(items,
 			actionItem{"Create…", func(m Model) (Model, tea.Cmd) {
-				x, c := m.beginPrompt("volcreate", "name")
+				x, c := m.beginPrompt("volcreate", "volume name")
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
@@ -1307,14 +1316,15 @@ func (m Model) footerView() string {
 	default:
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
-	return m.st.footerHelp.Width(m.width).Render(m.clampToRow(prefix + keys))
+	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
 }
 
-// clampToRow flattens s onto one row no wider than the frame. layoutDims
-// budgets the footer exactly one row, and CLI errors arrive with embedded
-// newlines and hundreds of characters of stderr, so anything unclamped pushes
-// the header off the alt-screen. Measurement is by display cell, matching what
-// lipgloss wraps on: a rune count lets wide glyphs through and still overflows.
+// clampToRow flattens s onto one row no wider than the frame. It guards the two
+// footer branches that render unbounded text — CLI errors arrive with embedded
+// newlines and hundreds of characters of stderr — and deliberately not the key
+// hints, whose grouping is authored to be read as-is. Measurement is by display
+// cell, matching what lipgloss wraps on: a rune count lets wide glyphs through
+// and still overflows.
 func (m Model) clampToRow(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if m.width <= 0 || lipgloss.Width(s) <= m.width {
@@ -1452,7 +1462,10 @@ func (m Model) actionsModal() string {
 }
 
 func (m Model) promptModal() string {
-	title := m.promptKind
+	title := m.promptLabel
+	if title == "" {
+		title = m.promptKind
+	}
 	body := fmt.Sprintf("%s: %s_", title, m.promptBuf)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

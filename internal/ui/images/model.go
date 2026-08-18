@@ -26,6 +26,14 @@ type Model struct {
 	marked     map[string]bool
 	toggleMark string
 	pageRows   int
+	notice     string
+}
+
+// SetNotice attaches a standing message to the detail pane. The pane wraps, so
+// unlike the footer it can carry an instruction too long to fit one row.
+func (m Model) SetNotice(notice string) Model {
+	m.notice = notice
+	return m
 }
 
 // New creates an empty images model.
@@ -279,6 +287,12 @@ func (m Model) DetailView(width, height int) string {
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[p] pull  [c] run  [d] delete  [P] prune"),
+	}
+	if m.notice != "" {
+		lines = append(lines, "", lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#fbbf24")).
+			Width(max(1, width-2)).
+			Render(m.notice))
 	}
 	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
