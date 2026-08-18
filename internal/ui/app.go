@@ -126,6 +126,14 @@ func (k deleteKind) isPrune() bool {
 	return k == pruneContainers || k == pruneImages || k == pruneVolumes
 }
 
+const (
+	// confirmTimeout bounds a confirmed single-resource action (delete, stop).
+	confirmTimeout = 60 * time.Second
+	// globalTimeout bounds whole-store verbs such as prune, which sweep every
+	// container/image/volume and take far longer than a single removal.
+	globalTimeout = 120 * time.Second
+)
+
 // Model is the root bubbletea model for vessel.
 type Model struct {
 	cfg    config.Config
@@ -994,32 +1002,50 @@ func (m Model) beginStop() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// pendingAction describes a confirmed action: the footer label shown while it
+// runs, the message reported on success, and its time budget. A prune sweeps a
+// whole container/image/volume store, so it keeps the longer budget it had
+// before it was routed through the confirm modal; the other paths remove a
+// single resource.
+func pendingAction(kind deleteKind) (label, done string, timeout time.Duration) {
+	switch kind {
+	case pruneContainers:
+		return "prune containers", "pruned", globalTimeout
+	case pruneImages:
+		return "prune images", "pruned", globalTimeout
+	case pruneVolumes:
+		return "prune volumes", "pruned", globalTimeout
+	case stopContainer:
+		return "stop", "stopped", confirmTimeout
+	default:
+		return "delete", "deleted", confirmTimeout
+	}
+}
+
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
+	label, done, timeout := pendingAction(kind)
 	m.mode = modeBrowse
 	m.pendingIDs = nil
 	m.pendingLbl = ""
 	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
+	m.status = label + "…"
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		var err error
-		msg := "deleted"
+		msg := done
 		switch kind {
 		case pruneContainers:
-			msg = "pruned"
 			err = client.PruneContainers(ctx)
 		case pruneImages:
-			msg = "pruned"
 			err = client.PruneImages(ctx)
 		case pruneVolumes:
-			msg = "pruned"
 			err = client.PruneVolumes(ctx)
 		case stopContainer:
-			msg = "stopped"
 			err = client.StopContainer(ctx, ids[0])
 		case deleteImages:
 			err = client.RemoveImage(ctx, ids...)
@@ -1064,7 +1090,7 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
 	m.status = label + "…"
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
 		if err := fn(ctx); err != nil {
 			return actionDoneMsg{err: err}
@@ -1344,8 +1370,13 @@ func (m Model) handleActionsKey(k string) (tea.Model, tea.Cmd) {
 
 // customCommandForKey returns the command string of the first custom command
 // configured with key k, or "" if none. A configured key is the user's explicit
-// opt-in and shadows the built-in key it collides with.
+// opt-in and shadows the built-in action it collides with, except for the
+// reserved navigation/filter/global keys, which stay usable no matter what the
+// config binds.
 func (m Model) customCommandForKey(k string) string {
+	if m.keys.Reserved(k) {
+		return ""
+	}
 	for _, cc := range m.cfg.CustomCommands {
 		if cc.Key != "" && cc.Key == k {
 			return cc.Command
@@ -1387,15 +1418,8 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		if msg == "" {
 			msg = "custom ok"
 		}
-		return actionDoneMsg{msg: uiutilTruncate(msg, 80)}
+		return actionDoneMsg{msg: uiutil.Truncate(msg, 80)}
 	}
-}
-
-func uiutilTruncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func (m Model) headerView() string {
@@ -1421,20 +1445,22 @@ func (m Model) viewName() string {
 
 func (m Model) footerView() string {
 	if m.lastErr != nil {
-		prefix := "error: "
-		msg := m.lastErr.Error()
+		const prefix = "error: "
 		hint := ""
 		if backend.IsServicesDown(m.lastErr) {
 			hint = " — run `container system start` to start services"
-			// The raw CLI error is long; truncate it so the hint is never
-			// pushed past the footer's width limit.
-			avail := max(0, m.width-len(prefix)-len([]rune(hint)))
-			msg = uiutil.Truncate(msg, avail)
 		}
-		return m.st.errorText.Width(m.width).Render(prefix + msg + hint)
+		// layoutDims reserves exactly one row for the footer, so the CLI's
+		// multi-line error is flattened onto one line and truncated to what is
+		// left beside the hint — otherwise either would wrap off screen.
+		msg := strings.Join(strings.Fields(m.lastErr.Error()), " ")
+		msg = uiutil.Truncate(msg, max(0, m.width-len(prefix)-len([]rune(hint))))
+		line := uiutil.Truncate(prefix+msg+hint, m.width)
+		return m.st.errorText.Width(m.width).Render(line)
 	}
 	if m.status != "" {
-		return m.st.footerHelp.Width(m.width).Render(m.status)
+		status := strings.Join(strings.Fields(m.status), " ")
+		return m.st.footerHelp.Width(m.width).Render(uiutil.Truncate(status, m.width))
 	}
 	cur, n := m.cursorInfo()
 	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)
@@ -1515,7 +1541,7 @@ func (m Model) helpView() string {
 	rows = append(rows, m.st.title.Render("vessel — keybindings"))
 	rows = append(rows, m.st.dimText.Render(fmt.Sprintf("view=%s focus=%s", m.viewName(), m.focus.String())))
 	rows = append(rows, "")
-	for _, b := range helpBindings(m.activeView, m.focus, m.mode) {
+	for _, b := range helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands) {
 		key := m.st.helpText.Width(22).Render(b.key)
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, key, b.desc))
 	}
