@@ -316,7 +316,7 @@ func (m Model) DetailView(width, height int) string {
 		"",
 		uiutil.KV("Driver", sel.Driver),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
-		uiutil.KV("Path", uiutil.Truncate(sel.Mountpoint, width-12)),
+		uiutil.KVFit("Path", sel.Mountpoint, width),
 	)
 
 	same := sel.Name == m.inspectName && m.inspect != nil
