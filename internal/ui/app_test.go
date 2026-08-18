@@ -659,7 +659,7 @@ func TestFooterView_noHintForOtherErrors(t *testing.T) {
 func TestHelpBindingsCoverAllKeys(t *testing.T) {
 	tokens := map[string]bool{}
 	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
-		for _, b := range helpBindings(v, FocusList, modeBrowse) {
+		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
 			for _, tok := range strings.FieldsFunc(b.key, func(r rune) bool {
 				return r == ' ' || r == '←' || r == '→' || r == '↑' || r == '↓'
 			}) {
@@ -691,7 +691,7 @@ func TestHelpBindingsCoverAllKeys(t *testing.T) {
 func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
 	var sb strings.Builder
 	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
-		for _, b := range helpBindings(v, FocusList, modeBrowse) {
+		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
 			sb.WriteString(b.key + " ")
 			sb.WriteString(b.desc + "\n")
 		}
@@ -701,6 +701,88 @@ func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
 		if !strings.Contains(all, k) {
 			t.Fatalf("reachable key %q missing from help", k)
 		}
+	}
+}
+
+func TestCustomCommandKeyDoesNotShadowNavigation(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "nav", Key: "j", Command: "echo nope"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
+		{ID: "a", Name: "one"}, {ID: "b", Name: "two"}, {ID: "c", Name: "three"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	if strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("navigation key must not be shadowed by a custom command, status=%q", m.status)
+	}
+	if m.cntPanel.Cursor() != 1 {
+		t.Fatalf("list must still scroll with j, cursor=%d", m.cntPanel.Cursor())
+	}
+}
+
+func TestHelpBindings_customCommands(t *testing.T) {
+	custom := []config.CustomCommand{
+		{Name: "redefine", Key: "y", Command: "echo redefined"},
+		{Name: "nav", Key: "j", Command: "echo nope"},
+	}
+	var rows []string
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		rows = append(rows, b.key+"\t"+b.desc)
+	}
+	all := strings.Join(rows, "\n")
+	if !strings.Contains(all, "custom: redefine") {
+		t.Fatalf("configured custom key must appear in help, got:\n%s", all)
+	}
+	if strings.Contains(all, "yank id/name to clipboard") {
+		t.Fatalf("shadowed builtin must not keep its old help entry, got:\n%s", all)
+	}
+	if strings.Contains(all, "custom: nav") {
+		t.Fatalf("custom command on a reserved key never fires, so help must omit it, got:\n%s", all)
+	}
+	if !strings.Contains(all, "move up / down (in list)") {
+		t.Fatalf("navigation help entry must survive a custom command bound to j, got:\n%s", all)
+	}
+}
+
+func TestFooterView_servicesDownStaysOneLine(t *testing.T) {
+	for _, w := range []int{60, 100, 183, 200} {
+		m := New()
+		m.width, m.height = w, 30
+		m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+			"Start the container system services and retry:\n\n    container system start\n)")
+		footer := m.footerView()
+		if got := strings.Count(footer, "\n") + 1; got != 1 {
+			t.Fatalf("width=%d: footer must render on one line, got %d lines: %q", w, got, footer)
+		}
+		if w >= 100 && !strings.Contains(ansi.Strip(footer), "container system start") {
+			t.Fatalf("width=%d: hint must survive truncation, footer=%q", w, footer)
+		}
+	}
+}
+
+func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
+	if _, _, timeout := pendingAction(pruneImages); timeout != globalTimeout {
+		t.Fatalf("prune must keep the global budget, got %v want %v", timeout, globalTimeout)
+	}
+	if _, _, timeout := pendingAction(deleteContainers); timeout != confirmTimeout {
+		t.Fatalf("single-resource delete budget = %v, want %v", timeout, confirmTimeout)
+	}
+
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.focus = FocusList
+	next, _ := m.handleKey(keyMsg("P"))
+	m = next.(Model)
+	next, cmd := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirming a prune should return a command")
+	}
+	if !strings.Contains(m.status, "prune") {
+		t.Fatalf("running prune must show progress in the footer, status=%q", m.status)
 	}
 }
 
