@@ -397,10 +397,12 @@ func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
 				t.Errorf("section header %q rendered with no rows under it at height %d", head, height)
 			}
 		}
-		// The bar is truncated to a single row so it cannot crowd out the
-		// volume itself, which must still be identifiable.
-		if !strings.Contains(v, "[c] create") {
-			t.Errorf("key hints missing at height %d: %q", height, v)
+		// At this width the bar wraps but still fits alongside the volume, so
+		// it renders in full rather than being truncated.
+		for _, want := range []string{"[c] create", "[y]", "yank path"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("key hints clipped at height %d: %q in %q", height, want, v)
+			}
 		}
 		for _, want := range []string{"data", "Driver"} {
 			if !strings.Contains(v, want) {
