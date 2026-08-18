@@ -43,9 +43,12 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 	return mapImages(raw), nil
 }
 
-// RemoveImage removes an image by ID or name.
-func (c *Client) RemoveImage(ctx context.Context, id string) error {
-	_, err := c.run(ctx, "image", "delete", id)
+// RemoveImage removes one or more images by ID or name in a single call.
+func (c *Client) RemoveImage(ctx context.Context, ids ...string) error {
+	if len(ids) == 0 {
+		return errNoDeleteTargets
+	}
+	_, err := c.run(ctx, append([]string{"image", "delete"}, ids...)...)
 	return err
 }
 

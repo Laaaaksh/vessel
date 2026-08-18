@@ -11,18 +11,27 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
+const (
+	colName   = 28
+	colDriver = 10
+)
+
 // Model is the volumes panel.
 type Model struct {
-	items     []backend.Volume
-	filtered  []backend.Volume
-	cursor    int
-	filter    string
-	filtering bool
-	pageRows  int
+	items      []backend.Volume
+	filtered   []backend.Volume
+	cursor     int
+	filter     string
+	filtering  bool
+	marked     map[string]bool
+	toggleMark string
+	pageRows   int
 }
 
 // New creates an empty volumes model.
-func New() Model { return Model{pageRows: 10} }
+func New() Model {
+	return Model{marked: make(map[string]bool), toggleMark: defaultToggleMark, pageRows: 10}
+}
 
 // Filtering reports whether the filter prompt is active.
 func (m Model) Filtering() bool { return m.filtering }
@@ -44,10 +53,18 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the volume list.
+// SetItems replaces the volume list and drops marks for volumes it no longer
+// contains, so a mark can never outlive the row it points at.
 func (m Model) SetItems(items []backend.Volume) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
+	marked := make(map[string]bool, len(m.marked))
+	for _, v := range items {
+		if m.marked[v.Name] {
+			marked[v.Name] = true
+		}
+	}
+	m.marked = marked
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
@@ -61,6 +78,30 @@ func (m Model) Selected() *backend.Volume {
 	}
 	v := m.filtered[m.cursor]
 	return &v
+}
+
+// defaultToggleMark is the fallback binding for a panel the app has not handed
+// its key map to; a real space bar press serialises as "space", never " ".
+const defaultToggleMark = "space"
+
+// SetToggleMarkKey sets the key that toggles a mark on the selected row. An
+// empty binding is ignored so the panel can never end up unmarkable.
+func (m Model) SetToggleMarkKey(k string) Model {
+	if k != "" {
+		m.toggleMark = k
+	}
+	return m
+}
+
+// MarkedIDs returns multi-selected volume names.
+func (m Model) MarkedIDs() []string {
+	var out []string
+	for _, v := range m.filtered {
+		if m.marked[v.Name] {
+			out = append(out, v.Name)
+		}
+	}
+	return out
 }
 
 // MoveBy moves the cursor by delta rows.
@@ -125,6 +166,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
+	case m.toggleMark:
+		if sel := m.Selected(); sel != nil {
+			if m.marked == nil {
+				m.marked = make(map[string]bool)
+			}
+			if m.marked[sel.Name] {
+				delete(m.marked, sel.Name)
+			} else {
+				m.marked[sel.Name] = true
+			}
+		}
 	}
 	return m, nil
 }
@@ -149,7 +201,7 @@ func (m Model) ListView(width, height int) string {
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
 		BorderBottom(true).BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#374151")).Width(width).
-		Render(fmt.Sprintf("%-28s %-10s %s", "NAME", "DRIVER", "CREATED"))
+		Render(fmt.Sprintf("%-*s %-*s %s", colName, "NAME", colDriver, "DRIVER", "CREATED"))
 
 	sel := lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd"))
 	row := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0"))
@@ -172,7 +224,11 @@ func (m Model) ListView(width, height int) string {
 	var rows []string
 	for i := start; i < end; i++ {
 		v := m.filtered[i]
-		line := fmt.Sprintf("%-28s %-10s %s", uiutil.Truncate(v.Name, 28), v.Driver, uiutil.Ago(v.Created))
+		mark := " "
+		if m.marked[v.Name] {
+			mark = "*"
+		}
+		line := fmt.Sprintf("%s%s %-*s %s", mark, uiutil.Pad(v.Name, colName-1), colDriver, v.Driver, uiutil.Ago(v.Created))
 		st := row
 		if i == m.cursor {
 			st = sel

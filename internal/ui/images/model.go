@@ -11,18 +11,27 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
+const (
+	colRef  = 40
+	colSize = 12
+)
+
 // Model is the images panel.
 type Model struct {
-	items     []backend.Image
-	filtered  []backend.Image
-	cursor    int
-	filter    string
-	filtering bool
-	pageRows  int
+	items      []backend.Image
+	filtered   []backend.Image
+	cursor     int
+	filter     string
+	filtering  bool
+	marked     map[string]bool
+	toggleMark string
+	pageRows   int
 }
 
 // New creates an empty images model.
-func New() Model { return Model{pageRows: 10} }
+func New() Model {
+	return Model{marked: make(map[string]bool), toggleMark: defaultToggleMark, pageRows: 10}
+}
 
 // Filtering reports whether the filter prompt is active.
 func (m Model) Filtering() bool { return m.filtering }
@@ -44,10 +53,37 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the image list.
+// defaultToggleMark is the fallback binding for a panel the app has not handed
+// its key map to; a real space bar press serialises as "space", never " ".
+const defaultToggleMark = "space"
+
+// SetToggleMarkKey sets the key that toggles a mark on the selected row. An
+// empty binding is ignored so the panel can never end up unmarkable.
+func (m Model) SetToggleMarkKey(k string) Model {
+	if k != "" {
+		m.toggleMark = k
+	}
+	return m
+}
+
+// markKey identifies a row for multi-select. Two references can resolve to the
+// same digest, so the id alone would key both rows to a single mark.
+func markKey(img backend.Image) string {
+	return img.ID + "\x00" + backend.FormatRef(img)
+}
+
+// SetItems replaces the image list and drops marks for images it no longer
+// contains, so a mark can never outlive the row it points at.
 func (m Model) SetItems(items []backend.Image) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
+	marked := make(map[string]bool, len(m.marked))
+	for _, img := range items {
+		if k := markKey(img); m.marked[k] {
+			marked[k] = true
+		}
+	}
+	m.marked = marked
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
@@ -61,6 +97,20 @@ func (m Model) Selected() *backend.Image {
 	}
 	img := m.filtered[m.cursor]
 	return &img
+}
+
+// MarkedIDs returns multi-selected image IDs, each at most once: several
+// references can share one digest, and the delete takes digests.
+func (m Model) MarkedIDs() []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, img := range m.filtered {
+		if m.marked[markKey(img)] && !seen[img.ID] {
+			seen[img.ID] = true
+			out = append(out, img.ID)
+		}
+	}
+	return out
 }
 
 // MoveBy adjusts cursor.
@@ -125,6 +175,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
+	case m.toggleMark:
+		if sel := m.Selected(); sel != nil {
+			if m.marked == nil {
+				m.marked = make(map[string]bool)
+			}
+			k := markKey(*sel)
+			if m.marked[k] {
+				delete(m.marked, k)
+			} else {
+				m.marked[k] = true
+			}
+		}
 	}
 	return m, nil
 }
@@ -149,7 +211,7 @@ func (m Model) ListView(width, height int) string {
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
 		BorderBottom(true).BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#374151")).Width(width).
-		Render(fmt.Sprintf("%-40s %-12s %s", "REPOSITORY:TAG", "SIZE", "CREATED"))
+		Render(fmt.Sprintf("%-*s %-*s %s", colRef, "REPOSITORY:TAG", colSize, "SIZE", "CREATED"))
 
 	sel := lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd"))
 	row := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0"))
@@ -172,9 +234,14 @@ func (m Model) ListView(width, height int) string {
 	var rows []string
 	for i := start; i < end; i++ {
 		img := m.filtered[i]
-		line := fmt.Sprintf("%-40s %-12s %s",
-			uiutil.Truncate(backend.FormatRef(img), 40),
-			uiutil.HumanBytes(img.Size),
+		mark := " "
+		if m.marked[markKey(img)] {
+			mark = "*"
+		}
+		line := fmt.Sprintf("%s%s %-*s %s",
+			mark,
+			uiutil.Pad(backend.FormatRef(img), colRef-1),
+			colSize, uiutil.HumanBytes(img.Size),
 			uiutil.Ago(img.Created),
 		)
 		st := row
