@@ -41,6 +41,18 @@ type volumesLoadedMsg struct {
 	err   error
 }
 
+type imageInspectMsg struct {
+	ref string
+	ins *backend.ImageInspect
+	err error
+}
+
+type volumeInspectMsg struct {
+	name string
+	ins  *backend.VolumeInspect
+	err  error
+}
+
 type actionDoneMsg struct {
 	err error
 	msg string
@@ -210,13 +222,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.imgPanel = m.imgPanel.SetItems(msg.items)
 		}
-		return m, nil
+		return m, m.loadImageInspectCmd()
 	case volumesLoadedMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err
 		} else {
 			m.volPanel = m.volPanel.SetItems(msg.items)
 		}
+		return m, m.loadVolumeInspectCmd()
+	case imageInspectMsg:
+		m.imgPanel = m.imgPanel.SetInspect(msg.ref, msg.ins, msg.err)
+		return m, nil
+	case volumeInspectMsg:
+		m.volPanel = m.volPanel.SetInspect(msg.name, msg.ins, msg.err)
 		return m, nil
 	case actionDoneMsg:
 		if msg.err != nil {
@@ -445,6 +463,46 @@ func (m Model) loadVolumesCmd() tea.Cmd {
 	}
 }
 
+// loadImageInspectCmd inspects the currently selected image (if any) so the
+// images detail pane can render the enriched fields.
+func (m Model) loadImageInspectCmd() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	sel := m.imgPanel.Selected()
+	if sel == nil {
+		return nil
+	}
+	ref := backend.FormatRef(*sel)
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		ins, err := client.ImageInspect(ctx, ref)
+		return imageInspectMsg{ref: ref, ins: ins, err: err}
+	}
+}
+
+// loadVolumeInspectCmd inspects the currently selected volume (if any) so the
+// volumes detail pane can render size/format/labels/options.
+func (m Model) loadVolumeInspectCmd() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	sel := m.volPanel.Selected()
+	if sel == nil {
+		return nil
+	}
+	name := sel.Name
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		ins, err := client.VolumeInspect(ctx, name)
+		return volumeInspectMsg{name: name, ins: ins, err: err}
+	}
+}
+
 func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.lastErr = msg.err
@@ -664,13 +722,38 @@ func (m Model) routeToPanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.activeView {
 	case ViewImages:
+		before := m.imgPanel.Selected()
 		m.imgPanel, cmd = m.imgPanel.Update(msg)
+		if selectionRefChanged(before, m.imgPanel.Selected()) {
+			return m, tea.Batch(cmd, m.loadImageInspectCmd())
+		}
 	case ViewVolumes:
+		before := m.volPanel.Selected()
 		m.volPanel, cmd = m.volPanel.Update(msg)
+		if selectionNameChanged(before, m.volPanel.Selected()) {
+			return m, tea.Batch(cmd, m.loadVolumeInspectCmd())
+		}
 	default:
 		m.cntPanel, cmd = m.cntPanel.Update(msg)
 	}
 	return m, cmd
+}
+
+// selectionRefChanged reports whether the selected image changed, so the app
+// can trigger a fresh inspect for the new selection.
+func selectionRefChanged(before, after *backend.Image) bool {
+	if before == nil || after == nil {
+		return before != after
+	}
+	return backend.FormatRef(*before) != backend.FormatRef(*after)
+}
+
+// selectionNameChanged reports whether the selected volume changed.
+func selectionNameChanged(before, after *backend.Volume) bool {
+	if before == nil || after == nil {
+		return before != after
+	}
+	return before.Name != after.Name
 }
 
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
