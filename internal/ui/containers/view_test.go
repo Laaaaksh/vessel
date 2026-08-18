@@ -1,8 +1,10 @@
 package containers
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -76,5 +78,44 @@ func TestDetailView_noSelection(t *testing.T) {
 	v := ansi.Strip(New().DetailView(60, 40, nil))
 	if !strings.Contains(v, "no container selected") {
 		t.Fatalf("expected empty state, got %q", v)
+	}
+}
+
+func TestDetailView_staysWithinHeightBudgetAndKeepsMetrics(t *testing.T) {
+	mounts := make([]backend.Mount, 12)
+	for i := range mounts {
+		mounts[i] = backend.Mount{Source: fmt.Sprintf("/host/data-%d", i), Destination: fmt.Sprintf("/data-%d", i)}
+	}
+	labels := map[string]string{"a": "1", "b": "2"}
+	m := New().SetItems([]backend.Container{{
+		ID: "abc", Name: "web", Status: "running",
+		Mounts: mounts, Labels: labels,
+		Env: []string{"PATH=/usr/bin", "HOME=/root"},
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	const height = 20
+	v := ansi.Strip(m.DetailView(60, height, poller))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into a %d-line budget", got, height)
+	}
+	lines := strings.Split(v, "\n")
+	for i, l := range lines {
+		head := strings.TrimSpace(l)
+		if !strings.HasPrefix(head, "--") {
+			continue
+		}
+		next := ""
+		if i+1 < len(lines) {
+			next = strings.TrimSpace(lines[i+1])
+		}
+		if next == "" || strings.HasPrefix(next, "--") {
+			t.Errorf("section header %q rendered with no rows under it", head)
+		}
+	}
+	// The live metrics block must not be crowded out by a long mounts list.
+	if !strings.Contains(v, "CPU") {
+		t.Errorf("live metrics squeezed out by the mounts section: %q", v)
 	}
 }

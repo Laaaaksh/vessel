@@ -1,6 +1,7 @@
 package volumes
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -300,5 +301,57 @@ func TestSetInspect_lateResultForOtherVolumeKeepsCurrentCache(t *testing.T) {
 	}
 	if strings.Contains(v, "xfs") {
 		t.Errorf("foreign format rendered: %q", v)
+	}
+}
+
+func manyPairs(n int, prefix string) map[string]string {
+	out := make(map[string]string, n)
+	for i := range n {
+		out[fmt.Sprintf("%s_%02d", prefix, i)] = "some-value"
+	}
+	return out
+}
+
+func TestDetailView_staysWithinHeightBudget(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(12, "label")
+	ins.Options = manyPairs(4, "option")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	const height = 20
+	v := ansi.Strip(m.DetailView(60, height))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into a %d-line budget", got, height)
+	}
+	lines := strings.Split(v, "\n")
+	for i, l := range lines {
+		head := strings.TrimSpace(l)
+		if !strings.HasPrefix(head, "--") {
+			continue
+		}
+		next := ""
+		if i+1 < len(lines) {
+			next = strings.TrimSpace(lines[i+1])
+		}
+		if next == "" || strings.HasPrefix(next, "--") {
+			t.Errorf("section header %q rendered with no rows under it", head)
+		}
+	}
+	if !strings.Contains(v, "[c] create") {
+		t.Errorf("key hints pushed out of the pane: %q", v)
+	}
+}
+
+func TestDetailView_sectionRowsAreStablyOrdered(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(6, "label")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	first := ansi.Strip(m.DetailView(60, 40))
+	for range 5 {
+		if got := ansi.Strip(m.DetailView(60, 40)); got != first {
+			t.Fatal("label rows render in a different order between calls")
+		}
 	}
 }

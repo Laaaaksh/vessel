@@ -316,6 +316,10 @@ func (m Model) ListView(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
+// keybarLines is the spacer plus the key hint row the detail pane always ends
+// with; sections must leave room for them.
+const keybarLines = 2
+
 // DetailView renders image details.
 func (m Model) DetailView(width, height int) string {
 	sel := m.Selected()
@@ -332,6 +336,7 @@ func (m Model) DetailView(width, height int) string {
 	}
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	budget := height - keybarLines
 	if m.inspect != nil && m.inspectRef == backend.FormatRef(*sel) {
 		if d := m.inspect.Digest; d != "" {
 			lines = append(lines, uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
@@ -346,32 +351,22 @@ func (m Model) DetailView(width, height int) string {
 			lines = append(lines, uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
 		}
 
-		if len(m.inspect.Env) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, dim.Render("-- Env --"))
-			for _, e := range m.inspect.Env {
-				if len(lines) > height-4 {
-					break
-				}
-				lines = append(lines, dim.Render("  "+uiutil.Truncate(e, width-6)))
-			}
+		env := make([]string, 0, len(m.inspect.Env))
+		for _, e := range m.inspect.Env {
+			env = append(env, dim.Render("  "+uiutil.Truncate(e, width-6)))
 		}
+		lines = uiutil.Section(lines, budget, dim.Render("-- Env --"), env)
 
-		if len(m.inspect.Platforms) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, dim.Render("-- Platforms --"))
-			for _, p := range m.inspect.Platforms {
-				if len(lines) > height-4 {
-					break
-				}
-				line := p.OS + "/" + p.Architecture + "  " + uiutil.HumanBytes(p.Size)
-				lines = append(lines, dim.Render("  "+uiutil.Truncate(line, width-6)))
-			}
+		platforms := make([]string, 0, len(m.inspect.Platforms))
+		for _, p := range m.inspect.Platforms {
+			line := p.OS + "/" + p.Architecture + "  " + uiutil.HumanBytes(p.Size)
+			platforms = append(platforms, dim.Render("  "+uiutil.Truncate(line, width-6)))
 		}
+		lines = uiutil.Section(lines, budget, dim.Render("-- Platforms --"), platforms)
 	} else if m.inspectErr != nil && m.inspectRef == backend.FormatRef(*sel) {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
-			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+		lines = uiutil.AppendLines(lines, budget, "",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
+				Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
 	}
 
 	lines = append(lines, "", dim.Render("[p] pull  [c] run  [d] delete  [P] prune"))

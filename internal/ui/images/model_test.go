@@ -1,6 +1,7 @@
 package images
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -315,5 +316,72 @@ func TestSetInspect_lateResultForOtherImageKeepsCurrentCache(t *testing.T) {
 	}
 	if strings.Contains(v, "nginxdigest") {
 		t.Errorf("foreign digest rendered: %q", v)
+	}
+}
+
+func manyEnv(n int) []string {
+	env := make([]string, n)
+	for i := range env {
+		env[i] = fmt.Sprintf("VAR_NUMBER_%d=some-value", i)
+	}
+	return env
+}
+
+func TestDetailView_staysWithinHeightBudget(t *testing.T) {
+	ins := cachedInspect("id1", "sha256:digest")
+	ins.Env = manyEnv(12)
+	ins.Platforms = []backend.ImagePlatform{
+		{OS: "linux", Architecture: "arm64", Size: 5242880},
+		{OS: "linux", Architecture: "amd64", Size: 2097152},
+	}
+	m := New().SetItems([]backend.Image{imageWithID("id1")}).SetInspect(testRef, ins, nil)
+
+	const height = 20
+	v := ansi.Strip(m.DetailView(60, height))
+
+	assertFitsHeight(t, v, height)
+	assertNoDanglingHeader(t, v)
+	if !strings.Contains(v, "[p] pull") {
+		t.Errorf("key hints pushed out of the pane: %q", v)
+	}
+}
+
+func TestDetailView_rendersEverythingWhenItFits(t *testing.T) {
+	ins := cachedInspect("id1", "sha256:digest")
+	ins.Env = manyEnv(2)
+	ins.Platforms = []backend.ImagePlatform{{OS: "linux", Architecture: "arm64", Size: 5242880}}
+	m := New().SetItems([]backend.Image{imageWithID("id1")}).SetInspect(testRef, ins, nil)
+
+	v := ansi.Strip(m.DetailView(60, 40))
+
+	for _, want := range []string{"-- Env --", "VAR_NUMBER_0", "-- Platforms --", "linux/arm64"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("detail missing %q at full height", want)
+		}
+	}
+}
+
+func assertFitsHeight(t *testing.T, v string, height int) {
+	t.Helper()
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into a %d-line budget", got, height)
+	}
+}
+
+func assertNoDanglingHeader(t *testing.T, v string) {
+	t.Helper()
+	lines := strings.Split(v, "\n")
+	for i, l := range lines {
+		head := strings.TrimSpace(l)
+		if !strings.HasPrefix(head, "--") {
+			continue
+		}
+		next := ""
+		if i+1 < len(lines) {
+			next = strings.TrimSpace(lines[i+1])
+		}
+		if next == "" || strings.HasPrefix(next, "--") {
+			t.Errorf("section header %q rendered with no rows under it", head)
+		}
 	}
 }

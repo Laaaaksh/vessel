@@ -2,6 +2,7 @@ package containers
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -153,62 +154,59 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 		lines = append(lines, uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
 	}
 
-	if len(sel.Mounts) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Mounts --"))
-		for _, mt := range sel.Mounts {
-			if len(lines) > height-4 {
-				break
-			}
-			line := mt.Source + " → " + mt.Destination
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-				Render("  "+uiutil.Truncate(line, width-6)))
-		}
-	}
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	metrics := metricRows(sel, poller, width)
 
-	if poller != nil {
-		m2, ok := poller.Snapshot().Get(sel.ID)
-		lines = append(lines, uiutil.KV("CPU", backend.FormatCPU(m2, ok)))
-		lines = append(lines, uiutil.KV("Memory", backend.FormatMem(m2, ok)))
-		if ok {
-			lines = append(lines, renderBar(m2.CPUPercent/100.0, width-4))
-			if m2.MemLimit > 0 {
-				lines = append(lines, renderBar(float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
-			}
-			if spark := poller.Sparkline(sel.ID, min(24, width-6)); spark != "" {
-				lines = append(lines, uiutil.KV("CPU hist", spark))
-			}
-		}
+	mounts := make([]string, 0, len(sel.Mounts))
+	for _, mt := range sel.Mounts {
+		mounts = append(mounts, dim.Render("  "+uiutil.Truncate(mt.Source+" → "+mt.Destination, width-6)))
 	}
+	lines = uiutil.Section(lines, height-len(metrics), dim.Render("-- Mounts --"), mounts)
+	lines = uiutil.AppendLines(lines, height, metrics...)
 
-	if len(sel.Labels) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Labels --"))
-		for k, v := range sel.Labels {
-			if len(lines) > height-4 {
-				break
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-				Render("  "+uiutil.Truncate(k+"="+v, width-6)))
-		}
-	}
+	lines = uiutil.Section(lines, height, dim.Render("-- Labels --"), pairRows(sel.Labels, dim, width))
 
-	if len(sel.Env) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Env --"))
-		for _, e := range sel.Env {
-			if len(lines) > height-4 {
-				break
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-				Render("  "+uiutil.Truncate(e, width-6)))
-		}
+	env := make([]string, 0, len(sel.Env))
+	for _, e := range sel.Env {
+		env = append(env, dim.Render("  "+uiutil.Truncate(e, width-6)))
 	}
+	lines = uiutil.Section(lines, height, dim.Render("-- Env --"), env)
 
 	return lipgloss.NewStyle().
 		Width(width).Height(height).
 		PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+}
+
+func metricRows(sel *backend.Container, poller *backend.Poller, width int) []string {
+	if poller == nil {
+		return nil
+	}
+	m2, ok := poller.Snapshot().Get(sel.ID)
+	rows := []string{
+		uiutil.KV("CPU", backend.FormatCPU(m2, ok)),
+		uiutil.KV("Memory", backend.FormatMem(m2, ok)),
+	}
+	if !ok {
+		return rows
+	}
+	rows = append(rows, renderBar(m2.CPUPercent/100.0, width-4))
+	if m2.MemLimit > 0 {
+		rows = append(rows, renderBar(float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
+	}
+	if spark := poller.Sparkline(sel.ID, min(24, width-6)); spark != "" {
+		rows = append(rows, uiutil.KV("CPU hist", spark))
+	}
+	return rows
+}
+
+func pairRows(pairs map[string]string, style lipgloss.Style, width int) []string {
+	rows := make([]string, 0, len(pairs))
+	for k, v := range pairs {
+		rows = append(rows, style.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
+	}
+	sort.Strings(rows)
+	return rows
 }
 
 func renderBar(pct float64, width int) string {
