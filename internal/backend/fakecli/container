@@ -48,6 +48,22 @@ case "$cmd" in
       list|ls) cat "$DATA/images.json" ;;
       delete|rm) echo "ok image delete ${1:-}" >&2 ;;
       pull) echo "ok image pull ${1:-}" >&2 ;;
+      tag) echo "ok image tag $*" >&2 ;;
+      save) echo "ok image save $*" >&2 ;;
+      load) echo "ok image load $*" >&2 ;;
+      push)
+        case "${FAKE_CONTAINER_FAIL_PUSH:-}" in
+          auth)
+            echo "Error: HTTP request to https://registry-1.docker.io/v2/library/foo/blobs/sha256:abc failed with response: 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io" >&2
+            exit 1
+            ;;
+          generic)
+            echo "Error: unexpected network failure" >&2
+            exit 1
+            ;;
+        esac
+        echo "ok image push $*" >&2
+        ;;
       *) echo "unknown image subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;
