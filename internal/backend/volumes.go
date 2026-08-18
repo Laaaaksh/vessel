@@ -26,9 +26,12 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 	return mapVolumes(raw), nil
 }
 
-// RemoveVolume deletes a volume by name.
-func (c *Client) RemoveVolume(ctx context.Context, name string) error {
-	_, err := c.run(ctx, "volume", "delete", name)
+// RemoveVolume deletes one or more volumes by name in a single call.
+func (c *Client) RemoveVolume(ctx context.Context, names ...string) error {
+	if len(names) == 0 {
+		return errNoDeleteTargets
+	}
+	_, err := c.run(ctx, append([]string{"volume", "delete"}, names...)...)
 	return err
 }
 
