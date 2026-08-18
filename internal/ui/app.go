@@ -122,6 +122,9 @@ type Model struct {
 	pendingKind deleteKind
 	pendingIDs  []string
 	pendingLbl  string
+	// pendingPush holds the image reference a confirm modal is staging for a
+	// push, so the same modal can carry a push instead of a delete.
+	pendingPush string
 	logCancel   context.CancelFunc
 	logCh       chan backend.LogLine
 	logID       string
@@ -230,6 +233,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowse
 		m.pendingIDs = nil
 		m.pendingLbl = ""
+		m.pendingPush = ""
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
 		if msg.err != nil {
@@ -475,11 +479,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeConfirmDelete {
 		switch k {
 		case "y":
-			return m.confirmDelete()
+			return m.confirmPending()
 		case "n", "esc":
 			m.mode = modeBrowse
 			m.pendingIDs = nil
 			m.pendingLbl = ""
+			m.pendingPush = ""
 			m.status = "cancelled"
 			return m, nil
 		}
@@ -728,6 +733,7 @@ func (m Model) beginDelete(kind deleteKind, ids []string, label string) (tea.Mod
 	m.pendingKind = kind
 	m.pendingIDs = ids
 	m.pendingLbl = label
+	m.pendingPush = ""
 	return m, nil
 }
 
@@ -765,12 +771,28 @@ func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 	return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
 }
 
+// confirmPending runs whatever the confirm modal is currently holding. Delete
+// is the common case; push is routed here too because publishing the wrong
+// image to a registry is as unrecoverable as a delete.
+func (m Model) confirmPending() (tea.Model, tea.Cmd) {
+	if ref := m.pendingPush; ref != "" {
+		m.mode = modeBrowse
+		m.pendingPush = ""
+		m.pendingLbl = ""
+		return m.runGlobal("push "+ref, func(ctx context.Context) error {
+			return m.client.PushImage(ctx, ref)
+		})
+	}
+	return m.confirmDelete()
+}
+
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
 	m.mode = modeBrowse
 	m.pendingIDs = nil
 	m.pendingLbl = ""
+	m.pendingPush = ""
 	if len(ids) == 0 {
 		return m, nil
 	}
@@ -1109,10 +1131,11 @@ func (m Model) buildActions() []actionItem {
 					return m, nil
 				}
 				ref := backend.FormatRef(*sel)
-				x, c := m.runGlobal("push "+ref, func(ctx context.Context) error {
-					return m.client.PushImage(ctx, ref)
-				})
-				return x.(Model), c
+				m.mode = modeConfirmDelete
+				m.pendingIDs = nil
+				m.pendingPush = ref
+				m.pendingLbl = ref + " → " + backend.PushTarget(ref)
+				return m, nil
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
 				x, c := m.runGlobal("prune images", func(ctx context.Context) error {
@@ -1338,7 +1361,11 @@ func (m Model) confirmModal() string {
 	if label == "" {
 		label = strings.Join(m.pendingIDs, ", ")
 	}
-	body := fmt.Sprintf("Delete %s?\n\n[y] confirm   [n/esc] cancel", label)
+	verb := "Delete"
+	if m.pendingPush != "" {
+		verb = "Push"
+	}
+	body := fmt.Sprintf("%s %s?\n\n[y] confirm   [n/esc] cancel", verb, label)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorRed).
