@@ -1022,19 +1022,44 @@ func (m Model) beginStop() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// pruneSpec pairs the question asked about a prune target with the footer label
+// and the call that performs it, so the modal can never ask about one store and
+// sweep another.
+type pruneSpec struct {
+	label    string
+	question string
+	run      func(context.Context, *backend.Client) error
+}
+
+var pruneSpecs = map[deleteKind]pruneSpec{
+	pruneContainers: {"prune containers", "Prune stopped containers?", func(ctx context.Context, c *backend.Client) error {
+		return c.PruneContainers(ctx)
+	}},
+	pruneImages: {"prune images", "Prune unused images?", func(ctx context.Context, c *backend.Client) error {
+		return c.PruneImages(ctx)
+	}},
+	pruneVolumes: {"prune volumes", "Prune unused volumes?", func(ctx context.Context, c *backend.Client) error {
+		return c.PruneVolumes(ctx)
+	}},
+}
+
+func pruneSpecFor(kind deleteKind) pruneSpec {
+	if spec, ok := pruneSpecs[kind]; ok {
+		return spec
+	}
+	return pruneSpecs[pruneContainers]
+}
+
 // pendingAction describes a confirmed action: the footer label shown while it
 // runs, the message reported on success, and its time budget. A prune sweeps a
 // whole container/image/volume store, so it keeps the longer budget it had
 // before it was routed through the confirm modal; the other paths remove a
 // single resource.
 func pendingAction(kind deleteKind) (label, done string, timeout time.Duration) {
+	if kind.isPrune() {
+		return pruneSpecFor(kind).label, "pruned", globalTimeout
+	}
 	switch kind {
-	case pruneContainers:
-		return "prune containers", "pruned", globalTimeout
-	case pruneImages:
-		return "prune images", "pruned", globalTimeout
-	case pruneVolumes:
-		return "prune volumes", "pruned", globalTimeout
 	case stopContainer:
 		return "stop", "stopped", lifecycleTimeout
 	default:
@@ -1057,14 +1082,9 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		var err error
-		msg := done
 		switch kind {
-		case pruneContainers:
-			err = client.PruneContainers(ctx)
-		case pruneImages:
-			err = client.PruneImages(ctx)
-		case pruneVolumes:
-			err = client.PruneVolumes(ctx)
+		case pruneContainers, pruneImages, pruneVolumes:
+			err = pruneSpecFor(kind).run(ctx, client)
 		case stopContainer:
 			err = client.StopContainer(ctx, ids[0])
 		case deleteImages:
@@ -1084,7 +1104,7 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 		if err != nil {
 			return actionDoneMsg{err: err}
 		}
-		return actionDoneMsg{msg: msg}
+		return actionDoneMsg{msg: done}
 	}
 }
 
@@ -1611,23 +1631,15 @@ func (m Model) helpView() string {
 // confirmQuestion returns the concrete question for the pending confirm (delete,
 // prune, stop), rather than a generic "are you sure?".
 func (m Model) confirmQuestion() string {
-	switch m.pendingKind {
-	case pruneImages:
-		return "Prune unused images?"
-	case pruneVolumes:
-		return "Prune unused volumes?"
-	case pruneContainers:
-		return "Prune stopped containers?"
-	case stopContainer:
-		label := m.pendingLbl
-		if label == "" {
-			label = strings.Join(m.pendingIDs, ", ")
-		}
-		return fmt.Sprintf("Stop %s?", label)
+	if m.pendingKind.isPrune() {
+		return pruneSpecFor(m.pendingKind).question
 	}
 	label := m.pendingLbl
 	if label == "" {
 		label = strings.Join(m.pendingIDs, ", ")
+	}
+	if m.pendingKind == stopContainer {
+		return fmt.Sprintf("Stop %s?", label)
 	}
 	return fmt.Sprintf("Delete %s?", label)
 }
