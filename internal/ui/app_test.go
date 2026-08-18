@@ -200,14 +200,30 @@ func volumesModel(t *testing.T) Model {
 	return m
 }
 
-func inspectRefOf(t *testing.T, cmd tea.Cmd) string {
+// settle runs the debounce timer the selection change scheduled and delivers
+// the resulting message, returning whatever inspect command it triggers.
+func settle(t *testing.T, m Model, cmd tea.Cmd) (Model, tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
-		t.Fatal("expected an inspect command, got nil")
+		t.Fatal("expected a debounced inspect to be scheduled, got nil")
 	}
-	msg, ok := cmd().(imageInspectMsg)
+	msg, ok := cmd().(inspectSettledMsg)
 	if !ok {
-		t.Fatalf("expected imageInspectMsg, got %T", msg)
+		t.Fatalf("expected inspectSettledMsg, got %T", cmd())
+	}
+	next, out := m.Update(msg)
+	return next.(Model), out
+}
+
+func inspectRefOf(t *testing.T, m Model, cmd tea.Cmd) string {
+	t.Helper()
+	_, load := settle(t, m, cmd)
+	if load == nil {
+		t.Fatal("expected an inspect command after the selection settled, got nil")
+	}
+	msg, ok := load().(imageInspectMsg)
+	if !ok {
+		t.Fatalf("expected imageInspectMsg, got %T", load())
 	}
 	return msg.ref
 }
@@ -219,7 +235,7 @@ func TestMouseWheel_imagesInspectsNewSelection(t *testing.T) {
 	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
 		t.Fatalf("selection after wheel = %q, want nginx:1.27", got)
 	}
-	if got := inspectRefOf(t, cmd); got != "nginx:1.27" {
+	if got := inspectRefOf(t, m, cmd); got != "nginx:1.27" {
 		t.Errorf("inspect ref = %q, want nginx:1.27", got)
 	}
 }
@@ -231,7 +247,7 @@ func TestMouseClick_imagesInspectsNewSelection(t *testing.T) {
 	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
 		t.Fatalf("selection after click = %q, want nginx:1.27", got)
 	}
-	if got := inspectRefOf(t, cmd); got != "nginx:1.27" {
+	if got := inspectRefOf(t, m, cmd); got != "nginx:1.27" {
 		t.Errorf("inspect ref = %q, want nginx:1.27", got)
 	}
 }
@@ -253,15 +269,50 @@ func TestMouseWheel_volumesInspectsNewSelection(t *testing.T) {
 	if got := m.volPanel.Selected().Name; got != "cache" {
 		t.Fatalf("selection after wheel = %q, want cache", got)
 	}
-	if cmd == nil {
-		t.Fatal("expected an inspect command, got nil")
+	_, load := settle(t, m, cmd)
+	if load == nil {
+		t.Fatal("expected an inspect command after the selection settled, got nil")
 	}
-	msg, ok := cmd().(volumeInspectMsg)
+	msg, ok := load().(volumeInspectMsg)
 	if !ok {
-		t.Fatalf("expected volumeInspectMsg, got %T", msg)
+		t.Fatalf("expected volumeInspectMsg, got %T", load())
 	}
 	if msg.name != "cache" {
 		t.Errorf("inspect name = %q, want cache", msg.name)
+	}
+}
+
+func TestInspect_rapidSelectionChangesCoalesceIntoOne(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+		{ID: "3", Repository: "redis", Tag: "7"},
+	})
+
+	// Two cursor steps in quick succession, as a held key produces.
+	var scheduled []tea.Cmd
+	for range 2 {
+		next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("selection change must schedule an inspect")
+		}
+		scheduled = append(scheduled, cmd)
+	}
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "redis:7" {
+		t.Fatalf("selection after two steps = %q, want redis:7", got)
+	}
+
+	// Every superseded timer must be a no-op...
+	for i, cmd := range scheduled[:len(scheduled)-1] {
+		if _, load := settle(t, m, cmd); load != nil {
+			t.Errorf("superseded timer %d inspected anyway: %T", i, load())
+		}
+	}
+	// ...and only the last one inspects, for the settled selection.
+	if got := inspectRefOf(t, m, scheduled[len(scheduled)-1]); got != "redis:7" {
+		t.Errorf("settled inspect ref = %q, want redis:7", got)
 	}
 }
 
