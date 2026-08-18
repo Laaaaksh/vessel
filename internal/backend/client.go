@@ -18,6 +18,11 @@ const (
 	cmdLogN = 40
 )
 
+// errNoDeleteTargets rejects an empty variadic delete. The CLI needs an explicit
+// --all to wipe everything, so a no-argument call destroys nothing; it is a
+// caller bug that would otherwise surface only as a confusing CLI usage error.
+var errNoDeleteTargets = fmt.Errorf("delete requires at least one target")
+
 // Client is the adapter that shells out to the container CLI.
 type Client struct {
 	binary  string
