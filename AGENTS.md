@@ -14,6 +14,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `backend.Client.RemoveImage`/`RemoveVolume` take variadic ids/names and refuse an empty call (`errNoDeleteTargets` in `internal/backend/client.go`). A bare `container image delete` destroys nothing - the CLI needs `--all` for that - so the guard is there to catch a caller bug that would otherwise surface as a confusing CLI usage error.
 - Every CLI invocation is re-wrapped with `Client.timeout` (10s, `internal/backend/client.go`), so the context a caller passes never widens it. A bulk image or volume delete batches every id into one invocation and shares that single 10s budget, so a large one can be killed partway and reported as a failure with nothing actually wrong; bulk container deletes issue one call per id and so get 10s each.
 
+## Build / test / lint
+- `go build ./... && go vet ./...` then `go test ./... -race -count=1` (see `scripts/smoke.sh`).
+- Lint: `golangci-lint run ./...`. The Homebrew golangci-lint (v2.5.0, built with Go 1.25) refuses to load the config because `go.mod` targets 1.26.5 — use a `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` binary instead (v2.12.2+). Config lives in `.golangci.yml`; goimports group uses `github.com/Laaaaksh/vessel` as the local prefix.
+- Baseline lint on `main` is already red (13 issues: `main.go` errcheck, `config.ConfigPath` revive stutter, `focus.go`/`images/model.go`/`volumes/model.go` exported-comment revives, `containers/view.go` staticcheck). They are pre-existing; a phase should only fix lint its own diff introduces.
+
+## Live CLI probes
+- The Apple `container` CLI (v1.2.2) and its system services are running on this machine (`container system status` → running), so live TUI/backend probes work. `container list --all --format json` for live state.
+- Destroy nothing shared: other crewmates run live probes concurrently (e.g. named containers/volumes like `*probe*`). Verify prune etc. only through the confirm modal's cancel path, or with throwaway resources cleaned up immediately.
+- To reproduce the "services down" path string-based hint while services are up, shadow PATH with a wrapper returning the CLI's documented error for one verb and delegating the rest, then run the real binary in a PTY.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
