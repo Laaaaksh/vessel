@@ -16,6 +16,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -122,9 +123,8 @@ type Model struct {
 	pendingKind deleteKind
 	pendingIDs  []string
 	pendingLbl  string
-	// pendingPush holds the image reference a confirm modal is staging for a
-	// push, so the same modal can carry a push instead of a delete.
-	pendingPush string
+	pendingVerb string
+	pendingAct  func(Model) (Model, tea.Cmd)
 	logCancel   context.CancelFunc
 	logCh       chan backend.LogLine
 	logID       string
@@ -230,10 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = nil
 			m.status = msg.msg
 		}
-		m.mode = modeBrowse
-		m.pendingIDs = nil
-		m.pendingLbl = ""
-		m.pendingPush = ""
+		m = m.clearPending()
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
 		if msg.err != nil {
@@ -481,10 +478,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "y":
 			return m.confirmPending()
 		case "n", "esc":
-			m.mode = modeBrowse
-			m.pendingIDs = nil
-			m.pendingLbl = ""
-			m.pendingPush = ""
+			m = m.clearPending()
 			m.status = "cancelled"
 			return m, nil
 		}
@@ -733,7 +727,8 @@ func (m Model) beginDelete(kind deleteKind, ids []string, label string) (tea.Mod
 	m.pendingKind = kind
 	m.pendingIDs = ids
 	m.pendingLbl = label
-	m.pendingPush = ""
+	m.pendingVerb = ""
+	m.pendingAct = nil
 	return m, nil
 }
 
@@ -771,17 +766,33 @@ func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 	return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
 }
 
+// beginConfirm parks an action behind the confirm modal, labelled with the
+// concrete target it will act on. Delete stages its targets as pendingIDs; the
+// image actions carry more than one value, so they hand over a closure.
+func (m Model) beginConfirm(verb, label string, act func(Model) (Model, tea.Cmd)) Model {
+	m.mode = modeConfirmDelete
+	m.pendingIDs = nil
+	m.pendingLbl = label
+	m.pendingVerb = verb
+	m.pendingAct = act
+	return m
+}
+
+func (m Model) clearPending() Model {
+	m.mode = modeBrowse
+	m.pendingIDs = nil
+	m.pendingLbl = ""
+	m.pendingVerb = ""
+	m.pendingAct = nil
+	return m
+}
+
 // confirmPending runs whatever the confirm modal is currently holding. Delete
-// is the common case; push is routed here too because publishing the wrong
-// image to a registry is as unrecoverable as a delete.
+// is the common case; push and an overwriting save are routed here too because
+// publishing an image or truncating a local file is as unrecoverable.
 func (m Model) confirmPending() (tea.Model, tea.Cmd) {
-	if ref := m.pendingPush; ref != "" {
-		m.mode = modeBrowse
-		m.pendingPush = ""
-		m.pendingLbl = ""
-		return m.runGlobal("push "+ref, func(ctx context.Context) error {
-			return m.client.PushImage(ctx, ref)
-		})
+	if act := m.pendingAct; act != nil {
+		return act(m.clearPending())
 	}
 	return m.confirmDelete()
 }
@@ -789,10 +800,7 @@ func (m Model) confirmPending() (tea.Model, tea.Cmd) {
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
-	m.mode = modeBrowse
-	m.pendingIDs = nil
-	m.pendingLbl = ""
-	m.pendingPush = ""
+	m = m.clearPending()
 	if len(ids) == 0 {
 		return m, nil
 	}
@@ -1021,9 +1029,16 @@ func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 		})
 	case "save to":
 		imageRef, path := ref, msg.text
-		return m.runGlobal("save "+imageRef, func(ctx context.Context) error {
-			return m.client.SaveImage(ctx, imageRef, path)
-		})
+		save := func(m Model) (Model, tea.Cmd) {
+			x, c := m.runGlobal("save "+imageRef+" → "+path, func(ctx context.Context) error {
+				return m.client.SaveImage(ctx, imageRef, path)
+			})
+			return x.(Model), c
+		}
+		if backend.FileExists(path) {
+			return m.beginConfirm("Overwrite", path+" with "+imageRef, save), nil
+		}
+		return save(m)
 	case "load from":
 		path := msg.text
 		return m.runGlobal("load "+path, func(ctx context.Context) error {
@@ -1045,6 +1060,23 @@ func (m Model) openActions() (tea.Model, tea.Cmd) {
 	m.actionItems = items
 	m.actionIdx = 0
 	return m, nil
+}
+
+// imageActionRef resolves the highlighted row to a reference safe to act on.
+// Tag, Save and Push all reach outside the process, so a row that formats to an
+// ambiguous reference is refused rather than silently resolved to ":latest".
+func (m Model) imageActionRef() (Model, string, bool) {
+	sel := m.imgPanel.Selected()
+	if sel == nil {
+		m.status = "nothing selected"
+		return m, "", false
+	}
+	ref, ok := backend.ExactRef(*sel)
+	if !ok {
+		m.status = "image has no tag — tag it first"
+		return m, "", false
+	}
+	return m, ref, true
 }
 
 func (m Model) buildActions() []actionItem {
@@ -1103,21 +1135,19 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Tag…", func(m Model) (Model, tea.Cmd) {
-				sel := m.imgPanel.Selected()
-				if sel == nil {
-					m.status = "nothing selected"
+				m, ref, ok := m.imageActionRef()
+				if !ok {
 					return m, nil
 				}
-				x, c := m.beginPromptForImage("tag", backend.FormatRef(*sel))
+				x, c := m.beginPromptForImage("tag", ref)
 				return x.(Model), c
 			}},
 			actionItem{"Save…", func(m Model) (Model, tea.Cmd) {
-				sel := m.imgPanel.Selected()
-				if sel == nil {
-					m.status = "nothing selected"
+				m, ref, ok := m.imageActionRef()
+				if !ok {
 					return m, nil
 				}
-				x, c := m.beginPromptForImage("save to", backend.FormatRef(*sel))
+				x, c := m.beginPromptForImage("save to", ref)
 				return x.(Model), c
 			}},
 			actionItem{"Load…", func(m Model) (Model, tea.Cmd) {
@@ -1125,17 +1155,17 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Push", func(m Model) (Model, tea.Cmd) {
-				sel := m.imgPanel.Selected()
-				if sel == nil {
-					m.status = "nothing selected"
+				m, ref, ok := m.imageActionRef()
+				if !ok {
 					return m, nil
 				}
-				ref := backend.FormatRef(*sel)
-				m.mode = modeConfirmDelete
-				m.pendingIDs = nil
-				m.pendingPush = ref
-				m.pendingLbl = ref + " → " + backend.PushTarget(ref)
-				return m, nil
+				label := ref + " → " + backend.PushTarget(ref)
+				return m.beginConfirm("Push", label, func(m Model) (Model, tea.Cmd) {
+					x, c := m.runGlobal("push "+ref, func(ctx context.Context) error {
+						return m.client.PushImage(ctx, ref)
+					})
+					return x.(Model), c
+				}), nil
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
 				x, c := m.runGlobal("prune images", func(ctx context.Context) error {
@@ -1260,10 +1290,10 @@ func (m Model) viewName() string {
 
 func (m Model) footerView() string {
 	if m.lastErr != nil {
-		return m.st.errorText.Width(m.width).Render("error: " + m.lastErr.Error())
+		return m.st.errorText.Width(m.width).Render(m.clampToRow("error: " + m.lastErr.Error()))
 	}
 	if m.status != "" {
-		return m.st.footerHelp.Width(m.width).Render(m.status)
+		return m.st.footerHelp.Width(m.width).Render(m.clampToRow(m.status))
 	}
 	cur, n := m.cursorInfo()
 	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)
@@ -1280,6 +1310,18 @@ func (m Model) footerView() string {
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
 	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
+}
+
+// clampToRow flattens s onto one row no wider than the frame. layoutDims
+// budgets the footer exactly one row, and CLI errors arrive with embedded
+// newlines and hundreds of characters of stderr, so anything unclamped pushes
+// the header off the alt-screen.
+func (m Model) clampToRow(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if m.width <= 0 {
+		return s
+	}
+	return uiutil.Truncate(s, m.width)
 }
 
 func (m Model) cursorInfo() (int, int) {
@@ -1361,9 +1403,9 @@ func (m Model) confirmModal() string {
 	if label == "" {
 		label = strings.Join(m.pendingIDs, ", ")
 	}
-	verb := "Delete"
-	if m.pendingPush != "" {
-		verb = "Push"
+	verb := m.pendingVerb
+	if verb == "" {
+		verb = "Delete"
 	}
 	body := fmt.Sprintf("%s %s?\n\n[y] confirm   [n/esc] cancel", verb, label)
 	return lipgloss.NewStyle().
