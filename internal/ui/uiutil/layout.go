@@ -78,8 +78,8 @@ func Headline(text string, width, height int) string {
 // Pane accumulates detail-pane rows within a budget counted in rendered rows.
 // Once a row does not fit the pane is full: later rows are dropped even when
 // they would fit, so what renders is always a prefix of what was asked for
-// rather than an arbitrary subset. Grow reopens it for the content its budget
-// was reserved for.
+// rather than an arbitrary subset. AddReserved spends a reservation without
+// reopening the pane for anything else.
 type Pane struct {
 	width  int
 	budget int
@@ -90,16 +90,22 @@ type Pane struct {
 
 // NewPane starts a pane of the given width that may occupy budget rendered
 // rows. Reserve room for trailing content by passing a reduced budget and
-// releasing it with Grow once the earlier rows are in.
+// spending it with AddReserved once the earlier rows are in.
 func NewPane(width, budget int) *Pane {
 	return &Pane{width: width, budget: max(0, budget)}
 }
 
-// Grow raises the budget by n rendered rows, releasing a reservation made for
-// content that is about to be added.
-func (p *Pane) Grow(n int) {
-	p.budget += n
+// AddReserved appends the rows a reservation of that many rendered rows was
+// held for. A pane that filled up before the reservation is spent stays full
+// afterwards, so rows added later cannot jump ahead of rows already dropped.
+func (p *Pane) AddReserved(reserved int, rows ...string) {
+	wasFull := p.full
+	p.budget += reserved
 	p.full = false
+	p.Add(rows...)
+	if wasFull {
+		p.full = true
+	}
 }
 
 // Remaining reports how many rendered rows are still free.
