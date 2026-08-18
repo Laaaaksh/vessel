@@ -16,6 +16,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -105,15 +106,25 @@ const (
 	modePrompt
 )
 
-// deleteKind names which panel a staged delete belongs to, so the confirmation
-// carries its targets as plain ids instead of a prefix-encoded string.
+// deleteKind names what a staged confirmation will do, so the confirmation
+// carries its targets as plain ids instead of a prefix-encoded string. Prune and
+// stop reuse the same modeConfirmDelete plumbing as their own kinds.
 type deleteKind int
 
 const (
 	deleteContainers deleteKind = iota
 	deleteImages
 	deleteVolumes
+	pruneContainers
+	pruneImages
+	pruneVolumes
+	stopContainer
 )
+
+// isPrune reports whether kind is a prune, which stages no ids of its own.
+func (k deleteKind) isPrune() bool {
+	return k == pruneContainers || k == pruneImages || k == pruneVolumes
+}
 
 // Model is the root bubbletea model for vessel.
 type Model struct {
@@ -721,6 +732,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A custom command configured with this key takes precedence over the
+	// built-in single-key actions below.
+	if cmd := m.customCommandForKey(k); cmd != "" {
+		return m.runCustom(cmd)
+	}
+
 	if Match(k, m.keys.Actions) {
 		return m.openActions()
 	}
@@ -733,9 +750,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ViewContainers:
 		switch {
 		case Match(k, m.keys.Stop):
-			return m.runOnSelected("stop", func(ctx context.Context, id string) error {
-				return m.client.StopContainer(ctx, id)
-			})
+			return m.beginStop()
 		case Match(k, m.keys.Start):
 			return m.runOnSelected("start", func(ctx context.Context, id string) error {
 				return m.client.StartContainer(ctx, id)
@@ -751,9 +766,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case Match(k, m.keys.Enter) && m.focus != FocusDetail:
 			return m.openShell()
 		case Match(k, m.keys.Prune):
-			return m.runGlobal("prune stopped", func(ctx context.Context) error {
-				return m.client.PruneContainers(ctx)
-			})
+			return m.beginPrune(pruneContainers)
 		case Match(k, m.keys.Create):
 			return m.beginPrompt("run", "image to run")
 		}
@@ -764,9 +777,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case Match(k, m.keys.Pull):
 			return m.beginPrompt("pull", "image to pull")
 		case Match(k, m.keys.Prune):
-			return m.runGlobal("prune images", func(ctx context.Context) error {
-				return m.client.PruneImages(ctx)
-			})
+			return m.beginPrune(pruneImages)
 		case Match(k, m.keys.Create):
 			sel := m.imgPanel.Selected()
 			if sel == nil {
@@ -784,9 +795,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case Match(k, m.keys.Create):
 			return m.beginPrompt("volcreate", "volume name")
 		case Match(k, m.keys.Prune):
-			return m.runGlobal("prune volumes", func(ctx context.Context) error {
-				return m.client.PruneVolumes(ctx)
-			})
+			return m.beginPrune(pruneVolumes)
 		}
 	}
 
@@ -954,20 +963,64 @@ func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 	return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
 }
 
+// beginPrune opens the confirm modal before a destructive prune. A prune targets
+// whatever the CLI deems unused, so it stages a kind with no ids.
+func (m Model) beginPrune(kind deleteKind) (tea.Model, tea.Cmd) {
+	m.mode = modeConfirmDelete
+	m.pendingKind = kind
+	m.pendingIDs = nil
+	m.pendingLbl = ""
+	return m, nil
+}
+
+// beginStop stops the selected container, asking for confirmation first when
+// the user opted into Config.ConfirmStop.
+func (m Model) beginStop() (tea.Model, tea.Cmd) {
+	sel := m.cntPanel.Selected()
+	if sel == nil {
+		m.status = "nothing selected"
+		return m, nil
+	}
+	id, name := sel.ID, sel.Name
+	if !m.cfg.ConfirmStop {
+		return m.runOnSelected("stop", func(ctx context.Context, containerID string) error {
+			return m.client.StopContainer(ctx, containerID)
+		})
+	}
+	m.mode = modeConfirmDelete
+	m.pendingKind = stopContainer
+	m.pendingIDs = []string{id}
+	m.pendingLbl = name
+	return m, nil
+}
+
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
 	m.mode = modeBrowse
 	m.pendingIDs = nil
 	m.pendingLbl = ""
-	if len(ids) == 0 {
+	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		var err error
+		msg := "deleted"
 		switch kind {
+		case pruneContainers:
+			msg = "pruned"
+			err = client.PruneContainers(ctx)
+		case pruneImages:
+			msg = "pruned"
+			err = client.PruneImages(ctx)
+		case pruneVolumes:
+			msg = "pruned"
+			err = client.PruneVolumes(ctx)
+		case stopContainer:
+			msg = "stopped"
+			err = client.StopContainer(ctx, ids[0])
 		case deleteImages:
 			err = client.RemoveImage(ctx, ids...)
 		case deleteVolumes:
@@ -985,7 +1038,7 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 		if err != nil {
 			return actionDoneMsg{err: err}
 		}
-		return actionDoneMsg{msg: "deleted"}
+		return actionDoneMsg{msg: msg}
 	}
 }
 
@@ -1198,9 +1251,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Stop", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runOnSelected("stop", func(ctx context.Context, id string) error {
-					return m.client.StopContainer(ctx, id)
-				})
+				x, c := m.beginStop()
 				return x.(Model), c
 			}},
 			actionItem{"Restart", func(m Model) (Model, tea.Cmd) {
@@ -1218,9 +1269,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Prune stopped", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runGlobal("prune stopped", func(ctx context.Context) error {
-					return m.client.PruneContainers(ctx)
-				})
+				x, c := m.beginPrune(pruneContainers)
 				return x.(Model), c
 			}},
 		)
@@ -1242,9 +1291,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runGlobal("prune images", func(ctx context.Context) error {
-					return m.client.PruneImages(ctx)
-				})
+				x, c := m.beginPrune(pruneImages)
 				return x.(Model), c
 			}},
 		)
@@ -1255,9 +1302,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runGlobal("prune volumes", func(ctx context.Context) error {
-					return m.client.PruneVolumes(ctx)
-				})
+				x, c := m.beginPrune(pruneVolumes)
 				return x.(Model), c
 			}},
 		)
@@ -1295,6 +1340,18 @@ func (m Model) handleActionsKey(k string) (tea.Model, tea.Cmd) {
 		return item.run(m)
 	}
 	return m, nil
+}
+
+// customCommandForKey returns the command string of the first custom command
+// configured with key k, or "" if none. A configured key is the user's explicit
+// opt-in and shadows the built-in key it collides with.
+func (m Model) customCommandForKey(k string) string {
+	for _, cc := range m.cfg.CustomCommands {
+		if cc.Key != "" && cc.Key == k {
+			return cc.Command
+		}
+	}
+	return ""
 }
 
 func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
@@ -1364,7 +1421,17 @@ func (m Model) viewName() string {
 
 func (m Model) footerView() string {
 	if m.lastErr != nil {
-		return m.st.errorText.Width(m.width).Render("error: " + m.lastErr.Error())
+		prefix := "error: "
+		msg := m.lastErr.Error()
+		hint := ""
+		if backend.IsServicesDown(m.lastErr) {
+			hint = " — run `container system start` to start services"
+			// The raw CLI error is long; truncate it so the hint is never
+			// pushed past the footer's width limit.
+			avail := max(0, m.width-len(prefix)-len([]rune(hint)))
+			msg = uiutil.Truncate(msg, avail)
+		}
+		return m.st.errorText.Width(m.width).Render(prefix + msg + hint)
 	}
 	if m.status != "" {
 		return m.st.footerHelp.Width(m.width).Render(m.status)
@@ -1460,12 +1527,32 @@ func (m Model) helpView() string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
-func (m Model) confirmModal() string {
+// confirmQuestion returns the concrete question for the pending confirm (delete,
+// prune, stop), rather than a generic "are you sure?".
+func (m Model) confirmQuestion() string {
+	switch m.pendingKind {
+	case pruneImages:
+		return "Prune unused images?"
+	case pruneVolumes:
+		return "Prune unused volumes?"
+	case pruneContainers:
+		return "Prune stopped containers?"
+	case stopContainer:
+		label := m.pendingLbl
+		if label == "" {
+			label = strings.Join(m.pendingIDs, ", ")
+		}
+		return fmt.Sprintf("Stop %s?", label)
+	}
 	label := m.pendingLbl
 	if label == "" {
 		label = strings.Join(m.pendingIDs, ", ")
 	}
-	body := fmt.Sprintf("Delete %s?\n\n[y] confirm   [n/esc] cancel", label)
+	return fmt.Sprintf("Delete %s?", label)
+}
+
+func (m Model) confirmModal() string {
+	body := fmt.Sprintf("%s\n\n[y] confirm   [n/esc] cancel", m.confirmQuestion())
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorRed).
