@@ -16,7 +16,7 @@ import (
 )
 
 func TestView_shellModeEmpty(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width = 80
 	m.height = 24
 	m.mode = modeShell
@@ -30,7 +30,7 @@ func TestView_shellModeEmpty(t *testing.T) {
 }
 
 func TestSelection_listContainsRows(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width = 120
 	m.height = 40
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
@@ -45,7 +45,7 @@ func TestSelection_listContainsRows(t *testing.T) {
 }
 
 func TestFocusKeys(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.focus = FocusList
 	next, _ := m.handleKey(keyMsg("l"))
@@ -61,7 +61,7 @@ func TestFocusKeys(t *testing.T) {
 }
 
 func TestConfirmModalMode(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
 	next, _ := m.handleKey(keyMsg("d"))
@@ -514,7 +514,7 @@ func TestConfirmPruneModalMode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := New()
+			m := newTestModel()
 			m.width, m.height = 100, 30
 			m.activeView = tc.view
 			m.focus = FocusList
@@ -537,7 +537,7 @@ func TestConfirmPruneModalMode(t *testing.T) {
 }
 
 func TestConfirmPrune_actionMenuPath(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.focus = FocusList
 	next, _ := m.handleKey(keyMsg("x"))
@@ -564,7 +564,7 @@ func TestConfirmPrune_actionMenuPath(t *testing.T) {
 }
 
 func TestConfirmStop_configOff(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.cfg.ConfirmStop = false
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
@@ -579,7 +579,7 @@ func TestConfirmStop_configOff(t *testing.T) {
 }
 
 func TestConfirmStop_configOn(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.cfg.ConfirmStop = true
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
@@ -599,7 +599,7 @@ func TestConfirmStop_configOn(t *testing.T) {
 }
 
 func TestCustomCommandKeyDispatch(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.cfg.CustomCommands = []config.CustomCommand{{Name: "inspect", Key: "z", Command: "container inspect {{.ID}}"}}
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "vessel-probe", Name: "web", Status: "running"}})
@@ -618,7 +618,7 @@ func TestCustomCommandKeyDispatch(t *testing.T) {
 }
 
 func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	// User binds 'y' (normally yank) to a custom command; the configured key wins.
 	m.cfg.CustomCommands = []config.CustomCommand{{Name: "redefine", Key: "y", Command: "echo redefined"}}
@@ -631,7 +631,7 @@ func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
 }
 
 func TestFooterView_servicesDownHint(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. Start the container system services and retry:" +
 		"\n\n    container system start\n)")
@@ -648,7 +648,7 @@ func TestFooterView_servicesDownHint(t *testing.T) {
 }
 
 func TestFooterView_noHintForOtherErrors(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
 	out := ansi.Strip(viewString(m.View()))
@@ -756,7 +756,7 @@ func TestCustomCommandWithoutCommandKeepsBuiltin(t *testing.T) {
 		t.Fatalf("the built-in y must keep its help entry:\n%s", all)
 	}
 
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.focus = FocusList
 	m.cfg.CustomCommands = custom
@@ -768,7 +768,7 @@ func TestCustomCommandWithoutCommandKeepsBuiltin(t *testing.T) {
 }
 
 func TestCustomCommandKeyDoesNotShadowNavigation(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.focus = FocusList
 	m.cfg.CustomCommands = []config.CustomCommand{{Name: "nav", Key: "j", Command: "echo nope"}}
@@ -811,7 +811,7 @@ func TestHelpBindings_customCommands(t *testing.T) {
 
 func TestFooterView_servicesDownStaysOneLine(t *testing.T) {
 	for _, w := range []int{60, 100, 183, 200} {
-		m := New()
+		m := newTestModel()
 		m.width, m.height = w, 30
 		m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
 			"Start the container system services and retry:\n\n    container system start\n)")
@@ -833,7 +833,7 @@ func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
 		t.Fatalf("single-resource delete budget = %v, want %v", timeout, confirmTimeout)
 	}
 
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.focus = FocusList
@@ -856,7 +856,7 @@ func TestHelpView_fitsTerminalHeight(t *testing.T) {
 	}
 	for _, size := range []struct{ w, h int }{{80, 24}, {80, 12}, {120, 40}, {200, 60}} {
 		for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
-			m := New()
+			m := newTestModel()
 			m.width, m.height = size.w, size.h
 			m.activeView = v
 			m.cfg.CustomCommands = custom
@@ -871,7 +871,7 @@ func TestHelpView_fitsTerminalHeight(t *testing.T) {
 }
 
 func TestHelpView_scrollsToTheLastBinding(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 80, 24
 	m.showHelp = true
 	bindings := m.helpBindings()
@@ -945,6 +945,112 @@ func TestStopTimeoutMatchesUnconfirmedStop(t *testing.T) {
 	if _, _, timeout := pendingAction(stopContainer); timeout != lifecycleTimeout {
 		t.Fatalf("confirming a stop must not change its budget: got %v want %v", timeout, lifecycleTimeout)
 	}
+}
+
+// newTestModel is New() with the developer's ~/.config/vessel/config.toml
+// dropped, so assertions never depend on the host's dotfiles.
+func newTestModel() Model {
+	m := New()
+	m.cfg = config.Config{}
+	return m
+}
+
+func TestFooterView_alwaysOneLine(t *testing.T) {
+	servicesDown := errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+	states := []struct {
+		name  string
+		apply func(Model) Model
+	}{
+		{"resting key hints", func(m Model) Model { return m }},
+		{"status", func(m Model) Model {
+			m.status = "custom: " + strings.Repeat("echo hello ", 30)
+			return m
+		}},
+		{"multi-line status", func(m Model) Model {
+			m.status = "custom ok\nsecond line\tthird"
+			return m
+		}},
+		{"services down", func(m Model) Model {
+			m.lastErr = servicesDown
+			return m
+		}},
+		{"plain error", func(m Model) Model {
+			m.lastErr = errors.New("container [list]: exit status 1 (stderr: " + strings.Repeat("boom ", 40) + ")")
+			return m
+		}},
+	}
+	for _, st := range states {
+		for _, w := range []int{60, 72, 80, 100, 183, 200} {
+			for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+				m := newTestModel()
+				m.width, m.height = w, 24
+				m.activeView = v
+				m = st.apply(m)
+				footer := m.footerView()
+				if lines := lipgloss.Height(footer); lines != 1 {
+					t.Fatalf("%s at width %d view %d: footer must be one row, got %d: %q",
+						st.name, w, v, lines, footer)
+				}
+			}
+		}
+	}
+}
+
+func TestHelpBindings_keyStillLiveInLogViewKeepsARow(t *testing.T) {
+	km := DefaultKeyMap()
+	for _, key := range []string{km.Follow, km.Yank} {
+		custom := []config.CustomCommand{{Name: "taken", Key: key, Command: "echo taken"}}
+		var got []string
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, km, custom) {
+			for _, t := range helpKeyTokens(b.key) {
+				if t == key {
+					got = append(got, b.desc)
+				}
+			}
+		}
+		if len(got) != 2 {
+			t.Fatalf("key %q: want a custom row plus its surviving log-view row, got %q", key, got)
+		}
+		var custRow, logRow bool
+		for _, d := range got {
+			if strings.HasPrefix(d, "custom:") {
+				custRow = true
+			}
+			if strings.Contains(d, "log view") {
+				logRow = true
+			}
+		}
+		if !custRow || !logRow {
+			t.Fatalf("key %q: help must show both the custom command and what it still does in the log view, got %q", key, got)
+		}
+	}
+}
+
+func TestCustomCommandKeyModifierSpellings(t *testing.T) {
+	t.Run("modifier order is canonical", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "shift-ctrl-a", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "ctrl+shift+a"); got != "echo probe" {
+			t.Fatalf("a keypress spells modifiers ctrl+shift+…, so that config key must fire on it, got %q", got)
+		}
+	})
+	t.Run("shifted character is unmatchable", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "phantom", Key: "shift+z", Command: "echo nope"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "Z"); got != "" {
+			t.Fatalf("shift+z is not what a keypress reports; it must not claim to fire, got %q", got)
+		}
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			if strings.Contains(b.desc, "phantom") {
+				t.Fatalf("a binding that can never fire must not appear in help: %q -> %q", b.key, b.desc)
+			}
+		}
+	})
+	t.Run("shift plus a named key stays usable", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "shift+tab", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "shift+tab"); got != "echo probe" {
+			t.Fatalf("shift+tab is a real keypress spelling, got %q", got)
+		}
+	})
 }
 
 func viewString(v tea.View) string {
