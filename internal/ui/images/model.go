@@ -329,7 +329,8 @@ func (m Model) DetailView(width, height int) string {
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
+			Render(uiutil.Headline(backend.FormatRef(*sel), width, height)),
 		"",
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
 		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
