@@ -115,7 +115,7 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 			{"P", "prune unused images"},
 			{"d", "delete marked (confirm)"},
 			{"c", "run container from image"},
-			{"x → tag/save/load/push", "image mobility (push confirms)"},
+			{"x → image mobility", "tag, save, load, push (push confirms)"},
 			{"", "large save/load/push may be cut off by a 10s CLI cap"},
 		}, base...)
 	case ViewVolumes:
