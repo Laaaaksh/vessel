@@ -40,3 +40,41 @@ func TestRenderRowAlignsWithHeader(t *testing.T) {
 		}
 	}
 }
+
+// TestDetailView_rendersInspectDepth checks that the detail pane surfaces the
+// fields the list JSON already carries: network/IP, mounts, resources,
+// platform, hostname.
+func TestDetailView_rendersInspectDepth(t *testing.T) {
+	m := New().SetItems([]backend.Container{{
+		ID:          "abc",
+		Name:        "web",
+		Status:      "running",
+		Hostname:    "web",
+		Platform:    "linux/arm64",
+		CPUs:        4,
+		MemoryBytes: 1073741824,
+		Mounts:      []backend.Mount{{Source: "/host/data", Destination: "/data"}},
+		Networks:    []backend.Network{{Name: "default", IP: "192.168.64.2/24"}},
+	}})
+	v := ansi.Strip(m.DetailView(60, 40, nil))
+	for _, want := range []string{
+		"web",
+		"Hostname", "web",
+		"Platform", "linux/arm64",
+		"CPUs", "4",
+		"Memory", "1 GiB",
+		"-- Mounts --", "/host/data → /data",
+		"Networks", "default (192.168.64.2/24)",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("detail missing %q", want)
+		}
+	}
+}
+
+func TestDetailView_noSelection(t *testing.T) {
+	v := ansi.Strip(New().DetailView(60, 40, nil))
+	if !strings.Contains(v, "no container selected") {
+		t.Fatalf("expected empty state, got %q", v)
+	}
+}
