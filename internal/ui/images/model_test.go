@@ -385,3 +385,23 @@ func assertNoDanglingHeader(t *testing.T, v string) {
 		}
 	}
 }
+
+func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
+	ins := cachedInspect("id1", "sha256:e7a1a92a5bfeee40966aea60f0796b0e")
+	ins.Cmd = []string{"/bin/sh"}
+	ins.WorkingDir = "/"
+	ins.LayerCount = 1
+	ins.Env = manyEnv(4)
+	ins.Platforms = []backend.ImagePlatform{{OS: "linux", Architecture: "arm64", Size: 5242880}}
+	m := New().SetItems([]backend.Image{imageWithID("id1")}).SetInspect(testRef, ins, nil)
+
+	// The app accepts a 60x12 terminal, which leaves the detail pane 18 columns
+	// and 8 rows, so rows wrap as well as run long.
+	for _, width := range []int{18, 38} {
+		for _, height := range []int{4, 6, 8, 10} {
+			v := ansi.Strip(m.DetailView(width, height))
+			assertFitsHeight(t, v, height)
+			assertNoDanglingHeader(t, v)
+		}
+	}
+}
