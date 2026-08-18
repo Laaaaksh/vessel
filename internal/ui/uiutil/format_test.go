@@ -133,3 +133,33 @@ func TestRenderPane_neverExceedsHeight(t *testing.T) {
 		t.Errorf("RenderPane rendered %d rows into 6", got)
 	}
 }
+
+func TestReserve_boundedToHalfThePane(t *testing.T) {
+	if got := Reserve(6, 8); got != 4 {
+		t.Errorf("Reserve(6, 8) = %d, want 4", got)
+	}
+	if got := Reserve(2, 8); got != 2 {
+		t.Errorf("Reserve(2, 8) = %d, want 2", got)
+	}
+	if got := Reserve(3, 4); got != 2 {
+		t.Errorf("Reserve(3, 4) = %d, want 2", got)
+	}
+}
+
+func TestPane_dropsEverythingAfterTheFirstRowThatDoesNotFit(t *testing.T) {
+	p := NewPane(20, 3)
+	p.Add("one")
+	p.Add(strings.Repeat("x", 50)) // three rendered rows: does not fit
+	p.Add("short")                 // would fit, but must not jump the queue
+
+	got := p.Lines()
+	if len(got) != 1 || got[0] != "one" {
+		t.Fatalf("rows must render as a prefix of what was asked for, got %v", got)
+	}
+
+	p.Grow(2)
+	p.Add("tail")
+	if got := p.Lines(); len(got) != 2 || got[1] != "tail" {
+		t.Errorf("Grow must reopen the pane for its reserved content, got %v", got)
+	}
+}

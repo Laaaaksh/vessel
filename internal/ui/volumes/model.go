@@ -299,10 +299,6 @@ func (m Model) ListView(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
-// keybarLines is the spacer plus the key hint row the detail pane always ends
-// with; sections must leave room for them.
-const keybarLines = 2
-
 // DetailView renders volume details.
 func (m Model) DetailView(width, height int) string {
 	sel := m.Selected()
@@ -311,8 +307,8 @@ func (m Model) DetailView(width, height int) string {
 			Foreground(lipgloss.Color("#6b7280")).Render("  no volume selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	keybar := dim.Render("[c] create  [d] delete  [P] prune  [y] yank path")
-	reserved := 1 + uiutil.RowsFor(keybar, width)
+	keybar := dim.Render(uiutil.Truncate("[c] create  [d] delete  [P] prune  [y] yank path", width-1))
+	reserved := uiutil.Reserve(1+uiutil.RowsFor(keybar, width), height)
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(

@@ -147,3 +147,28 @@ func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailView_narrowPaneRendersRowsInOrder(t *testing.T) {
+	m := New().SetItems([]backend.Container{{
+		ID:          "abc123456789",
+		Name:        "web",
+		Image:       "alpine:latest",
+		Status:      "running",
+		MemoryBytes: 1073741824,
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	// Every row wraps at this width, so most of them cannot fit.
+	v := ansi.Strip(m.DetailView(10, 8, poller))
+
+	if got := strings.Count(v, "\n") + 1; got > 8 {
+		t.Errorf("pane rendered %d lines into 10x8", got)
+	}
+	if !strings.Contains(v, "web") {
+		t.Errorf("the container name must always render: %q", v)
+	}
+	// A later row must not appear while an earlier one was dropped for space.
+	if strings.Contains(v, "Status") && !strings.Contains(v, "Image") {
+		t.Errorf("Status rendered while the earlier Image row was dropped: %q", v)
+	}
+}

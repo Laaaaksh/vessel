@@ -397,13 +397,35 @@ func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
 				t.Errorf("section header %q rendered with no rows under it at height %d", head, height)
 			}
 		}
-		// The bar itself wraps at this width; its last token proves the
-		// reservation covered every rendered row of it.
-		if !strings.Contains(v, "yank path") {
-			t.Errorf("key hints clipped at height %d: %q", height, v)
+		// The bar is truncated to a single row so it cannot crowd out the
+		// volume itself, which must still be identifiable.
+		if !strings.Contains(v, "[c] create") {
+			t.Errorf("key hints missing at height %d: %q", height, v)
+		}
+		for _, want := range []string{"data", "Driver"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("detail missing %q at height %d: %q", want, height, v)
+			}
 		}
 	}
 	if v := ansi.Strip(m.DetailView(40, 24)); !strings.Contains(v, "-- Labels --") {
 		t.Fatalf("no section rendered, the header assertions are vacuous: %q", v)
+	}
+}
+
+func TestDetailView_narrowPaneStillIdentifiesTheVolume(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	const width, height = 18, 6
+	v := ansi.Strip(m.DetailView(width, height))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+	}
+	for _, want := range []string{"data", "Driver", "local"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("narrow pane dropped %q for key hints: %q", want, v)
+		}
 	}
 }
