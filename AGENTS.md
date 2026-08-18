@@ -14,6 +14,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `backend.Client.RemoveImage`/`RemoveVolume` take variadic ids/names and refuse an empty call (`errNoDeleteTargets` in `internal/backend/client.go`). A bare `container image delete` destroys nothing - the CLI needs `--all` for that - so the guard is there to catch a caller bug that would otherwise surface as a confusing CLI usage error.
 - Every CLI invocation is re-wrapped with `Client.timeout` (10s, `internal/backend/client.go`), so the context a caller passes never widens it. A bulk image or volume delete batches every id into one invocation and shares that single 10s budget, so a large one can be killed partway and reported as a failure with nothing actually wrong; bulk container deletes issue one call per id and so get 10s each.
 
+## Container CLI sharp edges
+
+- Vessel deliberately does NOT own registry login: `image push` auth failures
+  tell the user to run `container registry login` (see `internal/backend/images.go`).
+- On this container 1.2.x build, `image save/load/tag/push` are core subcommands,
+  but `image pull` is a plugin (`container-pull` is absent): probe live, don't
+  assume. Live probe results live in `docs/APPLE_CONTAINER_MATRIX.md`.
+- `image tag <source> <target>` and `image save --output <path> <ref>` argument
+  order is asserted in tests via `Client.CommandLog`; don't swap the order.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
