@@ -223,6 +223,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case actionDoneMsg:
+		m.imgPanel = m.imgPanel.SetNotice("")
 		if msg.err != nil {
 			m.lastErr = msg.err
 			m.status = ""
@@ -232,7 +233,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.lastErr = nil
 			m.status = msg.msg
-			m.imgPanel = m.imgPanel.SetNotice("")
 		}
 		m = m.clearPending()
 		return m, m.refreshCmd()

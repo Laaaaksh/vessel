@@ -926,6 +926,73 @@ func TestImagesDetail_showsRegistryLoginAfterAuthFailure(t *testing.T) {
 	}
 }
 
+func TestImagesDetail_noticeNeverGrowsThePaneBeyondItsBudget(t *testing.T) {
+	panel := New().imgPanel.
+		SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}}).
+		SetNotice(backend.PushAuthNotice)
+	// The geometry mainPanels hands the detail pane on the smallest terminal
+	// View() still renders (60x12), and on 80x24 with the command log open.
+	for _, size := range []struct{ w, h int }{{18, 8}, {14, 16}, {40, 20}} {
+		rendered := ansi.Strip(panel.DetailView(size.w, size.h))
+		rows := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+		if len(rows) > size.h {
+			t.Errorf("detail pane %dx%d rendered %d rows: %q", size.w, size.h, len(rows), rendered)
+		}
+		for _, row := range rows {
+			if w := lipgloss.Width(row); w > size.w {
+				t.Errorf("detail pane %dx%d row is %d cells wide: %q", size.w, size.h, w, row)
+			}
+		}
+	}
+}
+
+func TestImagesDetail_noticeSurvivesOnASmallPane(t *testing.T) {
+	panel := New().imgPanel.
+		SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}}).
+		SetNotice(backend.PushAuthNotice)
+	detail := squash(ansi.Strip(panel.DetailView(18, 8)))
+	if !strings.Contains(detail, squash("container registry login")) {
+		t.Fatalf("the login instruction must survive the pane cap, got: %q", detail)
+	}
+}
+
+func TestImagesDetail_noticeClearedByALaterNonAuthFailure(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
+	out, _ := next.(Model).Update(cmd().(actionDoneMsg))
+	om := out.(Model)
+	if !strings.Contains(squash(ansi.Strip(om.imgPanel.DetailView(40, 20))), squash("container registry login")) {
+		t.Fatal("precondition: the auth failure should have set the notice")
+	}
+
+	after, _ := om.Update(actionDoneMsg{err: errors.New("unexpected network failure")})
+	am := after.(Model)
+	detail := squash(ansi.Strip(am.imgPanel.DetailView(40, 20)))
+	if strings.Contains(detail, squash("container registry login")) {
+		t.Fatalf("a non-auth failure must not leave stale credential advice, got: %q", detail)
+	}
+}
+
+func TestHelpView_keyColumnNeverRunsIntoItsDescription(t *testing.T) {
+	for _, view := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		m := New()
+		m.width, m.height = 80, 24
+		m.activeView = view
+		rendered := ansi.Strip(m.helpView())
+		for _, b := range helpBindings(m.activeView, m.focus, m.mode) {
+			if b.key == "" || b.desc == "" {
+				continue
+			}
+			if strings.Contains(rendered, b.key+b.desc) {
+				t.Errorf("%s help: key %q runs straight into its description", m.viewName(), b.key)
+			}
+		}
+	}
+}
+
 func TestImagesAction_Tag_promptNamesSourceAndWantsNewRef(t *testing.T) {
 	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	run := findAction(m.buildActions(), "Tag…")
