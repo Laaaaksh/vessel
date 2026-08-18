@@ -18,11 +18,14 @@ type Model struct {
 	cursor    int
 	filter    string
 	filtering bool
+	marked    map[string]bool
 	pageRows  int
 }
 
 // New creates an empty volumes model.
-func New() Model { return Model{pageRows: 10} }
+func New() Model {
+	return Model{marked: make(map[string]bool), pageRows: 10}
+}
 
 // Filtering reports whether the filter prompt is active.
 func (m Model) Filtering() bool { return m.filtering }
@@ -61,6 +64,23 @@ func (m Model) Selected() *backend.Volume {
 	}
 	v := m.filtered[m.cursor]
 	return &v
+}
+
+// MarkedIDs returns multi-selected volume names.
+func (m Model) MarkedIDs() []string {
+	var out []string
+	for _, v := range m.filtered {
+		if m.marked[v.Name] {
+			out = append(out, v.Name)
+		}
+	}
+	return out
+}
+
+// ClearMarks clears multi-select.
+func (m Model) ClearMarks() Model {
+	m.marked = make(map[string]bool)
+	return m
 }
 
 // MoveBy moves the cursor by delta rows.
@@ -125,6 +145,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
+	case "space":
+		if sel := m.Selected(); sel != nil {
+			if m.marked == nil {
+				m.marked = make(map[string]bool)
+			}
+			if m.marked[sel.Name] {
+				delete(m.marked, sel.Name)
+			} else {
+				m.marked[sel.Name] = true
+			}
+		}
 	}
 	return m, nil
 }
@@ -172,7 +203,11 @@ func (m Model) ListView(width, height int) string {
 	var rows []string
 	for i := start; i < end; i++ {
 		v := m.filtered[i]
-		line := fmt.Sprintf("%-28s %-10s %s", uiutil.Truncate(v.Name, 28), v.Driver, uiutil.Ago(v.Created))
+		mark := " "
+		if m.marked[v.Name] {
+			mark = "*"
+		}
+		line := fmt.Sprintf("%s %-28s %-10s %s", mark, uiutil.Truncate(v.Name, 28), v.Driver, uiutil.Ago(v.Created))
 		st := row
 		if i == m.cursor {
 			st = sel

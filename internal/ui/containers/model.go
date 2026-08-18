@@ -178,7 +178,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
-	case " ":
+	// A space bar press serialises via KeyPressMsg.String as "space", not " ".
+	case "space":
 		if sel := m.Selected(); sel != nil {
 			if m.marked == nil {
 				m.marked = make(map[string]bool)

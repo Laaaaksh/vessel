@@ -18,11 +18,14 @@ type Model struct {
 	cursor    int
 	filter    string
 	filtering bool
+	marked    map[string]bool
 	pageRows  int
 }
 
 // New creates an empty images model.
-func New() Model { return Model{pageRows: 10} }
+func New() Model {
+	return Model{marked: make(map[string]bool), pageRows: 10}
+}
 
 // Filtering reports whether the filter prompt is active.
 func (m Model) Filtering() bool { return m.filtering }
@@ -61,6 +64,23 @@ func (m Model) Selected() *backend.Image {
 	}
 	img := m.filtered[m.cursor]
 	return &img
+}
+
+// MarkedIDs returns multi-selected image IDs.
+func (m Model) MarkedIDs() []string {
+	var out []string
+	for _, img := range m.filtered {
+		if m.marked[img.ID] {
+			out = append(out, img.ID)
+		}
+	}
+	return out
+}
+
+// ClearMarks clears multi-select.
+func (m Model) ClearMarks() Model {
+	m.marked = make(map[string]bool)
+	return m
 }
 
 // MoveBy adjusts cursor.
@@ -125,6 +145,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
+	case "space":
+		if sel := m.Selected(); sel != nil {
+			if m.marked == nil {
+				m.marked = make(map[string]bool)
+			}
+			if m.marked[sel.ID] {
+				delete(m.marked, sel.ID)
+			} else {
+				m.marked[sel.ID] = true
+			}
+		}
 	}
 	return m, nil
 }
@@ -172,7 +203,12 @@ func (m Model) ListView(width, height int) string {
 	var rows []string
 	for i := start; i < end; i++ {
 		img := m.filtered[i]
-		line := fmt.Sprintf("%-40s %-12s %s",
+		mark := " "
+		if m.marked[img.ID] {
+			mark = "*"
+		}
+		line := fmt.Sprintf("%s %-40s %-12s %s",
+			mark,
 			uiutil.Truncate(backend.FormatRef(img), 40),
 			uiutil.HumanBytes(img.Size),
 			uiutil.Ago(img.Created),
