@@ -128,40 +128,45 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 			Render("  no container selected")
 	}
 
-	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name))
-	lines = append(lines, "")
-	lines = append(lines, uiutil.KV("Image", sel.Image))
-	lines = append(lines, uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)))
-	if !sel.Created.IsZero() {
-		lines = append(lines, uiutil.KV("Created", uiutil.Ago(sel.Created)))
-	}
-	lines = append(lines, uiutil.KV("Status", sel.Status))
-	lines = append(lines, uiutil.KV("Ports", backend.FormatPorts(sel.Ports)))
-	if sel.Hostname != "" {
-		lines = append(lines, uiutil.KV("Hostname", sel.Hostname))
-	}
-	if sel.Platform != "" {
-		lines = append(lines, uiutil.KV("Platform", sel.Platform))
-	}
-	if sel.CPUs > 0 {
-		lines = append(lines, uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
-	}
-	if sel.MemoryBytes > 0 {
-		lines = append(lines, uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
-	}
-	if len(sel.Networks) > 0 {
-		lines = append(lines, uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
-	}
-
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
 	metrics := metricRows(sel, poller, width)
+	budget := max(0, height-len(metrics))
+
+	lines := uiutil.AppendLines(nil, budget,
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
+		"",
+		uiutil.KV("Image", sel.Image),
+		uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)),
+	)
+	if !sel.Created.IsZero() {
+		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Created", uiutil.Ago(sel.Created)))
+	}
+	lines = uiutil.AppendLines(lines, budget,
+		uiutil.KV("Status", sel.Status),
+		uiutil.KV("Ports", backend.FormatPorts(sel.Ports)),
+	)
+	if sel.Hostname != "" {
+		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Hostname", sel.Hostname))
+	}
+	if sel.Platform != "" {
+		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Platform", sel.Platform))
+	}
+	if sel.CPUs > 0 {
+		lines = uiutil.AppendLines(lines, budget, uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
+	}
+	if sel.MemoryBytes > 0 {
+		lines = uiutil.AppendLines(lines, budget, uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
+	}
+	if len(sel.Networks) > 0 {
+		lines = uiutil.AppendLines(lines, budget,
+			uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
+	}
 
 	mounts := make([]string, 0, len(sel.Mounts))
 	for _, mt := range sel.Mounts {
 		mounts = append(mounts, dim.Render("  "+uiutil.Truncate(mt.Source+" → "+mt.Destination, width-6)))
 	}
-	lines = uiutil.Section(lines, height-len(metrics), dim.Render("-- Mounts --"), mounts)
+	lines = uiutil.Section(lines, budget, dim.Render("-- Mounts --"), mounts)
 	lines = uiutil.AppendLines(lines, height, metrics...)
 
 	lines = uiutil.Section(lines, height, dim.Render("-- Labels --"), pairRows(sel.Labels, dim, width))
@@ -172,10 +177,11 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 	}
 	lines = uiutil.Section(lines, height, dim.Render("-- Env --"), env)
 
-	return lipgloss.NewStyle().
-		Width(width).Height(height).
+	body := lipgloss.NewStyle().
+		Width(width).
 		PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.NewStyle().Height(height).Render(uiutil.ClampHeight(body, height))
 }
 
 func metricRows(sel *backend.Container, poller *backend.Poller, width int) []string {

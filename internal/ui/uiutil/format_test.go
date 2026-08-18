@@ -66,3 +66,27 @@ func TestHumanBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestClampHeight(t *testing.T) {
+	block := "a\nb\nc\nd"
+	if got := ClampHeight(block, 2); got != "a\nb" {
+		t.Errorf("ClampHeight(4 lines, 2) = %q", got)
+	}
+	if got := ClampHeight(block, 9); got != block {
+		t.Errorf("short block must pass through, got %q", got)
+	}
+	if got := ClampHeight(block, 0); got != "" {
+		t.Errorf("zero height must render nothing, got %q", got)
+	}
+}
+
+func TestSection_skippedWhenHeaderAndRowDoNotFit(t *testing.T) {
+	lines := []string{"one", "two"}
+	if got := Section(lines, 4, "-- Labels --", []string{"a=1"}); len(got) != 2 {
+		t.Errorf("section must be dropped whole when it cannot fit, got %v", got)
+	}
+	got := Section(lines, 5, "-- Labels --", []string{"a=1", "b=2"})
+	if len(got) != 5 || got[3] != "-- Labels --" || got[4] != "a=1" {
+		t.Errorf("section must fill exactly the budget, got %v", got)
+	}
+}

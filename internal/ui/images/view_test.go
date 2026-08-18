@@ -61,14 +61,42 @@ func TestDetailView_rendersInspectFields(t *testing.T) {
 }
 
 func TestDetailView_inspectKeyedByRef(t *testing.T) {
-	// Inspect belonged to a different image: the fields must not leak into the
-	// currently selected one.
+	// The cached inspect belongs to the first image; after moving to the second
+	// none of its fields may leak into that image's pane.
 	m := New().SetItems([]backend.Image{
 		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
-	}).SetInspect("other/image:v1", &backend.ImageInspect{Digest: "sha256:stale"}, nil)
-	v := ansi.Strip(m.DetailView(60, 40))
-	if strings.Contains(v, "Digest") || strings.Contains(v, "stale") {
-		t.Fatalf("stale inspect rendered for a different ref: %q", v)
+		{ID: "nginxid", Repository: "nginx", Tag: "1.27", Size: 1048576},
+	}).SetInspect(testRef, &backend.ImageInspect{
+		ID:         "28bd5fe8b56d",
+		Digest:     "sha256:alpineonly",
+		Cmd:        []string{"/bin/sh"},
+		LayerCount: 1,
+	}, nil)
+
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "sha256:alpineonly") {
+		t.Fatalf("inspect not rendered for the image it belongs to: %q", v)
+	}
+
+	v := ansi.Strip(m.MoveBy(1).DetailView(60, 40))
+	if !strings.Contains(v, "nginx:1.27") {
+		t.Fatalf("expected the second image to be selected: %q", v)
+	}
+	for _, leaked := range []string{"sha256:alpineonly", "Digest", "/bin/sh", "Layers"} {
+		if strings.Contains(v, leaked) {
+			t.Errorf("previous image's inspect leaked into the next selection: %q in %q", leaked, v)
+		}
+	}
+}
+
+func TestDetailView_inspectErrorKeyedByRef(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest"},
+		{ID: "nginxid", Repository: "nginx", Tag: "1.27"},
+	}).SetInspect(testRef, nil, errors.New("boom"))
+
+	v := ansi.Strip(m.MoveBy(1).DetailView(60, 40))
+	if strings.Contains(v, "boom") {
+		t.Errorf("another image's inspect error rendered: %q", v)
 	}
 }
 
