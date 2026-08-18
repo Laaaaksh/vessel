@@ -311,8 +311,11 @@ func (m Model) DetailView(width, height int) string {
 			Foreground(lipgloss.Color("#6b7280")).Render("  no volume selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	budget := max(0, height-keybarLines)
-	lines := uiutil.AppendLines(nil, budget,
+	keybar := dim.Render("[c] create  [d] delete  [P] prune  [y] yank path")
+	reserved := 1 + uiutil.RowsFor(keybar, width)
+
+	p := uiutil.NewPane(width, height-reserved)
+	p.Add(
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
 		"",
 		uiutil.KV("Driver", sel.Driver),
@@ -323,28 +326,21 @@ func (m Model) DetailView(width, height int) string {
 	same := sel.Name == m.inspectName && m.inspect != nil
 	if same {
 		if m.inspect.Format != "" {
-			lines = uiutil.AppendLines(lines, budget, uiutil.KV("Format", m.inspect.Format))
+			p.Add(uiutil.KV("Format", m.inspect.Format))
 		}
 		if m.inspect.SizeBytes > 0 {
-			lines = uiutil.AppendLines(lines, budget,
-				uiutil.KV("Size", uiutil.HumanBytes(int64(m.inspect.SizeBytes))))
+			p.Add(uiutil.KV("Size", uiutil.HumanBytes(int64(m.inspect.SizeBytes))))
 		}
-	}
-	if same {
-		lines = uiutil.Section(lines, budget, dim.Render("-- Labels --"),
-			pairRows(m.inspect.Labels, dim, width))
-		lines = uiutil.Section(lines, budget, dim.Render("-- Options --"),
-			pairRows(m.inspect.Options, dim, width))
+		p.Section(dim.Render("-- Labels --"), pairRows(m.inspect.Labels, dim, width))
+		p.Section(dim.Render("-- Options --"), pairRows(m.inspect.Options, dim, width))
 	} else if m.inspectErr != nil && sel.Name == m.inspectName {
-		lines = uiutil.AppendLines(lines, budget, "",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
-				Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+		p.Add("", lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
+			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
 	}
 
-	lines = uiutil.AppendLines(lines, height, "", dim.Render("[c] create  [d] delete  [P] prune  [y] yank path"))
-	body := lipgloss.NewStyle().Width(width).PaddingLeft(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
-	return lipgloss.NewStyle().Height(height).Render(uiutil.ClampHeight(body, height))
+	p.Grow(reserved)
+	p.Add("", keybar)
+	return uiutil.RenderPane(width, height, p.Lines())
 }
 
 func pairRows(pairs map[string]string, style lipgloss.Style, width int) []string {

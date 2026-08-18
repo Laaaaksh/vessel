@@ -316,6 +316,46 @@ func TestInspect_rapidSelectionChangesCoalesceIntoOne(t *testing.T) {
 	}
 }
 
+func TestInspect_repeatedListLoadsDoNotStarveThePendingTimer(t *testing.T) {
+	items := []backend.Image{{ID: "1", Repository: "alpine", Tag: "latest"}}
+	m := imagesModel(t)
+
+	next, first := m.Update(imagesLoadedMsg{items: items})
+	m = next.(Model)
+	if first == nil {
+		t.Fatal("the first list load must schedule an inspect")
+	}
+
+	// Poll loads keep arriving faster than the debounce; the selection has not
+	// moved, so they must not supersede the timer already in flight.
+	for range 3 {
+		next, again := m.Update(imagesLoadedMsg{items: items})
+		m = next.(Model)
+		if again != nil {
+			t.Fatalf("an unchanged selection re-armed the debounce: %T", again())
+		}
+	}
+
+	settled, ok := first().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", first())
+	}
+	next, load := m.Update(settled)
+	m = next.(Model)
+	if load == nil {
+		t.Fatal("the pending inspect was starved by the intervening list loads")
+	}
+	if msg, ok := load().(imageInspectMsg); !ok || msg.ref != "alpine:latest" {
+		t.Errorf("expected an inspect of alpine:latest, got %T %+v", load(), msg)
+	}
+
+	// The resolved timer must not leave the selection marked as pending, or a
+	// later request for the same image would never be scheduled again.
+	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
+		t.Error("a settled selection can no longer schedule a new inspect")
+	}
+}
+
 func TestLoadImageInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
 	m := imagesModel(t)
 	if cmd := m.loadImageInspectCmd(); cmd == nil {

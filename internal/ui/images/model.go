@@ -316,10 +316,6 @@ func (m Model) ListView(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
-// keybarLines is the spacer plus the key hint row the detail pane always ends
-// with; sections must leave room for them.
-const keybarLines = 2
-
 // DetailView renders image details.
 func (m Model) DetailView(width, height int) string {
 	sel := m.Selected()
@@ -328,8 +324,11 @@ func (m Model) DetailView(width, height int) string {
 			Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	budget := max(0, height-keybarLines)
-	lines := uiutil.AppendLines(nil, budget,
+	keybar := dim.Render("[p] pull  [c] run  [d] delete  [P] prune")
+	reserved := 1 + uiutil.RowsFor(keybar, width)
+
+	p := uiutil.NewPane(width, height-reserved)
+	p.Add(
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
 		"",
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
@@ -339,40 +338,36 @@ func (m Model) DetailView(width, height int) string {
 
 	if m.inspect != nil && m.inspectRef == backend.FormatRef(*sel) {
 		if d := m.inspect.Digest; d != "" {
-			lines = uiutil.AppendLines(lines, budget, uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
+			p.Add(uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
 		}
 		if len(m.inspect.Cmd) > 0 {
-			lines = uiutil.AppendLines(lines, budget,
-				uiutil.KV("Cmd", uiutil.Truncate(strings.Join(m.inspect.Cmd, " "), width-10)))
+			p.Add(uiutil.KV("Cmd", uiutil.Truncate(strings.Join(m.inspect.Cmd, " "), width-10)))
 		}
 		if m.inspect.WorkingDir != "" {
-			lines = uiutil.AppendLines(lines, budget,
-				uiutil.KV("Workdir", uiutil.Truncate(m.inspect.WorkingDir, width-10)))
+			p.Add(uiutil.KV("Workdir", uiutil.Truncate(m.inspect.WorkingDir, width-10)))
 		}
 		if m.inspect.LayerCount > 0 {
-			lines = uiutil.AppendLines(lines, budget, uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
+			p.Add(uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
 		}
 
 		env := make([]string, 0, len(m.inspect.Env))
 		for _, e := range m.inspect.Env {
 			env = append(env, dim.Render("  "+uiutil.Truncate(e, width-6)))
 		}
-		lines = uiutil.Section(lines, budget, dim.Render("-- Env --"), env)
+		p.Section(dim.Render("-- Env --"), env)
 
 		platforms := make([]string, 0, len(m.inspect.Platforms))
-		for _, p := range m.inspect.Platforms {
-			line := p.OS + "/" + p.Architecture + "  " + uiutil.HumanBytes(p.Size)
+		for _, pf := range m.inspect.Platforms {
+			line := pf.OS + "/" + pf.Architecture + "  " + uiutil.HumanBytes(pf.Size)
 			platforms = append(platforms, dim.Render("  "+uiutil.Truncate(line, width-6)))
 		}
-		lines = uiutil.Section(lines, budget, dim.Render("-- Platforms --"), platforms)
+		p.Section(dim.Render("-- Platforms --"), platforms)
 	} else if m.inspectErr != nil && m.inspectRef == backend.FormatRef(*sel) {
-		lines = uiutil.AppendLines(lines, budget, "",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
-				Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+		p.Add("", lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
+			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
 	}
 
-	lines = uiutil.AppendLines(lines, height, "", dim.Render("[p] pull  [c] run  [d] delete  [P] prune"))
-	body := lipgloss.NewStyle().Width(width).PaddingLeft(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
-	return lipgloss.NewStyle().Height(height).Render(uiutil.ClampHeight(body, height))
+	p.Grow(reserved)
+	p.Add("", keybar)
+	return uiutil.RenderPane(width, height, p.Lines())
 }

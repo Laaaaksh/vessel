@@ -405,3 +405,34 @@ func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
+	// 40 columns is the pane width on any terminal wide enough to reach the
+	// detailW cap, and both the key bar and the digest row wrap there.
+	ins := cachedInspect("id1", "sha256:e7a1a92a5bfeee40966aea60f0796b0e")
+	ins.Cmd = []string{"/bin/sh"}
+	ins.WorkingDir = "/"
+	ins.LayerCount = 1
+	ins.Env = manyEnv(4)
+	ins.Platforms = []backend.ImagePlatform{
+		{OS: "linux", Architecture: "arm64", Size: 5242880},
+		{OS: "linux", Architecture: "amd64", Size: 2097152},
+	}
+	m := New().SetItems([]backend.Image{imageWithID("id1")}).SetInspect(testRef, ins, nil)
+
+	for _, height := range []int{12, 16, 20, 24} {
+		v := ansi.Strip(m.DetailView(40, height))
+		assertFitsHeight(t, v, height)
+		assertNoDanglingHeader(t, v)
+		// The bar itself wraps at this width; its last token proves the
+		// reservation covered every rendered row of it.
+		if !strings.Contains(v, "prune") {
+			t.Errorf("key hints clipped at height %d: %q", height, v)
+		}
+	}
+	// At least one of those sizes must actually render a section, or the
+	// dangling-header assertion above proves nothing.
+	if v := ansi.Strip(m.DetailView(40, 24)); !strings.Contains(v, "-- Env --") {
+		t.Fatalf("no section rendered, the header assertions are vacuous: %q", v)
+	}
+}

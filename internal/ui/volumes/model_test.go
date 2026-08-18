@@ -371,3 +371,39 @@ func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(4, "label")
+	ins.Options = manyPairs(2, "option")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	for _, height := range []int{12, 16, 20, 24} {
+		v := ansi.Strip(m.DetailView(40, height))
+		if got := strings.Count(v, "\n") + 1; got > height {
+			t.Errorf("pane rendered %d lines into 40x%d", got, height)
+		}
+		lines := strings.Split(v, "\n")
+		for i, l := range lines {
+			head := strings.TrimSpace(l)
+			if !strings.HasPrefix(head, "--") {
+				continue
+			}
+			next := ""
+			if i+1 < len(lines) {
+				next = strings.TrimSpace(lines[i+1])
+			}
+			if next == "" || strings.HasPrefix(next, "--") {
+				t.Errorf("section header %q rendered with no rows under it at height %d", head, height)
+			}
+		}
+		// The bar itself wraps at this width; its last token proves the
+		// reservation covered every rendered row of it.
+		if !strings.Contains(v, "yank path") {
+			t.Errorf("key hints clipped at height %d: %q", height, v)
+		}
+	}
+	if v := ansi.Strip(m.DetailView(40, 24)); !strings.Contains(v, "-- Labels --") {
+		t.Fatalf("no section rendered, the header assertions are vacuous: %q", v)
+	}
+}
