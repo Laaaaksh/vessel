@@ -1486,7 +1486,7 @@ func (m Model) footerView() string {
 		}
 		return r
 	}, line)
-	return style.Width(m.width).Render(uiutil.Truncate(line, m.width))
+	return style.Width(m.width).Render(uiutil.TruncateCells(line, m.width))
 }
 
 func (m Model) footerLine() (lipgloss.Style, string) {
@@ -1499,7 +1499,7 @@ func (m Model) footerLine() (lipgloss.Style, string) {
 		// The raw CLI error is long and multi-line; collapse and truncate it to
 		// what is left beside the hint so the hint itself is never cut.
 		msg := strings.Join(strings.Fields(m.lastErr.Error()), " ")
-		msg = uiutil.Truncate(msg, max(0, m.width-len(prefix)-len([]rune(hint))))
+		msg = uiutil.TruncateCells(msg, max(0, m.width-lipgloss.Width(prefix)-lipgloss.Width(hint)))
 		return m.st.errorText, prefix + msg + hint
 	}
 	if m.status != "" {
@@ -1613,15 +1613,15 @@ func (m Model) helpView() string {
 	rows = append(rows, m.st.dimText.Render(fmt.Sprintf("view=%s focus=%s", m.viewName(), m.focus.String())))
 	rows = append(rows, "")
 	for _, b := range bindings[start:end] {
-		key := m.st.helpText.Render(uiutil.Pad(b.key, keyW))
-		rows = append(rows, key+" "+uiutil.Truncate(b.desc, descW))
+		key := m.st.helpText.Render(uiutil.PadCells(b.key, keyW))
+		rows = append(rows, key+" "+uiutil.TruncateCells(b.desc, descW))
 	}
 	rows = append(rows, "")
 	hint := "press ? or esc to close"
 	if end-start < len(bindings) {
 		hint = fmt.Sprintf("%d-%d of %d — j/k scroll — press ? or esc to close", start+1, end, len(bindings))
 	}
-	rows = append(rows, m.st.dimText.Render(uiutil.Truncate(hint, m.width)))
+	rows = append(rows, m.st.dimText.Render(uiutil.TruncateCells(hint, m.width)))
 	return lipgloss.NewStyle().
 		Width(m.width).Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center).
