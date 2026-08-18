@@ -265,3 +265,81 @@ func TestClient_PushImage_authHintStaysOnOneLine(t *testing.T) {
 		t.Fatalf("auth hint added %d line breaks to a footer that renders one row (auth=%d, plain=%d)", got-want, got, want)
 	}
 }
+
+func TestPushTarget(t *testing.T) {
+	cases := map[string]string{
+		"alpine:latest":                   "docker.io",
+		"vessel/alpine:probe":             "docker.io",
+		"ghcr.io/vessel/alpine:probe":     "ghcr.io",
+		"registry.local:5000/team/app:v2": "registry.local:5000",
+		"localhost:5000/team/app:v2":      "localhost:5000",
+		"localhost/team/app:v2":           "localhost",
+	}
+	for ref, want := range cases {
+		if got := PushTarget(ref); got != want {
+			t.Errorf("PushTarget(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}
+
+func TestExactRef(t *testing.T) {
+	if ref, ok := ExactRef(Image{Repository: "alpine", Tag: "latest"}); !ok || ref != "alpine:latest" {
+		t.Fatalf("tagged image: got %q %v", ref, ok)
+	}
+	for _, img := range []Image{
+		{Repository: "alpine", Tag: ""},
+		{Repository: "alpine", Tag: "<none>"},
+		{Repository: "", Tag: "latest"},
+	} {
+		if ref, ok := ExactRef(img); ok {
+			t.Errorf("ExactRef(%+v) resolved to %q, want a refusal", img, ref)
+		}
+	}
+}
+
+func TestClient_PushImage_authHintNotTriggeredByImageName(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "generic")
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := c.PushImage(ctx, "authentication-service:unauthorized")
+	if err == nil {
+		t.Fatal("expected a failure from the fake")
+	}
+	if strings.Contains(err.Error(), "container registry login") {
+		t.Fatalf("a non-auth failure must not be diagnosed from the image name, got: %v", err)
+	}
+}
+
+func TestClient_SaveImage_expandsHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.SaveImage(ctx, "alpine:latest", "~/out.tar"); err != nil {
+		t.Fatal(err)
+	}
+	want := "container image save --output " + filepath.Join(home, "out.tar") + " alpine:latest"
+	if got := lastCmdOrEmpty(c); got != want {
+		t.Fatalf("save must expand ~: got %q want %q", got, want)
+	}
+}
+
+func TestClient_LoadImage_expandsHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "in.tar"), []byte("oci-archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.LoadImage(ctx, "~/in.tar"); err != nil {
+		t.Fatalf("a home-relative archive that exists must load: %v", err)
+	}
+	want := "container image load --input " + filepath.Join(home, "in.tar")
+	if got := lastCmdOrEmpty(c); got != want {
+		t.Fatalf("load must expand ~: got %q want %q", got, want)
+	}
+}

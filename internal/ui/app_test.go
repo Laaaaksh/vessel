@@ -697,18 +697,164 @@ func beginPush(t *testing.T, m Model) Model {
 	return next
 }
 
+// modalText returns the rendered modal as one normalised line, so assertions
+// read the label rather than wherever lipgloss happened to wrap it.
+func modalText(t *testing.T, m Model) string {
+	t.Helper()
+	stripped := ansi.Strip(viewString(m.View()))
+	noBorders := strings.Map(func(r rune) rune {
+		if strings.ContainsRune("│─╭╮╰╯", r) {
+			return -1
+		}
+		return r
+	}, stripped)
+	return strings.Join(strings.Fields(noBorders), " ")
+}
+
+// squash drops all whitespace so an assertion survives lipgloss hard-wrapping a
+// long token such as a temp-directory path.
+func squash(s string) string {
+	return strings.Join(strings.Fields(s), "")
+}
+
 func TestImagesAction_Push_confirmNamesImageAndDestination(t *testing.T) {
+	// An unqualified ref: the destination docker.io appears nowhere in the ref
+	// itself, so the label can only read correctly if PushTarget resolved it.
 	m := beginPush(t, imagesModel(t, []backend.Image{
-		{ID: "sha256:abc", Repository: "ghcr.io/vessel/alpine", Tag: "probe"},
+		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
 	}))
-	view := ansi.Strip(viewString(m.View()))
-	for _, want := range []string{"Push", "ghcr.io/vessel/alpine:probe", "ghcr.io"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("confirm modal must name %q, got: %q", want, view)
+	view := modalText(t, m)
+	if !strings.Contains(view, "Push vessel/alpine:probe → docker.io?") {
+		t.Fatalf("confirm modal must name image and destination, got: %q", view)
+	}
+	if strings.Contains(view, "Delete vessel") {
+		t.Fatalf("push confirmation must not read as a delete: %q", view)
+	}
+}
+
+func TestImagesAction_Push_confirmNamesPrivateRegistry(t *testing.T) {
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "registry.local:5000/team/app", Tag: "v2"},
+	}))
+	view := modalText(t, m)
+	if !strings.Contains(view, "Push registry.local:5000/team/app:v2 → registry.local:5000?") {
+		t.Fatalf("confirm modal must name the private registry, got: %q", view)
+	}
+}
+
+func TestImagesActions_refuseUntaggedImage(t *testing.T) {
+	// A digest-pinned row lists with an empty tag; formatting it yields a bare
+	// repository that a registry resolves as :latest — a different artifact.
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: ""}})
+	for _, label := range []string{"Tag…", "Save…", "Push"} {
+		run := findAction(m.buildActions(), label)
+		if run == nil {
+			t.Fatalf("missing action %q", label)
+		}
+		next, cmd := run(m)
+		if cmd != nil {
+			t.Fatalf("%s must not act on an untagged image", label)
+		}
+		if next.mode != modeBrowse {
+			t.Fatalf("%s on an untagged image opened mode %v", label, next.mode)
+		}
+		if !strings.Contains(next.status, "no tag") {
+			t.Fatalf("%s status must explain the missing tag, got %q", label, next.status)
+		}
+		if got := lastCLICommand(next); got != "" {
+			t.Fatalf("%s on an untagged image shelled out: %q", label, got)
 		}
 	}
-	if strings.Contains(view, "Delete ghcr.io") {
-		t.Fatalf("push confirmation must not read as a delete: %q", view)
+}
+
+func TestImagesAction_Save_confirmsOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.tar")
+	if err := os.WriteFile(path, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	run := findAction(m.buildActions(), "Save…")
+	next, _ := run(m)
+	res, cmd := next.handlePrompt(promptDoneMsg{kind: "save to", text: path})
+	mm := res.(Model)
+	if cmd != nil {
+		t.Fatal("saving over an existing file must ask first")
+	}
+	if mm.mode != modeConfirmDelete {
+		t.Fatalf("expected a confirmation, mode=%v", mm.mode)
+	}
+	view := modalText(t, mm)
+	if !strings.Contains(squash(view), squash("Overwrite "+path+" with alpine:latest?")) {
+		t.Fatalf("overwrite confirmation must name file and image, got: %q", view)
+	}
+	if got := lastCLICommand(mm); got != "" {
+		t.Fatalf("must not shell out before confirmation, recorded %q", got)
+	}
+
+	cancelled, _ := mm.handleKey(keyMsg("n"))
+	if got := lastCLICommand(cancelled.(Model)); got != "" {
+		t.Fatalf("cancelled save shelled out: %q", got)
+	}
+	if body, err := os.ReadFile(path); err != nil || string(body) != "precious" {
+		t.Fatalf("cancelled save must leave the file alone, got %q %v", body, err)
+	}
+
+	confirmed, cmd := mm.handleKey(keyMsg("y"))
+	if cmd == nil {
+		t.Fatal("confirming must start the save")
+	}
+	done := cmd().(actionDoneMsg)
+	if done.err != nil {
+		t.Fatal(done.err)
+	}
+	out, _ := confirmed.(Model).Update(done)
+	if got := lastCLICommand(out.(Model)); got != "container image save --output "+path+" alpine:latest" {
+		t.Fatalf("save argument order: got %q", got)
+	}
+}
+
+func TestImagesAction_Save_newPathNeedsNoConfirmation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh.tar")
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	run := findAction(m.buildActions(), "Save…")
+	next, _ := run(m)
+	res, cmd := next.handlePrompt(promptDoneMsg{kind: "save to", text: path})
+	if cmd == nil {
+		t.Fatal("saving to a fresh path should run without a confirmation")
+	}
+	if mm := res.(Model); mm.mode == modeConfirmDelete {
+		t.Fatal("a fresh path must not raise an overwrite confirmation")
+	}
+	if done := cmd().(actionDoneMsg); done.err != nil {
+		t.Fatal(done.err)
+	}
+}
+
+func TestFooterView_clampsCLIErrorToOneRow(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected an auth failure")
+	}
+	if !strings.Contains(done.err.Error(), "\n") {
+		t.Fatal("precondition: a CLI error should carry stderr newlines")
+	}
+	out, _ := next.(Model).Update(done)
+	om := out.(Model)
+
+	footer := ansi.Strip(om.footerView())
+	if n := strings.Count(footer, "\n"); n != 0 {
+		t.Fatalf("footer must occupy exactly one row, got %d extra rows:\n%s", n, footer)
+	}
+	if w := len([]rune(footer)); w > om.width {
+		t.Fatalf("footer is %d cells wide, frame is %d — it will wrap", w, om.width)
+	}
+	if !strings.Contains(footer, "error:") {
+		t.Fatalf("footer should still report the error, got %q", footer)
 	}
 }
 

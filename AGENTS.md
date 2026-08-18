@@ -18,6 +18,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Vessel deliberately does NOT own registry login: `image push` auth failures
   tell the user to run `container registry login` (see `internal/backend/images.go`).
+- Classify a CLI failure from `CLIError.Stderr` (`internal/backend/client.go`),
+  never from `err.Error()`: the formatted text also contains the arguments, so
+  an image whose own name says "unauthorized" would be read as an auth failure.
+- The footer gets exactly one row (`clampToRow` in `internal/ui/app.go`); CLI
+  errors carry raw multi-line stderr, so anything rendered there must be clamped.
 - On the installed 1.2.2 build (services running) `image save/load/tag/push` are
   core subcommands and `image pull` works live; honour the plugin gate only when
   a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
