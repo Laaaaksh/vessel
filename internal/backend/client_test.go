@@ -266,18 +266,24 @@ func TestClient_PushImage_authHintStaysOnOneLine(t *testing.T) {
 	}
 }
 
-func TestPushTarget(t *testing.T) {
-	cases := map[string]string{
-		"alpine:latest":                   "docker.io",
-		"vessel/alpine:probe":             "docker.io",
+func TestPushTarget_namesOnlyAHostTheReferenceCarries(t *testing.T) {
+	named := map[string]string{
 		"ghcr.io/vessel/alpine:probe":     "ghcr.io",
 		"registry.local:5000/team/app:v2": "registry.local:5000",
 		"localhost:5000/team/app:v2":      "localhost:5000",
 		"localhost/team/app:v2":           "localhost",
 	}
-	for ref, want := range cases {
-		if got := PushTarget(ref); got != want {
-			t.Errorf("PushTarget(%q) = %q, want %q", ref, got, want)
+	for ref, want := range named {
+		got, ok := PushTarget(ref)
+		if !ok || got != want {
+			t.Errorf("PushTarget(%q) = %q,%v, want %q,true", ref, got, ok, want)
+		}
+	}
+	// An unqualified reference resolves against whatever default registry the
+	// CLI is configured with, which vessel does not read — so it must not guess.
+	for _, ref := range []string{"alpine:latest", "vessel/alpine:probe"} {
+		if got, ok := PushTarget(ref); ok || got != "" {
+			t.Errorf("PushTarget(%q) = %q,%v, want a refusal to guess", ref, got, ok)
 		}
 	}
 }
@@ -298,16 +304,27 @@ func TestExactRef(t *testing.T) {
 }
 
 func TestClient_PushImage_authHintNotTriggeredByImageName(t *testing.T) {
-	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "generic")
-	c := NewClientWithBinary(fakeBinary(t))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err := c.PushImage(ctx, "authentication-service:unauthorized")
-	if err == nil {
-		t.Fatal("expected a failure from the fake")
-	}
-	if strings.Contains(err.Error(), "container registry login") {
-		t.Fatalf("a non-auth failure must not be diagnosed from the image name, got: %v", err)
+	// The CLI echoes the reference into stderr, so a repository whose own words
+	// read like a credentials failure must not be classified as one.
+	for _, ref := range []string{
+		"myorg/authentication-service:v1",
+		"myorg/unauthorized-proxy:v1",
+		"myorg/authentication-service:401-unauthorised",
+	} {
+		t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "generic")
+		c := NewClientWithBinary(fakeBinary(t))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := c.PushImage(ctx, ref)
+		cancel()
+		if err == nil {
+			t.Fatalf("%s: expected a failure from the fake", ref)
+		}
+		if !strings.Contains(err.Error(), ref) {
+			t.Fatalf("precondition: the fake should echo %q into stderr, got: %v", ref, err)
+		}
+		if strings.Contains(err.Error(), "container registry login") {
+			t.Errorf("a non-auth failure must not be diagnosed from the image name %q, got: %v", ref, err)
+		}
 	}
 }
 

@@ -720,15 +720,19 @@ func squash(s string) string {
 	return strings.Join(strings.Fields(s), "")
 }
 
-func TestImagesAction_Push_confirmNamesImageAndDestination(t *testing.T) {
-	// An unqualified ref: the destination docker.io appears nowhere in the ref
-	// itself, so the label can only read correctly if PushTarget resolved it.
+func TestImagesAction_Push_confirmOmitsAnUnknownDestination(t *testing.T) {
+	// An unqualified ref resolves against the CLI's configured default registry,
+	// which vessel does not read, so the label must name no destination at all
+	// rather than assert a guess before an unrecoverable publish.
 	m := beginPush(t, imagesModel(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
 	}))
 	view := modalText(t, m)
-	if !strings.Contains(view, "Push vessel/alpine:probe → docker.io?") {
-		t.Fatalf("confirm modal must name image and destination, got: %q", view)
+	if !strings.Contains(view, "Push vessel/alpine:probe?") {
+		t.Fatalf("confirm modal must name the image, got: %q", view)
+	}
+	if strings.Contains(view, "docker.io") || strings.Contains(view, "→") {
+		t.Fatalf("confirm modal must not guess a destination, got: %q", view)
 	}
 	if strings.Contains(view, "Delete vessel") {
 		t.Fatalf("push confirmation must not read as a delete: %q", view)
@@ -946,13 +950,44 @@ func TestImagesDetail_noticeNeverGrowsThePaneBeyondItsBudget(t *testing.T) {
 	}
 }
 
-func TestImagesDetail_noticeSurvivesOnASmallPane(t *testing.T) {
+func TestImagesDetail_noticeSurvivesTheSmallestSupportedPane(t *testing.T) {
 	panel := New().imgPanel.
-		SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}}).
+		SetItems([]backend.Image{{
+			ID:         "sha256:abc",
+			Repository: "ghcr.io/a-deliberately-long-org/a-deliberately-long-image",
+			Tag:        "v1",
+		}}).
 		SetNotice(backend.PushAuthNotice)
-	detail := squash(ansi.Strip(panel.DetailView(18, 8)))
-	if !strings.Contains(detail, squash("container registry login")) {
-		t.Fatalf("the login instruction must survive the pane cap, got: %q", detail)
+	// 18x4 is what mainPanels hands the detail pane at 60x12 — the smallest
+	// frame View() still renders — with the command log toggled on.
+	for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
+		detail := squash(ansi.Strip(panel.DetailView(size.w, size.h)))
+		if !strings.Contains(detail, squash("container registry login")) {
+			t.Errorf("detail pane %dx%d loses the login command: %q", size.w, size.h, detail)
+		}
+	}
+}
+
+func TestImagesDetail_noticeNotShownForANonPushFailure(t *testing.T) {
+	// Docker Hub answers 401 for a repository that does not exist, so a typo'd
+	// pull produces auth-shaped stderr. It is not a credentials problem.
+	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	pullErr := &backend.CLIError{
+		Args:   []string{"image", "pull", "vessel-no-such-xyz123:latest"},
+		Stderr: "Error: ... 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io\n",
+		Err:    errors.New("exit status 1"),
+	}
+	if !backend.IsPushAuthError(pullErr) {
+		t.Fatal("precondition: this stderr should classify as auth-shaped")
+	}
+	out, _ := m.Update(actionDoneMsg{err: pullErr})
+	om := out.(Model)
+	detail := squash(ansi.Strip(om.imgPanel.DetailView(40, 20)))
+	if strings.Contains(detail, squash("container registry login")) {
+		t.Fatalf("a failed pull must not offer credential advice, got: %q", detail)
+	}
+	if om.lastErr == nil {
+		t.Fatal("the error itself should still reach the footer")
 	}
 }
 

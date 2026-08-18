@@ -58,7 +58,9 @@ case "$cmd" in
             exit 1
             ;;
           generic)
-            echo "Error: unexpected network failure" >&2
+            # The real CLI echoes the reference back into stderr; keep that so
+            # tests exercise a reference whose own words look like an auth error.
+            echo "Error: image with reference $*: unexpected network failure" >&2
             exit 1
             ;;
         esac

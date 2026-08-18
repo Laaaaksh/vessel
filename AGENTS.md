@@ -19,8 +19,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Vessel deliberately does NOT own registry login: `image push` auth failures
   tell the user to run `container registry login` (see `internal/backend/images.go`).
 - Classify a CLI failure from `CLIError.Stderr` (`internal/backend/client.go`),
-  never from `err.Error()`: the formatted text also contains the arguments, so
-  an image whose own name says "unauthorized" would be read as an auth failure.
+  never from `err.Error()` — but stderr echoes the image reference too, so match
+  multi-word phrases only a registry emits ("401 unauthorized", "no credentials
+  found"). A bare "unauthorized" misreads `myorg/unauthorized-proxy:v1`.
 - `clampToRow` (`internal/ui/app.go`) applies to the footer's error and status
   branches only: CLI errors carry raw multi-line stderr and must be flattened to
   one row. The key-hint branch is deliberately exempt — its grouping is authored
