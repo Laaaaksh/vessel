@@ -92,3 +92,62 @@ func TestMapImageInspect_emptyVariants(t *testing.T) {
 		t.Errorf("expected no platforms, got %d", len(got.Platforms))
 	}
 }
+
+func TestMapImageInspect_fallsBackToLargestVariantOffHostArch(t *testing.T) {
+	var raw cliImage
+	raw.Configuration.Name = "example.com/app:1.0"
+	raw.Configuration.Descriptor.Size = 1234
+	raw.ID = "sha256:abc"
+	small := cliImageVariant{Digest: "sha256:small", Size: 10}
+	small.Platform.OS = guestOS
+	small.Platform.Architecture = "otherarch"
+	big := cliImageVariant{Digest: "sha256:big", Size: 4096}
+	big.Platform.OS = guestOS
+	big.Platform.Architecture = "biggerarch"
+	big.Config.Config.Cmd = []string{"/bin/app"}
+	big.Config.Config.WorkingDir = "/srv"
+	big.Config.Config.Env = []string{"PATH=/usr/bin"}
+	big.Config.RootFS.DiffIDs = []string{"sha256:l1", "sha256:l2"}
+	att := cliImageVariant{Digest: "sha256:att", Size: 99999}
+	att.Platform.OS = "unknown"
+	att.Platform.Architecture = "unknown"
+	raw.Variants = []cliImageVariant{small, big, att}
+
+	got := mapImageInspect(raw)
+	if got.Digest != "sha256:big" {
+		t.Errorf("digest = %q, want the largest image variant", got.Digest)
+	}
+	if got.Size != 4096 {
+		t.Errorf("size = %d, want 4096", got.Size)
+	}
+	if want := imageSize(raw); got.Size != want {
+		t.Errorf("inspect size %d != list size %d", got.Size, want)
+	}
+	if len(got.Cmd) != 1 || got.Cmd[0] != "/bin/app" {
+		t.Errorf("cmd = %v, want [/bin/app]", got.Cmd)
+	}
+	if got.WorkingDir != "/srv" {
+		t.Errorf("working dir = %q, want /srv", got.WorkingDir)
+	}
+	if len(got.Env) != 1 {
+		t.Errorf("env = %v, want one entry", got.Env)
+	}
+	if got.LayerCount != 2 {
+		t.Errorf("layer count = %d, want 2", got.LayerCount)
+	}
+	if len(got.Platforms) != 2 {
+		t.Errorf("platforms = %d, want 2 (attestation excluded)", len(got.Platforms))
+	}
+}
+
+func TestImageSize_descriptorFallbackWhenVariantsSizeless(t *testing.T) {
+	var raw cliImage
+	raw.Configuration.Descriptor.Size = 777
+	v := cliImageVariant{Digest: "sha256:z"}
+	v.Platform.OS = guestOS
+	v.Platform.Architecture = runtime.GOARCH
+	raw.Variants = []cliImageVariant{v}
+	if got := imageSize(raw); got != 777 {
+		t.Errorf("imageSize = %d, want descriptor fallback 777", got)
+	}
+}
