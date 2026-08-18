@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
@@ -236,5 +237,83 @@ func TestRenderRowAlignsWithHeader(t *testing.T) {
 		if got := column(t, r, "3 MiB"); got != want {
 			t.Errorf("row %d: size at column %d, header SIZE at %d", i, got, want)
 		}
+	}
+}
+
+func imageWithID(id string) backend.Image {
+	return backend.Image{ID: id, Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024}
+}
+
+func cachedInspect(id, digest string) *backend.ImageInspect {
+	return &backend.ImageInspect{
+		ID:         id,
+		Repository: "docker.io/library/alpine",
+		Tag:        "latest",
+		Digest:     digest,
+		Size:       3848024,
+	}
+}
+
+func TestSetItems_dropsInspectWhenTagIsRepulled(t *testing.T) {
+	m := New().SetItems([]backend.Image{imageWithID("oldid")})
+	m = m.SetInspect(testRef, cachedInspect("oldid", "sha256:olddigest"), nil)
+	if m.InspectedRef() != testRef {
+		t.Fatalf("inspect not cached: %q", m.InspectedRef())
+	}
+
+	m = m.SetItems([]backend.Image{imageWithID("newid")})
+
+	if got := m.InspectedRef(); got != "" {
+		t.Errorf("inspect kept after re-pull: %q", got)
+	}
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "olddigest") {
+		t.Errorf("stale digest still rendered after re-pull: %q", v)
+	}
+}
+
+func TestSetItems_dropsInspectWhenImageIsGone(t *testing.T) {
+	m := New().SetItems([]backend.Image{imageWithID("oldid")})
+	m = m.SetInspect(testRef, cachedInspect("oldid", "sha256:olddigest"), nil)
+
+	m = m.SetItems([]backend.Image{{ID: "other", Repository: "nginx", Tag: "1.27"}})
+
+	if got := m.InspectedRef(); got != "" {
+		t.Errorf("inspect kept after image removal: %q", got)
+	}
+}
+
+func TestSetItems_keepsInspectForUnchangedImage(t *testing.T) {
+	m := New().SetItems([]backend.Image{imageWithID("sameid")})
+	m = m.SetInspect(testRef, cachedInspect("sameid", "sha256:livedigest"), nil)
+
+	m = m.SetItems([]backend.Image{imageWithID("sameid")})
+
+	if got := m.InspectedRef(); got != testRef {
+		t.Errorf("inspect dropped for unchanged image: %q", got)
+	}
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "sha256:lived") {
+		t.Errorf("digest missing after unchanged refresh: %q", v)
+	}
+}
+
+func TestSetInspect_lateResultForOtherImageKeepsCurrentCache(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		imageWithID("sameid"),
+		{ID: "nginxid", Repository: "nginx", Tag: "1.27"},
+	})
+	m = m.SetInspect(testRef, cachedInspect("sameid", "sha256:livedigest"), nil)
+
+	// A response for nginx (selected briefly, then left) arrives late.
+	m = m.SetInspect("nginx:1.27", &backend.ImageInspect{ID: "nginxid", Digest: "sha256:nginxdigest"}, nil)
+
+	if got := m.InspectedRef(); got != testRef {
+		t.Errorf("late foreign result evicted the cache: %q", got)
+	}
+	v := ansi.Strip(m.DetailView(60, 40))
+	if !strings.Contains(v, "sha256:lived") {
+		t.Errorf("current image's digest lost: %q", v)
+	}
+	if strings.Contains(v, "nginxdigest") {
+		t.Errorf("foreign digest rendered: %q", v)
 	}
 }

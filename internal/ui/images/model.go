@@ -79,8 +79,12 @@ func markKey(img backend.Image) string {
 	return img.ID + "\x00" + backend.FormatRef(img)
 }
 
-// SetItems replaces the image list and drops marks for images it no longer
-// contains, so a mark can never outlive the row it points at.
+// SetItems replaces the image list. Marks for images the list no longer
+// contains are dropped, so a mark can never outlive the row it points at. So
+// is a cached inspect whose image is gone from the list, or whose reference
+// now resolves to different content (a re-pulled tag keeps the ref but changes
+// the index digest), so the detail pane cannot pair a fresh list row with a
+// stale inspect.
 func (m Model) SetItems(items []backend.Image) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
@@ -94,7 +98,21 @@ func (m Model) SetItems(items []backend.Image) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+	if m.inspect != nil && !inspectMatchesList(items, m.inspectRef, m.inspect.ID) {
+		m.inspect = nil
+		m.inspectRef = ""
+		m.inspectErr = nil
+	}
 	return m
+}
+
+func inspectMatchesList(items []backend.Image, ref, id string) bool {
+	for _, it := range items {
+		if backend.FormatRef(it) == ref {
+			return it.ID == id
+		}
+	}
+	return false
 }
 
 // Selected returns the highlighted image.
@@ -122,8 +140,14 @@ func (m Model) MarkedIDs() []string {
 
 // SetInspect stores the inspected detail for the given image reference. The
 // panel keeps the result keyed by ref and only renders it while that image is
-// selected, so a slow response never labels the wrong image.
+// selected, so a slow response never labels the wrong image. A result for an
+// image that is no longer selected is discarded rather than replacing the
+// cache, so it cannot evict a valid inspect for the current selection.
 func (m Model) SetInspect(ref string, ins *backend.ImageInspect, err error) Model {
+	sel := m.Selected()
+	if sel == nil || backend.FormatRef(*sel) != ref {
+		return m
+	}
 	m.inspect = ins
 	m.inspectRef = ref
 	m.inspectErr = err
