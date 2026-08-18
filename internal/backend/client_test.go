@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -134,5 +136,26 @@ func TestClient_TailLogs_fake(t *testing.T) {
 	}
 	if len(lines) != 5 {
 		t.Fatalf("want 5 lines, got %d", len(lines))
+	}
+}
+
+func TestIsServicesDown(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		down bool
+	}{
+		{name: "nil", err: nil, down: false},
+		{name: "plugins unavailable", err: fmt.Errorf("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. Start the container system services and retry:\n\n    container system start\n)"), down: true},
+		{name: "plugins unavailable short", err: errors.New("Plugins are unavailable"), down: true},
+		{name: "system start hint mid-error", err: errors.New("other: has been started with `container system start`"), down: true},
+		{name: "unrelated", err: errors.New("container [list]: exit status 1 (stderr: boom)"), down: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsServicesDown(tc.err); got != tc.down {
+				t.Fatalf("IsServicesDown(%v) = %v, want %v", tc.err, got, tc.down)
+			}
+		})
 	}
 }
