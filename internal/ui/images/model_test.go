@@ -424,10 +424,12 @@ func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
 		v := ansi.Strip(m.DetailView(40, height))
 		assertFitsHeight(t, v, height)
 		assertNoDanglingHeader(t, v)
-		// The bar is truncated to a single row so it cannot crowd out the
-		// image itself, which must still be identifiable.
-		if !strings.Contains(v, "[p] pull") {
-			t.Errorf("key hints missing at height %d: %q", height, v)
+		// At this width the bar wraps but still fits alongside the image, so
+		// it renders in full rather than being truncated.
+		for _, want := range []string{"[p] pull", "[P]", "prune"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("key hints clipped at height %d: %q in %q", height, want, v)
+			}
 		}
 		for _, want := range []string{"docker.io/library/alpine:latest", "ID", "Size"} {
 			if !strings.Contains(v, want) {
@@ -468,11 +470,14 @@ func TestDetailView_rowsRenderInOrderWhenTheyDoNotAllFit(t *testing.T) {
 		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
 	}).SetInspect(testRef, ins, nil)
 
-	// The ID row wraps at this width and does not fit, while the shorter Cmd
-	// row that follows it would fit in the gap the ID row left behind.
-	v := ansi.Strip(m.DetailView(18, 8))
+	// The Digest row wraps to two rows and exhausts the budget, while the
+	// single-row Cmd row that follows it would fit in the gap it left behind.
+	v := ansi.Strip(m.DetailView(20, 12))
 
-	if strings.Contains(v, "Cmd") && !strings.Contains(v, "ID") {
-		t.Errorf("Cmd rendered while the earlier ID row was dropped: %q", v)
+	if !strings.Contains(v, "Size") {
+		t.Fatalf("expected the rows before Digest to render, so the gap is real: %q", v)
+	}
+	if strings.Contains(v, "Cmd") && !strings.Contains(v, "Digest") {
+		t.Errorf("Cmd rendered while the earlier Digest row was dropped: %q", v)
 	}
 }

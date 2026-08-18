@@ -307,8 +307,8 @@ func (m Model) DetailView(width, height int) string {
 			Foreground(lipgloss.Color("#6b7280")).Render("  no volume selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	keybar := dim.Render(uiutil.Truncate("[c] create  [d] delete  [P] prune  [y] yank path", width-1))
-	reserved := uiutil.Reserve(1+uiutil.RowsFor(keybar, width), height)
+	hints, reserved := uiutil.KeyBar("[c] create  [d] delete  [P] prune  [y] yank path", width, height)
+	keybar := dim.Render(hints)
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(

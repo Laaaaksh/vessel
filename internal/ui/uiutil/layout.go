@@ -52,6 +52,18 @@ func Reserve(rows, height int) int {
 	return rows
 }
 
+// KeyBar sizes a pane's trailing key-hint row. The bar is allowed to wrap
+// while it stays well under half the pane; beyond that it is truncated to a
+// single row so it cannot crowd out the rows that say what is selected. It
+// returns the text to render and the rows to reserve for it, spacer included.
+func KeyBar(text string, width, height int) (string, int) {
+	if rows := 1 + RowsFor(text, width); rows < height/2 {
+		return text, rows
+	}
+	short := Truncate(text, width-1)
+	return short, Reserve(1+RowsFor(short, width), height)
+}
+
 // Pane accumulates detail-pane rows within a budget counted in rendered rows.
 // Once a row does not fit the pane is full: later rows are dropped even when
 // they would fit, so what renders is always a prefix of what was asked for
