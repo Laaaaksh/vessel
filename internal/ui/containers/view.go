@@ -137,6 +137,34 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 	}
 	lines = append(lines, uiutil.KV("Status", sel.Status))
 	lines = append(lines, uiutil.KV("Ports", backend.FormatPorts(sel.Ports)))
+	if sel.Hostname != "" {
+		lines = append(lines, uiutil.KV("Hostname", sel.Hostname))
+	}
+	if sel.Platform != "" {
+		lines = append(lines, uiutil.KV("Platform", sel.Platform))
+	}
+	if sel.CPUs > 0 {
+		lines = append(lines, uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
+	}
+	if sel.MemoryBytes > 0 {
+		lines = append(lines, uiutil.KV("Memory", backend.FormatMemoryBytes(sel.MemoryBytes)))
+	}
+	if len(sel.Networks) > 0 {
+		lines = append(lines, uiutil.KV("Networks", uiutil.Truncate(backend.FormatNetworks(sel.Networks), width-10)))
+	}
+
+	if len(sel.Mounts) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Mounts --"))
+		for _, mt := range sel.Mounts {
+			if len(lines) > height-4 {
+				break
+			}
+			line := mt.Source + " → " + mt.Destination
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
+				Render("  "+uiutil.Truncate(line, width-6)))
+		}
+	}
 
 	if poller != nil {
 		m2, ok := poller.Snapshot().Get(sel.ID)
