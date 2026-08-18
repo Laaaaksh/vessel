@@ -18,6 +18,10 @@ const (
 	cmdLogN = 40
 )
 
+// errNoDeleteTargets guards against a destructively broad no-argument delete:
+// the CLI treats a bare "image delete" as deleting everything, so never issue it.
+var errNoDeleteTargets = fmt.Errorf("delete requires at least one target")
+
 // Client is the adapter that shells out to the container CLI.
 type Client struct {
 	binary  string
