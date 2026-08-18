@@ -135,45 +135,59 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 	return err
 }
 
-// PushAuthNotice tells the user how to authenticate when a push is rejected for
-// credentials. Container registry login is intentionally out of vessel's scope:
-// the user owns their registry session. It is exported so the images panel can
-// show it on a surface that is not truncated to a single footer row.
-const PushAuthNotice = "registry rejected these credentials; run `container registry login`, then retry"
+// PushAuthNotice is what the images detail pane shows after a rejected push.
+// Container registry login is intentionally out of vessel's scope: the user owns
+// their registry session. It leads with the command and carries no more prose
+// than that, because the smallest supported pane (18x4 at 60x12 with the command
+// log open) has room for roughly three wrapped rows.
+const PushAuthNotice = "push rejected — run `container registry login`"
 
-// pushAuthHint is the same instruction appended to the error itself. It stays on
-// one line because the footer that renders errors budgets exactly one row.
-const pushAuthHint = " — " + PushAuthNotice
+// pushAuthHint is the fuller instruction appended to the error itself, which the
+// footer renders. It stays on one line because the footer budgets exactly one row.
+const pushAuthHint = " — registry rejected these credentials; run `container registry login`, then retry"
 
-// IsPushAuthError reports whether a push error looks like a credentials
-// problem. It reads only what the CLI printed: the full error text also carries
-// the arguments, so an image whose own name contains "unauthorized" or
-// "authentication" would otherwise be misdiagnosed.
+// authStderrPhrases are multi-word phrases only a registry emits. Matching bare
+// words would misread the reference: the CLI echoes it into stderr, so pushing
+// myorg/authentication-service:v1 would classify any failure as a credentials
+// problem. A reference cannot contain a space, so a phrase cannot collide.
+var authStderrPhrases = []string{
+	"401 unauthorized",
+	"403 forbidden",
+	"no credentials found",
+	"authentication required",
+	"unauthorized: authentication",
+}
+
+// IsPushAuthError reports whether a push error is a credentials problem. It
+// reads only what the CLI printed, never the arguments it was handed.
 func IsPushAuthError(err error) bool {
 	var cliErr *CLIError
 	if !errors.As(err, &cliErr) {
 		return false
 	}
 	s := strings.ToLower(cliErr.Stderr)
-	return strings.Contains(s, "unauthorized") ||
-		strings.Contains(s, "no credentials found") ||
-		strings.Contains(s, "authentication")
+	for _, phrase := range authStderrPhrases {
+		if strings.Contains(s, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
-// defaultRegistry is where a reference that names no registry host is pushed.
-const defaultRegistry = "docker.io"
-
-// PushTarget returns the registry host that pushing ref would publish to, so a
-// confirmation can name the destination rather than only the image.
-func PushTarget(ref string) string {
+// PushTarget returns the registry host that pushing ref publishes to, and
+// reports whether the reference names one at all. An unqualified reference goes
+// to whatever the CLI has configured as its default registry, which vessel does
+// not read — so callers must say nothing rather than assert a guess, since the
+// push confirmation exists to name the real destination.
+func PushTarget(ref string) (string, bool) {
 	head, rest, ok := strings.Cut(ref, "/")
 	if !ok || rest == "" {
-		return defaultRegistry
+		return "", false
 	}
 	if head == "localhost" || strings.ContainsAny(head, ".:") {
-		return head
+		return head, true
 	}
-	return defaultRegistry
+	return "", false
 }
 
 func mapImages(raw []cliImage) []Image {

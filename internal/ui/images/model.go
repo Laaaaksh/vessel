@@ -274,24 +274,24 @@ func (m Model) ListView(width, height int) string {
 
 // DetailView renders image details. Height is a floor for lipgloss, never a
 // cap, so the pane is capped explicitly: anything longer would grow the body row
-// and push the header off the alt-screen. The notice sits above the metadata so
-// that on a pane too small for both it is the static fields that get cut.
+// and push the header off the alt-screen. The notice leads the pane so that when
+// the cap bites — 18x4 at the smallest supported frame — it is the reference and
+// the static fields that get cut, not the instruction the user has to act on.
 func (m Model) DetailView(width, height int) string {
 	pane := lipgloss.NewStyle().Width(width).Height(height).MaxHeight(max(1, height))
 	sel := m.Selected()
 	if sel == nil {
 		return pane.Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
-	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
-	}
+	var lines []string
 	if m.notice != "" {
-		lines = append(lines, "", lipgloss.NewStyle().
+		lines = append(lines, lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#fbbf24")).
 			Width(max(1, width-2)).
-			Render(m.notice))
+			Render(m.notice), "")
 	}
 	lines = append(lines,
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
 		"",
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
 		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
