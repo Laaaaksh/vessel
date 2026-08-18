@@ -8,11 +8,24 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// kvLabelWidth is the column width of a KV row's label, which is followed by a
+// single separating space.
+const kvLabelWidth = 9
+
 // KV renders a dim "key:" label followed by its value.
 func KV(key, val string) string {
-	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(key + ":")
+	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(kvLabelWidth).Render(key + ":")
 	v := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).Render(val)
 	return lipgloss.JoinHorizontal(lipgloss.Top, k, " ", v)
+}
+
+// KVFit renders a KV row whose value is shortened to whatever is left after the
+// label and its separating space, so the row occupies a single rendered row in
+// a pane of that width. Callers must not compute that budget themselves: the
+// label geometry belongs here, and getting it one column wrong costs the row an
+// extra rendered row.
+func KVFit(key, val string, width int) string {
+	return KV(key, Truncate(val, width-kvLabelWidth-2))
 }
 
 // Truncate shortens s to at most max runes, ending in an ellipsis when cut.

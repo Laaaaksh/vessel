@@ -481,3 +481,36 @@ func TestDetailView_rowsRenderInOrderWhenTheyDoNotAllFit(t *testing.T) {
 		t.Errorf("Cmd rendered while the earlier Digest row was dropped: %q", v)
 	}
 }
+
+func TestDetailView_longValueRowsDoNotWrap(t *testing.T) {
+	// A real digest is "sha256:" plus 64 hex characters, far wider than the
+	// 40-column pane the app uses on any reasonably sized terminal.
+	ins := cachedInspect("28bd5fe8b56d", "sha256:e7a1a92a5bfeee40966aea60f0796b0e6d4b2c1a9f8e7d6c5b4a39281706f5e4")
+	ins.Cmd = []string{"/usr/local/bin/some-entrypoint --with --several --flags"}
+	ins.WorkingDir = "/var/lib/some/deeply/nested/working/directory"
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
+	}).SetInspect(testRef, ins, nil)
+
+	for _, width := range []int{20, 40, 60} {
+		v := ansi.Strip(m.DetailView(width, 20))
+		for _, label := range []string{"Digest:", "Cmd:", "Workdir:"} {
+			line := lineContaining(v, label)
+			if line == "" {
+				t.Fatalf("no %s row rendered at width %d: %q", label, width, v)
+			}
+			if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), label)) == "" {
+				t.Errorf("%s row wrapped its value onto the next row at width %d: %q", label, width, v)
+			}
+		}
+	}
+}
+
+func lineContaining(v, want string) string {
+	for _, l := range strings.Split(v, "\n") {
+		if strings.Contains(l, want) {
+			return l
+		}
+	}
+	return ""
+}
