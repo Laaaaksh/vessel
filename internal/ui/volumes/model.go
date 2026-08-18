@@ -2,6 +2,7 @@ package volumes
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -298,6 +299,10 @@ func (m Model) ListView(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
+// keybarLines is the spacer plus the key hint row the detail pane always ends
+// with; sections must leave room for them.
+const keybarLines = 2
+
 // DetailView renders volume details.
 func (m Model) DetailView(width, height int) string {
 	sel := m.Selected()
@@ -323,34 +328,28 @@ func (m Model) DetailView(width, height int) string {
 		}
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	budget := height - keybarLines
 	if same {
-		if len(m.inspect.Labels) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, dim.Render("-- Labels --"))
-			for k, v := range m.inspect.Labels {
-				if len(lines) > height-4 {
-					break
-				}
-				lines = append(lines, dim.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
-			}
-		}
-		if len(m.inspect.Options) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, dim.Render("-- Options --"))
-			for k, v := range m.inspect.Options {
-				if len(lines) > height-4 {
-					break
-				}
-				lines = append(lines, dim.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
-			}
-		}
+		lines = uiutil.Section(lines, budget, dim.Render("-- Labels --"),
+			pairRows(m.inspect.Labels, dim, width))
+		lines = uiutil.Section(lines, budget, dim.Render("-- Options --"),
+			pairRows(m.inspect.Options, dim, width))
 	} else if m.inspectErr != nil && sel.Name == m.inspectName {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
-			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+		lines = uiutil.AppendLines(lines, budget, "",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
+				Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
 	}
 
 	lines = append(lines, "", dim.Render("[c] create  [d] delete  [P] prune  [y] yank path"))
 	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+}
+
+func pairRows(pairs map[string]string, style lipgloss.Style, width int) []string {
+	rows := make([]string, 0, len(pairs))
+	for k, v := range pairs {
+		rows = append(rows, style.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
+	}
+	sort.Strings(rows)
+	return rows
 }
