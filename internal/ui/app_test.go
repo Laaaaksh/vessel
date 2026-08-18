@@ -980,6 +980,19 @@ func TestFooterView_alwaysOneLine(t *testing.T) {
 			m.lastErr = errors.New("container [list]: exit status 1 (stderr: " + strings.Repeat("boom ", 40) + ")")
 			return m
 		}},
+		{"wide-rune status", func(m Model) Model {
+			m.status = "custom: " + strings.Repeat("世界", 60)
+			return m
+		}},
+		{"wide-rune error", func(m Model) Model {
+			m.lastErr = errors.New("container [volume create " + strings.Repeat("世界", 60) + "]: exit status 1")
+			return m
+		}},
+		{"wide-rune services-down error", func(m Model) Model {
+			m.lastErr = errors.New("container [volume create " + strings.Repeat("世界", 60) +
+				"]: exit status 1 (stderr: Error: Plugins are unavailable.\n\n    container system start\n)")
+			return m
+		}},
 	}
 	for _, st := range states {
 		for _, w := range []int{60, 72, 80, 100, 183, 200} {
@@ -994,6 +1007,26 @@ func TestFooterView_alwaysOneLine(t *testing.T) {
 						st.name, w, v, lines, footer)
 				}
 			}
+		}
+	}
+}
+
+func TestHelpView_fitsWithWideRuneCustomCommands(t *testing.T) {
+	custom := []config.CustomCommand{{Name: strings.Repeat("世界", 40), Key: "z", Command: "echo wide"}}
+	for _, size := range []struct{ w, h int }{{60, 24}, {80, 24}, {120, 24}} {
+		m := newTestModel()
+		m.width, m.height = size.w, size.h
+		m.cfg.CustomCommands = custom
+		m.showHelp = true
+		// The custom command is the last row, so scroll to it.
+		next, _ := m.handleKey(keyMsg("G"))
+		m = next.(Model)
+		out := ansi.Strip(viewString(m.View()))
+		if !strings.Contains(out, "custom:") {
+			t.Fatalf("%dx%d: the custom command row must be on screen, got:\n%s", size.w, size.h, out)
+		}
+		if got := lipgloss.Height(viewString(m.View())); got > size.h {
+			t.Fatalf("%dx%d: help renders %d lines for a %d-row screen", size.w, size.h, got, size.h)
 		}
 	}
 }
