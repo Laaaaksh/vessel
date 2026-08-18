@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -167,6 +169,153 @@ func assertPending(t *testing.T, m Model, kind deleteKind, ids ...string) {
 		if m.pendingIDs[i] != ids[i] {
 			t.Fatalf("pendingIDs=%v want %v", m.pendingIDs, ids)
 		}
+	}
+}
+
+func imagesModel(t *testing.T) Model {
+	t.Helper()
+	m := New()
+	m.cfg.MouseEnabled = true
+	m.width, m.height = 120, 40
+	m.activeView = ViewImages
+	m.client = backend.NewClientWithBinary(filepath.Join(t.TempDir(), "no-such-container-cli"))
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+	})
+	return m
+}
+
+func volumesModel(t *testing.T) Model {
+	t.Helper()
+	m := New()
+	m.cfg.MouseEnabled = true
+	m.width, m.height = 120, 40
+	m.activeView = ViewVolumes
+	m.client = backend.NewClientWithBinary(filepath.Join(t.TempDir(), "no-such-container-cli"))
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{
+		{Name: "data"},
+		{Name: "cache"},
+	})
+	return m
+}
+
+func inspectRefOf(t *testing.T, cmd tea.Cmd) string {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected an inspect command, got nil")
+	}
+	msg, ok := cmd().(imageInspectMsg)
+	if !ok {
+		t.Fatalf("expected imageInspectMsg, got %T", msg)
+	}
+	return msg.ref
+}
+
+func TestMouseWheel_imagesInspectsNewSelection(t *testing.T) {
+	m := imagesModel(t)
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection after wheel = %q, want nginx:1.27", got)
+	}
+	if got := inspectRefOf(t, cmd); got != "nginx:1.27" {
+		t.Errorf("inspect ref = %q, want nginx:1.27", got)
+	}
+}
+
+func TestMouseClick_imagesInspectsNewSelection(t *testing.T) {
+	m := imagesModel(t)
+	next, cmd := m.handleMouseClick(tea.MouseClickMsg(tea.Mouse{Y: 3, Button: tea.MouseLeft}))
+	m = next.(Model)
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection after click = %q, want nginx:1.27", got)
+	}
+	if got := inspectRefOf(t, cmd); got != "nginx:1.27" {
+		t.Errorf("inspect ref = %q, want nginx:1.27", got)
+	}
+}
+
+func TestMouseWheel_imagesUnchangedSelectionIssuesNoInspect(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", &backend.ImageInspect{ID: "1"}, nil)
+	// Wheel up at the top row cannot move the cursor.
+	_, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+	if cmd != nil {
+		t.Fatalf("unchanged selection must not inspect, got %T", cmd())
+	}
+}
+
+func TestMouseWheel_volumesInspectsNewSelection(t *testing.T) {
+	m := volumesModel(t)
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if got := m.volPanel.Selected().Name; got != "cache" {
+		t.Fatalf("selection after wheel = %q, want cache", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected an inspect command, got nil")
+	}
+	msg, ok := cmd().(volumeInspectMsg)
+	if !ok {
+		t.Fatalf("expected volumeInspectMsg, got %T", msg)
+	}
+	if msg.name != "cache" {
+		t.Errorf("inspect name = %q, want cache", msg.name)
+	}
+}
+
+func TestLoadImageInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
+	m := imagesModel(t)
+	if cmd := m.loadImageInspectCmd(); cmd == nil {
+		t.Fatal("first inspect of a selection must be issued")
+	}
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", &backend.ImageInspect{ID: "1"}, nil)
+	if cmd := m.loadImageInspectCmd(); cmd != nil {
+		t.Error("inspect must be skipped while the same image is already inspected")
+	}
+	// A failed inspect is not cached, so the next poll retries.
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", nil, errors.New("boom"))
+	if cmd := m.loadImageInspectCmd(); cmd == nil {
+		t.Error("failed inspect must be retried")
+	}
+}
+
+func TestLoadVolumeInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
+	m := volumesModel(t)
+	if cmd := m.loadVolumeInspectCmd(); cmd == nil {
+		t.Fatal("first inspect of a selection must be issued")
+	}
+	m.volPanel = m.volPanel.SetInspect("data", &backend.VolumeInspect{Name: "data"}, nil)
+	if cmd := m.loadVolumeInspectCmd(); cmd != nil {
+		t.Error("inspect must be skipped while the same volume is already inspected")
+	}
+	m.volPanel = m.volPanel.SetInspect("data", nil, errors.New("boom"))
+	if cmd := m.loadVolumeInspectCmd(); cmd == nil {
+		t.Error("failed inspect must be retried")
+	}
+}
+
+func TestSelectionChanged_nilHandling(t *testing.T) {
+	img := &backend.Image{Repository: "alpine", Tag: "latest"}
+	if selectionRefChanged(nil, nil) {
+		t.Error("nil to nil image selection did not change")
+	}
+	if !selectionRefChanged(nil, img) {
+		t.Error("nil to non-nil image selection changed")
+	}
+	if !selectionRefChanged(img, nil) {
+		t.Error("non-nil to nil image selection changed")
+	}
+	vol := &backend.Volume{Name: "data"}
+	if selectionNameChanged(nil, nil) {
+		t.Error("nil to nil volume selection did not change")
+	}
+	if !selectionNameChanged(nil, vol) {
+		t.Error("nil to non-nil volume selection changed")
+	}
+	if !selectionNameChanged(vol, nil) {
+		t.Error("non-nil to nil volume selection changed")
 	}
 }
 

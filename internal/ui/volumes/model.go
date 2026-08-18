@@ -120,6 +120,16 @@ func (m Model) SetInspect(name string, ins *backend.VolumeInspect, err error) Mo
 	return m
 }
 
+// InspectedName returns the volume name the panel already holds a successful
+// inspect for, or "" when the last inspect failed or none has arrived. The app
+// uses it to avoid re-inspecting an unchanged selection on every poll tick.
+func (m Model) InspectedName() string {
+	if m.inspect == nil || m.inspectErr != nil {
+		return ""
+	}
+	return m.inspectName
+}
+
 // MoveBy moves the cursor by delta rows.
 func (m Model) MoveBy(delta int) Model {
 	m.cursor = uiutil.MoveCursor(m.cursor, len(m.filtered), delta)
