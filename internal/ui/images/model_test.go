@@ -75,14 +75,25 @@ func TestImageMarkedIDsFollowsSelection(t *testing.T) {
 	}
 }
 
-func TestImageClearMarks(t *testing.T) {
-	m := New().SetItems([]backend.Image{img("a", "alpine"), img("b", "busybox")})
+// The app hands the panel its binding, so a rebound mark key has to reach it
+// and the old one has to stop working.
+func TestImageToggleMarkKeyIsConfigurable(t *testing.T) {
+	m := New().SetItems([]backend.Image{img("a", "alpine"), img("b", "busybox")}).SetToggleMarkKey("m")
 	m, _ = m.Update(spaceKey())
-	m, _ = m.Update(keyMsg("j"))
-	m, _ = m.Update(spaceKey())
-	m = m.ClearMarks()
 	if got := m.MarkedIDs(); len(got) != 0 {
-		t.Fatalf("ClearMarks left marks: %v", got)
+		t.Fatalf("space still marks after rebinding: %v", got)
+	}
+	m, _ = m.Update(keyMsg("m"))
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("MarkedIDs = %v, want [a] from the rebound key", got)
+	}
+}
+
+func TestImageEmptyToggleMarkKeyKeepsTheDefault(t *testing.T) {
+	m := New().SetItems([]backend.Image{img("a", "alpine")}).SetToggleMarkKey("")
+	m, _ = m.Update(spaceKey())
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("MarkedIDs = %v, want [a]: an empty binding must not disable marking", got)
 	}
 }
 

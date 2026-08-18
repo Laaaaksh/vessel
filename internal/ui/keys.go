@@ -69,7 +69,7 @@ func DefaultKeyMap() KeyMap {
 		Follow:     "f",
 		LayoutNext: "+",
 		LayoutPrev: "_",
-		ToggleMark: " ",
+		ToggleMark: "space",
 		FocusNext:  "l",
 		FocusPrev:  "h",
 	}
