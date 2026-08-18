@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
@@ -620,14 +622,15 @@ func TestImagesAction_Save_flow(t *testing.T) {
 	if mm.promptKind != "save to" || mm.promptRef != "alpine:latest" {
 		t.Fatalf("save prompt state: kind=%q ref=%q", mm.promptKind, mm.promptRef)
 	}
-	res, cmd2 := mm.handlePrompt(promptDoneMsg{kind: "save to", text: "/tmp/out.tar"})
+	path := filepath.Join(t.TempDir(), "out.tar")
+	res, cmd2 := mm.handlePrompt(promptDoneMsg{kind: "save to", text: path})
 	done := cmd2().(actionDoneMsg)
 	if done.err != nil {
 		t.Fatal(done.err)
 	}
 	out, _ := res.Update(done)
 	om := out.(Model)
-	if got := lastCLICommand(om); got != "container image save --output /tmp/out.tar alpine:latest" {
+	if got := lastCLICommand(om); got != "container image save --output "+path+" alpine:latest" {
 		t.Fatalf("save argument order: got %q", got)
 	}
 }
@@ -758,8 +761,11 @@ func TestImagesActions_refuseUntaggedImage(t *testing.T) {
 		if next.mode != modeBrowse {
 			t.Fatalf("%s on an untagged image opened mode %v", label, next.mode)
 		}
-		if !strings.Contains(next.status, "no tag") {
-			t.Fatalf("%s status must explain the missing tag, got %q", label, next.status)
+		if !strings.Contains(next.status, "no named reference") {
+			t.Fatalf("%s status must explain why the row is unaddressable, got %q", label, next.status)
+		}
+		if strings.Contains(next.status, "tag it first") {
+			t.Fatalf("%s must not prescribe an action it also refuses, got %q", label, next.status)
 		}
 		if got := lastCLICommand(next); got != "" {
 			t.Fatalf("%s on an untagged image shelled out: %q", label, got)
@@ -846,15 +852,86 @@ func TestFooterView_clampsCLIErrorToOneRow(t *testing.T) {
 	out, _ := next.(Model).Update(done)
 	om := out.(Model)
 
-	footer := ansi.Strip(om.footerView())
+	assertOneRow(t, om, "push auth failure")
+	if !strings.Contains(ansi.Strip(om.footerView()), "error:") {
+		t.Fatalf("footer should still report the error, got %q", ansi.Strip(om.footerView()))
+	}
+}
+
+// assertOneRow checks the invariant layoutDims depends on: the footer occupies
+// exactly one row of at most m.width display cells, whatever it is rendering.
+func assertOneRow(t *testing.T, m Model, what string) {
+	t.Helper()
+	footer := ansi.Strip(m.footerView())
 	if n := strings.Count(footer, "\n"); n != 0 {
-		t.Fatalf("footer must occupy exactly one row, got %d extra rows:\n%s", n, footer)
+		t.Fatalf("%s: footer must occupy one row, got %d extra:\n%s", what, n, footer)
 	}
-	if w := len([]rune(footer)); w > om.width {
-		t.Fatalf("footer is %d cells wide, frame is %d — it will wrap", w, om.width)
+	if w := lipgloss.Width(footer); w > m.width {
+		t.Fatalf("%s: footer is %d cells wide, frame is %d — it will wrap", what, w, m.width)
 	}
-	if !strings.Contains(footer, "error:") {
-		t.Fatalf("footer should still report the error, got %q", footer)
+}
+
+func TestFooterView_keyHintsFitOneRow(t *testing.T) {
+	for _, view := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		m := New()
+		m.width, m.height = 80, 24
+		m.activeView = view
+		m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
+		if m.status != "" || m.lastErr != nil {
+			t.Fatal("precondition: the key-hint branch needs no status and no error")
+		}
+		assertOneRow(t, m, "key hints at width 80")
+	}
+}
+
+func TestFooterView_clampsWideRunesByDisplayWidth(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.lastErr = errors.New(strings.Repeat("容器", 120))
+	assertOneRow(t, m, "wide-rune error")
+
+	m.lastErr = nil
+	m.status = strings.Repeat("容器", 120)
+	assertOneRow(t, m, "wide-rune status")
+}
+
+func TestConfirm_pendingActionDoesNotOutliveItsModal(t *testing.T) {
+	m := imagesModel(t, []backend.Image{
+		{ID: "sha256:aaa", Repository: "vessel/alpine", Tag: "probe"},
+		{ID: "sha256:bbb", Repository: "vessel/busybox", Tag: "probe"},
+	})
+	m = beginPush(t, m)
+
+	// An unrelated in-flight command lands and forces the frame back to browse,
+	// silently dismissing the push confirmation.
+	dismissed, _ := m.Update(actionDoneMsg{msg: "pull ok"})
+	mm := dismissed.(Model)
+	if mm.mode != modeBrowse {
+		t.Fatalf("actionDoneMsg should return to browse, got %v", mm.mode)
+	}
+
+	// The user now confirms a delete of a different row.
+	mm.imgPanel = mm.imgPanel.SetCursor(1)
+	next, _ := mm.handleKey(keyMsg("d"))
+	dm := next.(Model)
+	if dm.mode != modeConfirmDelete {
+		t.Fatalf("d should open the delete confirmation, got %v", dm.mode)
+	}
+	if !strings.Contains(modalText(t, dm), "Delete vessel/busybox:probe?") {
+		t.Fatalf("modal must describe the delete, got: %q", modalText(t, dm))
+	}
+
+	confirmed, cmd := dm.handleKey(keyMsg("y"))
+	if cmd == nil {
+		t.Fatal("confirming should start the delete")
+	}
+	done := cmd().(actionDoneMsg)
+	if done.err != nil {
+		t.Fatal(done.err)
+	}
+	out, _ := confirmed.(Model).Update(done)
+	if got := lastCLICommand(out.(Model)); got != "container image delete sha256:bbb" {
+		t.Fatalf("confirming a delete ran %q — a stale push closure hijacked it", got)
 	}
 }
 
