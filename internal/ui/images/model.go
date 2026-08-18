@@ -327,28 +327,30 @@ func (m Model) DetailView(width, height int) string {
 		return lipgloss.NewStyle().Width(width).Height(height).
 			Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
-	lines := []string{
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	budget := max(0, height-keybarLines)
+	lines := uiutil.AppendLines(nil, budget,
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
 		"",
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
 		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
-	}
+	)
 
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	budget := height - keybarLines
 	if m.inspect != nil && m.inspectRef == backend.FormatRef(*sel) {
 		if d := m.inspect.Digest; d != "" {
-			lines = append(lines, uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
+			lines = uiutil.AppendLines(lines, budget, uiutil.KV("Digest", uiutil.Truncate(d, width-10)))
 		}
 		if len(m.inspect.Cmd) > 0 {
-			lines = append(lines, uiutil.KV("Cmd", uiutil.Truncate(strings.Join(m.inspect.Cmd, " "), width-10)))
+			lines = uiutil.AppendLines(lines, budget,
+				uiutil.KV("Cmd", uiutil.Truncate(strings.Join(m.inspect.Cmd, " "), width-10)))
 		}
 		if m.inspect.WorkingDir != "" {
-			lines = append(lines, uiutil.KV("Workdir", uiutil.Truncate(m.inspect.WorkingDir, width-10)))
+			lines = uiutil.AppendLines(lines, budget,
+				uiutil.KV("Workdir", uiutil.Truncate(m.inspect.WorkingDir, width-10)))
 		}
 		if m.inspect.LayerCount > 0 {
-			lines = append(lines, uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
+			lines = uiutil.AppendLines(lines, budget, uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
 		}
 
 		env := make([]string, 0, len(m.inspect.Env))
@@ -369,7 +371,8 @@ func (m Model) DetailView(width, height int) string {
 				Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
 	}
 
-	lines = append(lines, "", dim.Render("[p] pull  [c] run  [d] delete  [P] prune"))
-	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
+	lines = uiutil.AppendLines(lines, height, "", dim.Render("[p] pull  [c] run  [d] delete  [P] prune"))
+	body := lipgloss.NewStyle().Width(width).PaddingLeft(1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.NewStyle().Height(height).Render(uiutil.ClampHeight(body, height))
 }

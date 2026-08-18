@@ -45,16 +45,45 @@ func TestDetailView_rendersInspectFields(t *testing.T) {
 }
 
 func TestDetailView_inspectKeyedByName(t *testing.T) {
+	// The cached inspect belongs to the first volume; after moving to the second
+	// none of its fields may leak into that volume's pane.
 	m := New().SetItems([]backend.Volume{
 		{Name: "vessel-test-vol", Driver: "local"},
-	}).SetInspect("other-vol", &backend.VolumeInspect{Name: "other-vol", Format: "ext4", SizeBytes: 1}, nil)
-	v := ansi.Strip(m.DetailView(60, 40))
-	// Base fields still render; the keyed inspect extras must not.
-	if strings.Contains(v, "Size") || strings.Contains(v, "ext4") {
-		t.Fatalf("stale inspect rendered for a different volume: %q", v)
+		{Name: "other-vol", Driver: "local"},
+	}).SetInspect("vessel-test-vol", &backend.VolumeInspect{
+		Name:      "vessel-test-vol",
+		Format:    "ext4",
+		SizeBytes: 549755813888,
+		Labels:    map[string]string{"purpose": "testing"},
+	}, nil)
+
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "ext4") {
+		t.Fatalf("inspect not rendered for the volume it belongs to: %q", v)
+	}
+
+	v := ansi.Strip(m.MoveBy(1).DetailView(60, 40))
+	if !strings.Contains(v, "other-vol") {
+		t.Fatalf("expected the second volume to be selected: %q", v)
+	}
+	for _, leaked := range []string{"ext4", "512 GiB", "-- Labels --", "purpose=testing"} {
+		if strings.Contains(v, leaked) {
+			t.Errorf("previous volume's inspect leaked into the next selection: %q in %q", leaked, v)
+		}
 	}
 	if !strings.Contains(v, "Driver") {
 		t.Fatalf("base detail fields missing: %q", v)
+	}
+}
+
+func TestDetailView_inspectErrorKeyedByName(t *testing.T) {
+	m := New().SetItems([]backend.Volume{
+		{Name: "vessel-test-vol", Driver: "local"},
+		{Name: "other-vol", Driver: "local"},
+	}).SetInspect("vessel-test-vol", nil, errors.New("boom"))
+
+	v := ansi.Strip(m.MoveBy(1).DetailView(60, 40))
+	if strings.Contains(v, "boom") {
+		t.Errorf("another volume's inspect error rendered: %q", v)
 	}
 }
 

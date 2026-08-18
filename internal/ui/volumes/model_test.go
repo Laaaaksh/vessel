@@ -355,3 +355,19 @@ func TestDetailView_sectionRowsAreStablyOrdered(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(3, "label")
+	ins.Options = manyPairs(2, "option")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	for _, width := range []int{18, 38} {
+		for _, height := range []int{4, 6, 8, 10} {
+			v := ansi.Strip(m.DetailView(width, height))
+			if got := strings.Count(v, "\n") + 1; got > height {
+				t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+			}
+		}
+	}
+}

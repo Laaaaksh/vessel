@@ -119,3 +119,31 @@ func TestDetailView_staysWithinHeightBudgetAndKeepsMetrics(t *testing.T) {
 		t.Errorf("live metrics squeezed out by the mounts section: %q", v)
 	}
 }
+
+func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
+	m := New().SetItems([]backend.Container{{
+		ID:          "abc",
+		Name:        "web",
+		Status:      "running",
+		Hostname:    "web",
+		Platform:    "linux/arm64",
+		CPUs:        4,
+		MemoryBytes: 1073741824,
+		Mounts:      []backend.Mount{{Source: "/host/data", Destination: "/data"}},
+		Networks:    []backend.Network{{Name: "default", IP: "192.168.64.2/24"}},
+		Labels:      map[string]string{"a": "1"},
+		Env:         []string{"PATH=/usr/bin"},
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	// A 60-col terminal, the narrowest the app accepts, gives the detail pane
+	// 18 columns, so rows wrap as well as run long.
+	for _, width := range []int{18, 38} {
+		for _, height := range []int{4, 6, 8, 10} {
+			v := ansi.Strip(m.DetailView(width, height, poller))
+			if got := strings.Count(v, "\n") + 1; got > height {
+				t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+			}
+		}
+	}
+}
