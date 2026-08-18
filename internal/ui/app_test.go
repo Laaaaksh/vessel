@@ -657,6 +657,37 @@ func TestFooterView_noHintForOtherErrors(t *testing.T) {
 	}
 }
 
+func TestApplyContainersLoaded_keepsServicesDownHint(t *testing.T) {
+	servicesDown := errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = servicesDown
+	// A successful `container list` poll is a top-level verb that works while
+	// services are down; it must not wipe the services-down hint.
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr == nil {
+		t.Fatal("a successful top-level list must not clear a services-down hint")
+	}
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("services-down hint must survive the next successful poll, footer=%q", out)
+	}
+}
+
+func TestApplyContainersLoaded_clearsOtherErrors(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful poll must clear a non-services-down error, got %v", m.lastErr)
+	}
+}
+
 func TestHelpBindingsCoverAllKeys(t *testing.T) {
 	tokens := map[string]bool{}
 	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
