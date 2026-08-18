@@ -14,7 +14,11 @@ confirm_stop = false
 
 # Custom commands appear in the action menu (x).
 # Templates: {{.ID}} {{.Name}} {{.Image}}
+# key is optional: a single character ("z"), a named key ("space", "enter",
+# "f5"), or a modifier combination ("ctrl+z"). A configured key replaces the
+# built-in action on that key; navigation, filtering, help and quit keys are
+# reserved and cannot be taken over. Leave it empty to run from the menu only.
 # [[custom_commands]]
 # name = "inspect"
-# key = ""
+# key = "z"
 # command = "container inspect {{.ID}}"
