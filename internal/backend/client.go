@@ -18,8 +18,9 @@ const (
 	cmdLogN = 40
 )
 
-// errNoDeleteTargets guards against a destructively broad no-argument delete:
-// the CLI treats a bare "image delete" as deleting everything, so never issue it.
+// errNoDeleteTargets rejects an empty variadic delete. The CLI needs an explicit
+// --all to wipe everything, so a no-argument call destroys nothing; it is a
+// caller bug that would otherwise surface only as a confusing CLI usage error.
 var errNoDeleteTargets = fmt.Errorf("delete requires at least one target")
 
 // Client is the adapter that shells out to the container CLI.

@@ -142,9 +142,8 @@ type actionItem struct {
 // New creates the root model. Backend connection happens in Init.
 func New() Model {
 	cfg, _ := config.Load()
-	return Model{
+	m := Model{
 		cfg:        cfg,
-		keys:       DefaultKeyMap(),
 		st:         newStyles(),
 		activeView: ViewContainers,
 		focus:      FocusList,
@@ -155,6 +154,17 @@ func New() Model {
 		volPanel:   volumes.New(),
 		logPanel:   logs.New(),
 	}
+	return m.withKeys(DefaultKeyMap())
+}
+
+// withKeys installs k and hands the panels the bindings they match themselves,
+// so a rebound key reaches them instead of a hardcoded literal.
+func (m Model) withKeys(k KeyMap) Model {
+	m.keys = k
+	m.cntPanel = m.cntPanel.SetToggleMarkKey(k.ToggleMark)
+	m.imgPanel = m.imgPanel.SetToggleMarkKey(k.ToggleMark)
+	m.volPanel = m.volPanel.SetToggleMarkKey(k.ToggleMark)
+	return m
 }
 
 // Init connects to the container backend and kicks off the first poll.
@@ -771,13 +781,15 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 			err = client.RemoveImage(ctx, ids...)
 		case deleteVolumes:
 			err = client.RemoveVolume(ctx, ids...)
-		default:
+		case deleteContainers:
 			for _, id := range ids {
 				if e := client.RemoveContainer(ctx, id); e != nil {
 					err = e
 					break
 				}
 			}
+		default:
+			return actionDoneMsg{err: fmt.Errorf("delete: unhandled target kind %d", kind)}
 		}
 		if err != nil {
 			return actionDoneMsg{err: err}

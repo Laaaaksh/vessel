@@ -428,3 +428,104 @@ func TestCancelledDeleteKeepsMarks(t *testing.T) {
 		t.Fatalf("cancelling a delete must keep marks, got %v", got)
 	}
 }
+
+// The mark key is a KeyMap binding, not a literal in each panel: rebinding it
+// has to reach every pane and the bulk delete that acts on the marks.
+func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
+	m := New().withKeys(rebound("m"))
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	})
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
+		{ID: "1", Name: "web", Status: "running"},
+		{ID: "2", Name: "db", Status: "running"},
+	})
+
+	next, _ := m.handleKey(spaceKey())
+	m = next.(Model)
+	if got := m.imgPanel.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("space still marks after rebinding: %v", got)
+	}
+	for _, v := range []View{ViewImages, ViewVolumes, ViewContainers} {
+		m.activeView = v
+		next, _ = m.handleKey(keyMsg("m"))
+		m = next.(Model)
+		next, _ = m.handleKey(keyMsg("j"))
+		m = next.(Model)
+		next, _ = m.handleKey(keyMsg("m"))
+		m = next.(Model)
+	}
+	assertMarked(t, "images", m.imgPanel.MarkedIDs(), "a", "b")
+	assertMarked(t, "volumes", m.volPanel.MarkedIDs(), "data", "logs")
+	assertMarked(t, "containers", m.cntPanel.MarkedIDs(), "1", "2")
+
+	// The bulk delete acts on what the rebound key marked.
+	m.activeView = ViewVolumes
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteVolumes, "data", "logs")
+}
+
+// The default binding is what a real space bar press produces, so marking and
+// bulk-deleting work end to end out of the box.
+func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	})
+	m = markRows(t, m, 2)
+	assertMarked(t, "images", m.imgPanel.MarkedIDs(), "a", "b")
+	next, _ := m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteImages, "a", "b")
+	if m.pendingLbl != "2 images" {
+		t.Fatalf("pendingLbl=%q want '2 images'", m.pendingLbl)
+	}
+}
+
+// The delete command is the one path that destroys user state, so an unhandled
+// kind must fail loudly instead of falling through to a container delete.
+func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
+	m := New()
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
+	m.mode = modeConfirmDelete
+	m.pendingKind = deleteKind(99)
+	m.pendingIDs = []string{"1"}
+	next, cmd := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirm produced no command")
+	}
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want actionDoneMsg", cmd())
+	}
+	if done.err == nil {
+		t.Fatal("an unhandled delete kind must report an error, not delete containers")
+	}
+}
+
+func rebound(toggleMark string) KeyMap {
+	k := DefaultKeyMap()
+	k.ToggleMark = toggleMark
+	return k
+}
+
+func assertMarked(t *testing.T, pane string, got []string, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s MarkedIDs = %v, want %v", pane, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s MarkedIDs = %v, want %v", pane, got, want)
+		}
+	}
+}

@@ -18,18 +18,19 @@ const (
 
 // Model is the volumes panel.
 type Model struct {
-	items     []backend.Volume
-	filtered  []backend.Volume
-	cursor    int
-	filter    string
-	filtering bool
-	marked    map[string]bool
-	pageRows  int
+	items      []backend.Volume
+	filtered   []backend.Volume
+	cursor     int
+	filter     string
+	filtering  bool
+	marked     map[string]bool
+	toggleMark string
+	pageRows   int
 }
 
 // New creates an empty volumes model.
 func New() Model {
-	return Model{marked: make(map[string]bool), pageRows: 10}
+	return Model{marked: make(map[string]bool), toggleMark: defaultToggleMark, pageRows: 10}
 }
 
 // Filtering reports whether the filter prompt is active.
@@ -79,6 +80,19 @@ func (m Model) Selected() *backend.Volume {
 	return &v
 }
 
+// defaultToggleMark is the fallback binding for a panel the app has not handed
+// its key map to; a real space bar press serialises as "space", never " ".
+const defaultToggleMark = "space"
+
+// SetToggleMarkKey sets the key that toggles a mark on the selected row. An
+// empty binding is ignored so the panel can never end up unmarkable.
+func (m Model) SetToggleMarkKey(k string) Model {
+	if k != "" {
+		m.toggleMark = k
+	}
+	return m
+}
+
 // MarkedIDs returns multi-selected volume names.
 func (m Model) MarkedIDs() []string {
 	var out []string
@@ -88,12 +102,6 @@ func (m Model) MarkedIDs() []string {
 		}
 	}
 	return out
-}
-
-// ClearMarks clears multi-select.
-func (m Model) ClearMarks() Model {
-	m.marked = make(map[string]bool)
-	return m
 }
 
 // MoveBy moves the cursor by delta rows.
@@ -158,7 +166,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
-	case "space":
+	case m.toggleMark:
 		if sel := m.Selected(); sel != nil {
 			if m.marked == nil {
 				m.marked = make(map[string]bool)
