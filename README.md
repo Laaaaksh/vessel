@@ -59,8 +59,8 @@ vessel doctor   # check CLI, system status, config
 | `L` | View logs |
 | `f` | Freeze / follow logs |
 | `s` / `u` / `r` | Stop / start / restart |
-| `d` | Remove (confirm with `y`) |
-| `space` | Toggle multi-select mark |
+| `d` | Remove the selected row, or every marked row when 2+ are marked (confirm with `y`) |
+| `space` | Toggle multi-select mark (containers, images, volumes) |
 | `/` | Filter current list |
 | `y` | Yank id / name / path |
 | `x` | Action menu |
