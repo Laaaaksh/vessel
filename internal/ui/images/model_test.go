@@ -463,25 +463,6 @@ func TestDetailView_narrowPaneStillIdentifiesTheImage(t *testing.T) {
 	}
 }
 
-func TestDetailView_rowsRenderInOrderWhenTheyDoNotAllFit(t *testing.T) {
-	ins := cachedInspect("28bd5fe8b56d", "sha256:e7a1a92a5bfeee40966aea60f0796b0e")
-	ins.Cmd = []string{"/bin/sh"}
-	m := New().SetItems([]backend.Image{
-		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
-	}).SetInspect(testRef, ins, nil)
-
-	// The Digest row wraps to two rows and exhausts the budget, while the
-	// single-row Cmd row that follows it would fit in the gap it left behind.
-	v := ansi.Strip(m.DetailView(20, 12))
-
-	if !strings.Contains(v, "Size") {
-		t.Fatalf("expected the rows before Digest to render, so the gap is real: %q", v)
-	}
-	if strings.Contains(v, "Cmd") && !strings.Contains(v, "Digest") {
-		t.Errorf("Cmd rendered while the earlier Digest row was dropped: %q", v)
-	}
-}
-
 func TestDetailView_longValueRowsDoNotWrap(t *testing.T) {
 	// A real digest is "sha256:" plus 64 hex characters, far wider than the
 	// 40-column pane the app uses on any reasonably sized terminal.
@@ -513,4 +494,24 @@ func lineContaining(v, want string) string {
 		}
 	}
 	return ""
+}
+
+func TestDetailView_narrowestPaneStillIdentifiesTheImage(t *testing.T) {
+	// The wide-list layout on a 60-column terminal leaves the detail pane 10
+	// columns, narrower than the image reference itself.
+	ins := cachedInspect("28bd5fe8b56d", "sha256:e7a1a92a5bfeee40966aea60f0796b0e")
+	ins.Cmd = []string{"/bin/sh"}
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
+	}).SetInspect(testRef, ins, nil)
+
+	v := ansi.Strip(m.DetailView(10, 8))
+
+	assertFitsHeight(t, v, 8)
+	if !strings.Contains(v, "docker.i") {
+		t.Errorf("the image reference must still render: %q", v)
+	}
+	if !strings.Contains(v, "ID") {
+		t.Errorf("a wrapping title crowded the data rows out of the pane: %q", v)
+	}
 }

@@ -183,3 +183,31 @@ func TestKVFit_keepsAsMuchOfTheValueAsFits(t *testing.T) {
 		t.Errorf("row occupies %d rendered rows, want 1", got)
 	}
 }
+
+func TestHeadline_wrapsWhileItIsASmallPartOfThePane(t *testing.T) {
+	title := "docker.io/library/alpine:latest"
+	got := Headline(title, 18, 20)
+	if got != title {
+		t.Errorf("a tall pane must show the whole title, got %q", got)
+	}
+	if RowsFor(got, 18) != 2 {
+		t.Errorf("expected the title to wrap to two rows at width 18")
+	}
+}
+
+func TestHeadline_truncatesWhenItWouldCrowdThePane(t *testing.T) {
+	title := "docker.io/library/alpine:latest"
+	got := Headline(title, 10, 8)
+	if got == title {
+		t.Fatal("a title that would take half a short pane must be truncated")
+	}
+	if rows := RowsFor(got, 10); rows != 1 {
+		t.Errorf("truncated title occupies %d rows, want 1: %q", rows, got)
+	}
+}
+
+func TestHeadline_leavesShortTitlesAlone(t *testing.T) {
+	if got := Headline("web", 40, 8); got != "web" {
+		t.Errorf("Headline(short) = %q, want it unchanged", got)
+	}
+}
