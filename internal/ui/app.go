@@ -132,6 +132,7 @@ type Model struct {
 	actionItems []actionItem
 	promptKind  string
 	promptBuf   string
+	promptRef   string
 }
 
 type actionItem struct {
@@ -931,11 +932,22 @@ func (m Model) beginPrompt(kind, _ string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// beginPromptForImage opens a prompt that remembers a selected image ref so the
+// submitted text can be combined with it (e.g. a live image + a new tag).
+func (m Model) beginPromptForImage(kind, ref string) (tea.Model, tea.Cmd) {
+	m.mode = modePrompt
+	m.promptKind = kind
+	m.promptBuf = ""
+	m.promptRef = ref
+	return m, nil
+}
+
 func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "esc":
 		m.mode = modeBrowse
 		m.promptBuf = ""
+		m.promptRef = ""
 		m.status = "cancelled"
 		return m, nil
 	case "enter":
@@ -958,6 +970,8 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
+	ref := m.promptRef
+	m.promptRef = ""
 	if msg.text == "" {
 		m.status = "empty input"
 		return m, nil
@@ -977,6 +991,21 @@ func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 		name := msg.text
 		return m.runGlobal("create volume "+name, func(ctx context.Context) error {
 			return m.client.CreateVolume(ctx, name)
+		})
+	case "tag":
+		newRef := msg.text
+		return m.runGlobal("tag "+newRef, func(ctx context.Context) error {
+			return m.client.TagImage(ctx, ref, newRef)
+		})
+	case "save to":
+		imageRef, path := ref, msg.text
+		return m.runGlobal("save "+imageRef, func(ctx context.Context) error {
+			return m.client.SaveImage(ctx, imageRef, path)
+		})
+	case "load from":
+		path := msg.text
+		return m.runGlobal("load "+path, func(ctx context.Context) error {
+			return m.client.LoadImage(ctx, path)
 		})
 	case "custom":
 		return m.runCustom(msg.text)
@@ -1048,6 +1077,40 @@ func (m Model) buildActions() []actionItem {
 				ref := backend.FormatRef(*sel)
 				x, c := m.runGlobal("run "+ref, func(ctx context.Context) error {
 					return m.client.RunDetached(ctx, ref)
+				})
+				return x.(Model), c
+			}},
+			actionItem{"Tag…", func(m Model) (Model, tea.Cmd) {
+				sel := m.imgPanel.Selected()
+				if sel == nil {
+					m.status = "nothing selected"
+					return m, nil
+				}
+				x, c := m.beginPromptForImage("tag", backend.FormatRef(*sel))
+				return x.(Model), c
+			}},
+			actionItem{"Save…", func(m Model) (Model, tea.Cmd) {
+				sel := m.imgPanel.Selected()
+				if sel == nil {
+					m.status = "nothing selected"
+					return m, nil
+				}
+				x, c := m.beginPromptForImage("save to", backend.FormatRef(*sel))
+				return x.(Model), c
+			}},
+			actionItem{"Load…", func(m Model) (Model, tea.Cmd) {
+				x, c := m.beginPrompt("load from", "tar archive path")
+				return x.(Model), c
+			}},
+			actionItem{"Push", func(m Model) (Model, tea.Cmd) {
+				sel := m.imgPanel.Selected()
+				if sel == nil {
+					m.status = "nothing selected"
+					return m, nil
+				}
+				ref := backend.FormatRef(*sel)
+				x, c := m.runGlobal("push "+ref, func(ctx context.Context) error {
+					return m.client.PushImage(ctx, ref)
 				})
 				return x.(Model), c
 			}},
