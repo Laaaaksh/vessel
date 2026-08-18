@@ -45,3 +45,30 @@ func TestContainerMarksSurviveARefreshThatKeepsThem(t *testing.T) {
 		t.Fatalf("MarkedIDs = %v, want [1]", got)
 	}
 }
+
+// The app hands the panel its binding, so a rebound mark key has to reach it
+// and the old one has to stop working.
+func TestContainerToggleMarkKeyIsConfigurable(t *testing.T) {
+	m := New().SetItems([]backend.Container{cnt("1", "web"), cnt("2", "db")}).SetToggleMarkKey("m")
+	m, _ = m.Update(spaceKey())
+	if got := m.MarkedIDs(); len(got) != 0 {
+		t.Fatalf("space still marks after rebinding: %v", got)
+	}
+	m, _ = m.Update(keyMsg("m"))
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "1" {
+		t.Fatalf("MarkedIDs = %v, want [1] from the rebound key", got)
+	}
+}
+
+func TestContainerEmptyToggleMarkKeyKeepsTheDefault(t *testing.T) {
+	m := New().SetItems([]backend.Container{cnt("1", "web")}).SetToggleMarkKey("")
+	m, _ = m.Update(spaceKey())
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "1" {
+		t.Fatalf("MarkedIDs = %v, want [1]: an empty binding must not disable marking", got)
+	}
+}
+
+func keyMsg(s string) tea.KeyPressMsg {
+	r := rune(s[0])
+	return tea.KeyPressMsg(tea.Key{Code: r, Text: s})
+}

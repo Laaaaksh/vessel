@@ -75,14 +75,25 @@ func TestVolumeMarkedIDsFollowsSelection(t *testing.T) {
 	}
 }
 
-func TestVolumeClearMarks(t *testing.T) {
-	m := New().SetItems([]backend.Volume{vol("data"), vol("logs")})
+// The app hands the panel its binding, so a rebound mark key has to reach it
+// and the old one has to stop working.
+func TestVolumeToggleMarkKeyIsConfigurable(t *testing.T) {
+	m := New().SetItems([]backend.Volume{vol("data"), vol("logs")}).SetToggleMarkKey("m")
 	m, _ = m.Update(spaceKey())
-	m, _ = m.Update(keyMsg("j"))
-	m, _ = m.Update(spaceKey())
-	m = m.ClearMarks()
 	if got := m.MarkedIDs(); len(got) != 0 {
-		t.Fatalf("ClearMarks left marks: %v", got)
+		t.Fatalf("space still marks after rebinding: %v", got)
+	}
+	m, _ = m.Update(keyMsg("m"))
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "data" {
+		t.Fatalf("MarkedIDs = %v, want [data] from the rebound key", got)
+	}
+}
+
+func TestVolumeEmptyToggleMarkKeyKeepsTheDefault(t *testing.T) {
+	m := New().SetItems([]backend.Volume{vol("data")}).SetToggleMarkKey("")
+	m, _ = m.Update(spaceKey())
+	if got := m.MarkedIDs(); len(got) != 1 || got[0] != "data" {
+		t.Fatalf("MarkedIDs = %v, want [data]: an empty binding must not disable marking", got)
 	}
 }
 

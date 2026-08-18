@@ -12,13 +12,14 @@ import (
 
 // Model is the containers panel model.
 type Model struct {
-	items     []backend.Container
-	filtered  []backend.Container
-	cursor    int
-	filter    string
-	filtering bool
-	marked    map[string]bool
-	pageRows  int
+	items      []backend.Container
+	filtered   []backend.Container
+	cursor     int
+	filter     string
+	filtering  bool
+	marked     map[string]bool
+	toggleMark string
+	pageRows   int
 
 	styleSelected lipgloss.Style
 	styleRow      lipgloss.Style
@@ -30,6 +31,7 @@ type Model struct {
 func New() Model {
 	return Model{
 		marked:        make(map[string]bool),
+		toggleMark:    defaultToggleMark,
 		pageRows:      10,
 		styleSelected: lipgloss.NewStyle().Background(lipgloss.Color("#2d1b69")).Foreground(lipgloss.Color("#c4b5fd")),
 		styleRow:      lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")),
@@ -86,6 +88,19 @@ func (m Model) Selected() *backend.Container {
 	return &c
 }
 
+// defaultToggleMark is the fallback binding for a panel the app has not handed
+// its key map to; a real space bar press serialises as "space", never " ".
+const defaultToggleMark = "space"
+
+// SetToggleMarkKey sets the key that toggles a mark on the selected row. An
+// empty binding is ignored so the panel can never end up unmarkable.
+func (m Model) SetToggleMarkKey(k string) Model {
+	if k != "" {
+		m.toggleMark = k
+	}
+	return m
+}
+
 // MarkedIDs returns multi-selected container IDs.
 func (m Model) MarkedIDs() []string {
 	var out []string
@@ -95,12 +110,6 @@ func (m Model) MarkedIDs() []string {
 		}
 	}
 	return out
-}
-
-// ClearMarks clears multi-select.
-func (m Model) ClearMarks() Model {
-	m.marked = make(map[string]bool)
-	return m
 }
 
 // RunningCount returns how many containers are running.
@@ -187,8 +196,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.filtered = m.items
 			m.cursor = 0
 		}
-	// A space bar press serialises via KeyPressMsg.String as "space", not " ".
-	case "space":
+	case m.toggleMark:
 		if sel := m.Selected(); sel != nil {
 			if m.marked == nil {
 				m.marked = make(map[string]bool)
