@@ -94,32 +94,34 @@ func (k KeyMap) NavUp(s string) bool { return Match(s, k.Up, "k") }
 // helpBindings returns contextual (key, description) pairs.
 func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string } {
 	base := []struct{ key, desc string }{
-		{"h / l / ← / →", "move focus (sidebar / list / detail)"},
-		{"j / ↓", "move down (in list)"},
-		{"k / ↑", "move up (in list)"},
+		{"h / l / left / right", "move focus (sidebar / list / detail)"},
+		{"j / k / up / down", "move up / down (in list)"},
 		{"g / G", "top / bottom"},
-		{"pgup / pgdn", "page scroll"},
+		{"pgup / pgdown / ctrl+u / ctrl+d", "page / half-page scroll"},
 		{"tab / 1 2 3", "switch Containers / Images / Volumes"},
 		{"+ / _", "cycle layout"},
 		{"space", "toggle multi-select mark"},
 		{"y", "yank id/name to clipboard"},
 		{"x", "action menu"},
 		{"/", "filter"},
+		{"f", "follow / freeze logs (log view)"},
+		{"`", "toggle command log"},
 		{"?", "toggle help"},
+		{"esc", "cancel / close"},
 		{"q / ctrl+c", "quit"},
 	}
 	switch view {
 	case ViewImages:
 		base = append([]struct{ key, desc string }{
 			{"p", "pull image (prompt)"},
-			{"P", "prune unused images"},
+			{"P", "prune unused images (confirm)"},
 			{"d", "delete marked (confirm)"},
 			{"c", "run container from image"},
 		}, base...)
 	case ViewVolumes:
 		base = append([]struct{ key, desc string }{
 			{"c", "create volume (prompt)"},
-			{"P", "prune unused volumes"},
+			{"P", "prune unused volumes (confirm)"},
 			{"d", "delete marked (confirm)"},
 		}, base...)
 	default:
@@ -128,7 +130,7 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 			{"L", "view logs"},
 			{"s / u / r", "stop / start / restart"},
 			{"d", "delete marked (confirm)"},
-			{"P", "prune stopped containers"},
+			{"P", "prune stopped containers (confirm)"},
 			{"c", "run new container (prompt image)"},
 		}, base...)
 	}
