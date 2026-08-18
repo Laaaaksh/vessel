@@ -157,10 +157,39 @@ func TestPane_dropsEverythingAfterTheFirstRowThatDoesNotFit(t *testing.T) {
 		t.Fatalf("rows must render as a prefix of what was asked for, got %v", got)
 	}
 
-	p.Grow(2)
-	p.Add("tail")
+	p.AddReserved(2, "tail")
 	if got := p.Lines(); len(got) != 2 || got[1] != "tail" {
-		t.Errorf("Grow must reopen the pane for its reserved content, got %v", got)
+		t.Errorf("AddReserved must spend the reservation, got %v", got)
+	}
+}
+
+func TestPane_reservationDoesNotReopenThePaneForLaterRows(t *testing.T) {
+	p := NewPane(20, 3)
+	p.Add("one")
+	p.Add(strings.Repeat("x", 50)) // three rendered rows: latches the pane full
+	p.AddReserved(2, "reserved")
+	p.Section("-- Labels --", []string{"a=1"})
+
+	got := p.Lines()
+	if len(got) != 2 || got[1] != "reserved" {
+		t.Fatalf("the reservation must still be spent, got %v", got)
+	}
+	for _, l := range got {
+		if strings.Contains(l, "Labels") {
+			t.Errorf("a section rendered after rows were dropped for space: %v", got)
+		}
+	}
+}
+
+func TestPane_reservationLeavesTheOpenPaneOpen(t *testing.T) {
+	p := NewPane(20, 4)
+	p.Add("one")
+	p.AddReserved(2, "reserved")
+	p.Section("-- Labels --", []string{"a=1"})
+
+	got := p.Lines()
+	if len(got) != 5 || got[1] != "reserved" || got[3] != "-- Labels --" {
+		t.Errorf("a pane that never filled up must keep accepting rows, got %v", got)
 	}
 }
 
