@@ -113,21 +113,21 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 		base = append([]struct{ key, desc string }{
 			{"p", "pull image (prompt)"},
 			{"P", "prune unused images"},
-			{"d", "delete image (confirm)"},
+			{"d", "delete marked (confirm)"},
 			{"c", "run container from image"},
 		}, base...)
 	case ViewVolumes:
 		base = append([]struct{ key, desc string }{
 			{"c", "create volume (prompt)"},
 			{"P", "prune unused volumes"},
-			{"d", "delete volume (confirm)"},
+			{"d", "delete marked (confirm)"},
 		}, base...)
 	default:
 		base = append([]struct{ key, desc string }{
 			{"enter", "open shell in running container"},
 			{"L", "view logs"},
 			{"s / u / r", "stop / start / restart"},
-			{"d", "remove (confirm)"},
+			{"d", "delete marked (confirm)"},
 			{"P", "prune stopped containers"},
 			{"c", "run new container (prompt image)"},
 		}, base...)
