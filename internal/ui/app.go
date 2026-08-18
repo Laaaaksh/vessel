@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
 	"github.com/Laaaaksh/vessel/internal/config"
@@ -44,6 +45,9 @@ type volumesLoadedMsg struct {
 type actionDoneMsg struct {
 	err error
 	msg string
+	// push marks a failure that came from an image push, so credential advice
+	// is only offered for the verb the user actually ran.
+	push bool
 }
 
 type logsOpenedMsg struct {
@@ -227,7 +231,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastErr = msg.err
 			m.status = ""
-			if backend.IsPushAuthError(msg.err) {
+			if msg.push && backend.IsPushAuthError(msg.err) {
 				m.imgPanel = m.imgPanel.SetNotice(backend.PushAuthNotice)
 			}
 		} else {
@@ -853,12 +857,22 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 }
 
 func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+	return m.runAction(label, false, fn)
+}
+
+// runPush is runGlobal for the one verb whose failures may carry registry
+// credential advice.
+func (m Model) runPush(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+	return m.runAction(label, true, fn)
+}
+
+func (m Model) runAction(label string, push bool, fn func(context.Context) error) (tea.Model, tea.Cmd) {
 	m.status = label + "…"
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		if err := fn(ctx); err != nil {
-			return actionDoneMsg{err: err}
+			return actionDoneMsg{err: err, push: push}
 		}
 		return actionDoneMsg{msg: label + " ok"}
 	}
@@ -1166,9 +1180,12 @@ func (m Model) buildActions() []actionItem {
 				if !ok {
 					return m, nil
 				}
-				label := ref + " → " + backend.PushTarget(ref)
+				label := ref
+				if dest, ok := backend.PushTarget(ref); ok {
+					label = ref + " → " + dest
+				}
 				return m.beginConfirm("Push", label, func(m Model) (Model, tea.Cmd) {
-					x, c := m.runGlobal("push "+ref, func(ctx context.Context) error {
+					x, c := m.runPush("push "+ref, func(ctx context.Context) error {
 						return m.client.PushImage(ctx, ref)
 					})
 					return x.(Model), c
@@ -1327,25 +1344,10 @@ func (m Model) footerView() string {
 // and still overflows.
 func (m Model) clampToRow(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if m.width <= 0 || lipgloss.Width(s) <= m.width {
+	if m.width <= 0 {
 		return s
 	}
-	ellipsis := "…"
-	budget := m.width - lipgloss.Width(ellipsis)
-	if budget <= 0 {
-		return ellipsis
-	}
-	var b strings.Builder
-	used := 0
-	for _, r := range s {
-		w := lipgloss.Width(string(r))
-		if used+w > budget {
-			break
-		}
-		b.WriteRune(r)
-		used += w
-	}
-	return b.String() + ellipsis
+	return ansi.Truncate(s, m.width, "…")
 }
 
 func (m Model) cursorInfo() (int, int) {
