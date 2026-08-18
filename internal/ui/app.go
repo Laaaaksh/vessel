@@ -149,6 +149,7 @@ type Model struct {
 	tickPaused  bool
 
 	inspectKey  string
+	inspectRun  string
 	actionIdx   int
 	actionItems []actionItem
 	promptKind  string
@@ -246,17 +247,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.key != m.selectionKey() {
 			return m, nil
 		}
+		var cmd tea.Cmd
 		switch m.activeView {
 		case ViewImages:
-			return m, m.loadImageInspectCmd()
+			cmd = m.loadImageInspectCmd()
 		case ViewVolumes:
-			return m, m.loadVolumeInspectCmd()
+			cmd = m.loadVolumeInspectCmd()
 		}
-		return m, nil
+		if cmd != nil {
+			m.inspectRun = msg.key
+		}
+		return m, cmd
 	case imageInspectMsg:
+		if m.inspectRun == imageKey(msg.ref) {
+			m.inspectRun = ""
+		}
 		m.imgPanel = m.imgPanel.SetInspect(msg.ref, msg.ins, msg.err)
 		return m, nil
 	case volumeInspectMsg:
+		if m.inspectRun == volumeKey(msg.name) {
+			m.inspectRun = ""
+		}
 		m.volPanel = m.volPanel.SetInspect(msg.name, msg.ins, msg.err)
 		return m, nil
 	case actionDoneMsg:
@@ -496,23 +507,28 @@ func (m Model) selectionKey() string {
 	switch m.activeView {
 	case ViewImages:
 		if sel := m.imgPanel.Selected(); sel != nil {
-			return "image:" + backend.FormatRef(*sel)
+			return imageKey(backend.FormatRef(*sel))
 		}
 	case ViewVolumes:
 		if sel := m.volPanel.Selected(); sel != nil {
-			return "volume:" + sel.Name
+			return volumeKey(sel.Name)
 		}
 	}
 	return ""
 }
 
+func imageKey(ref string) string { return "image:" + ref }
+
+func volumeKey(name string) string { return "volume:" + name }
+
 // scheduleInspect coalesces inspect requests: a burst of cursor movement
 // results in a single inspect of the selection the user settled on, and a
-// request for the selection already awaiting its timer is a no-op rather than
-// a fresh timer, so a fast poll interval cannot starve the inspect.
+// request for a selection already awaiting its timer or already out at the
+// CLI is a no-op rather than a fresh timer, so neither a fast poll interval
+// nor a slow inspect can multiply the subprocesses for one selection.
 func (m Model) scheduleInspect() (tea.Model, tea.Cmd) {
 	key := m.selectionKey()
-	if m.client == nil || key == "" || key == m.inspectKey {
+	if m.client == nil || key == "" || key == m.inspectKey || key == m.inspectRun {
 		return m, nil
 	}
 	m.inspectKey = key

@@ -138,7 +138,8 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
+			Render(uiutil.Headline(sel.Name, width, height)),
 		"",
 		uiutil.KV("Image", sel.Image),
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)),

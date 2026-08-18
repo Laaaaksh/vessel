@@ -312,7 +312,8 @@ func (m Model) DetailView(width, height int) string {
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
+			Render(uiutil.Headline(sel.Name, width, height)),
 		"",
 		uiutil.KV("Driver", sel.Driver),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),

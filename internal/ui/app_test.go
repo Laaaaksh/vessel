@@ -349,10 +349,52 @@ func TestInspect_repeatedListLoadsDoNotStarveThePendingTimer(t *testing.T) {
 		t.Errorf("expected an inspect of alpine:latest, got %T %+v", load(), msg)
 	}
 
-	// The resolved timer must not leave the selection marked as pending, or a
-	// later request for the same image would never be scheduled again.
+	// The resolved timer and the completed inspect must not leave the selection
+	// marked, or a later request for the same image would never be scheduled.
+	next, _ = m.Update(imageInspectMsg{ref: "alpine:latest", err: errors.New("boom")})
+	m = next.(Model)
 	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
 		t.Error("a settled selection can no longer schedule a new inspect")
+	}
+}
+
+func TestInspect_doesNotReissueWhileOneIsInFlight(t *testing.T) {
+	items := []backend.Image{{ID: "1", Repository: "alpine", Tag: "latest"}}
+	m := imagesModel(t)
+
+	next, cmd := m.Update(imagesLoadedMsg{items: items})
+	m = next.(Model)
+	settled, ok := cmd().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", cmd())
+	}
+	next, load := m.Update(settled)
+	m = next.(Model)
+	if load == nil {
+		t.Fatal("the settled selection must be inspected")
+	}
+
+	// The inspect is now out at the CLI. Poll loads arriving before it returns
+	// must not launch a second subprocess for the same selection.
+	for range 3 {
+		next, again := m.Update(imagesLoadedMsg{items: items})
+		m = next.(Model)
+		if again != nil {
+			t.Fatalf("a second inspect was scheduled while one was in flight: %T", again())
+		}
+	}
+
+	// A different selection is still inspected while the first is in flight.
+	nginx := []backend.Image{{ID: "2", Repository: "nginx", Tag: "1.27"}}
+	if _, other := m.Update(imagesLoadedMsg{items: nginx}); other == nil {
+		t.Error("a new selection must be inspected even while another inspect is in flight")
+	}
+
+	// The result releases the selection, so a failed inspect can be retried.
+	next, _ = m.Update(imageInspectMsg{ref: "alpine:latest", err: errors.New("boom")})
+	m = next.(Model)
+	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
+		t.Error("a completed inspect must be retryable")
 	}
 }
 

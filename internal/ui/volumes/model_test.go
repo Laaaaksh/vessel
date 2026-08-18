@@ -431,3 +431,22 @@ func TestDetailView_narrowPaneStillIdentifiesTheVolume(t *testing.T) {
 		}
 	}
 }
+
+func TestDetailView_narrowestPaneStillIdentifiesTheVolume(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	m := New().SetItems([]backend.Volume{
+		{Name: "a-rather-long-volume-name", Driver: "local", SizeBytes: 1 << 30, Created: created},
+	}).SetInspect("a-rather-long-volume-name", ins, nil)
+
+	v := ansi.Strip(m.DetailView(10, 8))
+
+	if got := strings.Count(v, "\n") + 1; got > 8 {
+		t.Errorf("pane rendered %d lines into 10x8", got)
+	}
+	if !strings.Contains(v, "a-rather") {
+		t.Errorf("the volume name must still render: %q", v)
+	}
+	if !strings.Contains(v, "Driver") {
+		t.Errorf("a wrapping title crowded the data rows out of the pane: %q", v)
+	}
+}

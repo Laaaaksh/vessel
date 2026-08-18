@@ -64,6 +64,17 @@ func KeyBar(text string, width, height int) (string, int) {
 	return short, Reserve(1+RowsFor(short, width), height)
 }
 
+// Headline sizes a pane's title row. Like KeyBar it may wrap while it stays
+// well under half the pane, so a long name still shows in full where there is
+// room; beyond that it is truncated to a single row rather than pushing the
+// rows that describe the selection out of the pane.
+func Headline(text string, width, height int) string {
+	if 1+RowsFor(text, width) < height/2 {
+		return text
+	}
+	return Truncate(text, width-1)
+}
+
 // Pane accumulates detail-pane rows within a budget counted in rendered rows.
 // Once a row does not fit the pane is full: later rows are dropped even when
 // they would fit, so what renders is always a prefix of what was asked for
