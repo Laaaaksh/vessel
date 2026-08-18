@@ -85,6 +85,16 @@ const (
 	modePrompt
 )
 
+// deleteKind names which panel a staged delete belongs to, so the confirmation
+// carries its targets as plain ids instead of a prefix-encoded string.
+type deleteKind int
+
+const (
+	deleteContainers deleteKind = iota
+	deleteImages
+	deleteVolumes
+)
+
 // Model is the root bubbletea model for vessel.
 type Model struct {
 	cfg    config.Config
@@ -107,15 +117,16 @@ type Model struct {
 	volPanel volumes.Model
 	logPanel logs.Model
 
-	lastErr    error
-	status     string
-	pending    string
-	pendingLbl string
-	logCancel  context.CancelFunc
-	logCh      chan backend.LogLine
-	logID      string
-	pollCancel context.CancelFunc
-	tickPaused bool
+	lastErr     error
+	status      string
+	pendingKind deleteKind
+	pendingIDs  []string
+	pendingLbl  string
+	logCancel   context.CancelFunc
+	logCh       chan backend.LogLine
+	logID       string
+	pollCancel  context.CancelFunc
+	tickPaused  bool
 
 	actionIdx   int
 	actionItems []actionItem
@@ -131,9 +142,8 @@ type actionItem struct {
 // New creates the root model. Backend connection happens in Init.
 func New() Model {
 	cfg, _ := config.Load()
-	return Model{
+	m := Model{
 		cfg:        cfg,
-		keys:       DefaultKeyMap(),
 		st:         newStyles(),
 		activeView: ViewContainers,
 		focus:      FocusList,
@@ -144,6 +154,17 @@ func New() Model {
 		volPanel:   volumes.New(),
 		logPanel:   logs.New(),
 	}
+	return m.withKeys(DefaultKeyMap())
+}
+
+// withKeys installs k and hands the panels the bindings they match themselves,
+// so a rebound key reaches them instead of a hardcoded literal.
+func (m Model) withKeys(k KeyMap) Model {
+	m.keys = k
+	m.cntPanel = m.cntPanel.SetToggleMarkKey(k.ToggleMark)
+	m.imgPanel = m.imgPanel.SetToggleMarkKey(k.ToggleMark)
+	m.volPanel = m.volPanel.SetToggleMarkKey(k.ToggleMark)
+	return m
 }
 
 // Init connects to the container backend and kicks off the first poll.
@@ -206,7 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.msg
 		}
 		m.mode = modeBrowse
-		m.pending = ""
+		m.pendingIDs = nil
 		m.pendingLbl = ""
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
@@ -456,7 +477,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.confirmDelete()
 		case "n", "esc":
 			m.mode = modeBrowse
-			m.pending = ""
+			m.pendingIDs = nil
 			m.pendingLbl = ""
 			m.status = "cancelled"
 			return m, nil
@@ -592,14 +613,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ViewImages:
 		switch {
 		case Match(k, m.keys.Remove):
-			sel := m.imgPanel.Selected()
-			if sel == nil {
-				return m, nil
-			}
-			m.mode = modeConfirmDelete
-			m.pending = "image:" + sel.ID
-			m.pendingLbl = backend.FormatRef(*sel)
-			return m, nil
+			return m.beginDeleteImages()
 		case Match(k, m.keys.Pull):
 			return m.beginPrompt("pull", "image to pull")
 		case Match(k, m.keys.Prune):
@@ -619,14 +633,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ViewVolumes:
 		switch {
 		case Match(k, m.keys.Remove):
-			sel := m.volPanel.Selected()
-			if sel == nil {
-				return m, nil
-			}
-			m.mode = modeConfirmDelete
-			m.pending = "volume:" + sel.Name
-			m.pendingLbl = sel.Name
-			return m, nil
+			return m.beginDeleteVolumes()
 		case Match(k, m.keys.Create):
 			return m.beginPrompt("volcreate", "volume name")
 		case Match(k, m.keys.Prune):
@@ -708,42 +715,74 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) beginDeleteContainer() (tea.Model, tea.Cmd) {
-	marked := m.cntPanel.MarkedIDs()
-	if len(marked) > 1 {
-		m.mode = modeConfirmDelete
-		m.pending = "bulk:" + strings.Join(marked, ",")
-		m.pendingLbl = fmt.Sprintf("%d containers", len(marked))
+// beginDelete stages a confirmation for ids of the given kind. Every delete
+// path funnels through here so a target is always paired with the panel that
+// owns it. Marks are not touched: the panels' SetItems prunes them on the next
+// refresh, so a delete that fails stays retryable.
+func (m Model) beginDelete(kind deleteKind, ids []string, label string) (tea.Model, tea.Cmd) {
+	if len(ids) == 0 {
 		return m, nil
+	}
+	m.mode = modeConfirmDelete
+	m.pendingKind = kind
+	m.pendingIDs = ids
+	m.pendingLbl = label
+	return m, nil
+}
+
+func (m Model) beginDeleteContainer() (tea.Model, tea.Cmd) {
+	if marked := m.cntPanel.MarkedIDs(); len(marked) > 1 {
+		return m.beginDelete(deleteContainers, marked, fmt.Sprintf("%d containers", len(marked)))
 	}
 	sel := m.cntPanel.Selected()
 	if sel == nil {
 		m.status = "nothing selected"
 		return m, nil
 	}
-	m.mode = modeConfirmDelete
-	m.pending = sel.ID
-	m.pendingLbl = sel.Name
-	return m, nil
+	return m.beginDelete(deleteContainers, []string{sel.ID}, sel.Name)
+}
+
+func (m Model) beginDeleteImages() (tea.Model, tea.Cmd) {
+	if marked := m.imgPanel.MarkedIDs(); len(marked) > 1 {
+		return m.beginDelete(deleteImages, marked, fmt.Sprintf("%d images", len(marked)))
+	}
+	sel := m.imgPanel.Selected()
+	if sel == nil {
+		return m, nil
+	}
+	return m.beginDelete(deleteImages, []string{sel.ID}, backend.FormatRef(*sel))
+}
+
+func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
+	if marked := m.volPanel.MarkedIDs(); len(marked) > 1 {
+		return m.beginDelete(deleteVolumes, marked, fmt.Sprintf("%d volumes", len(marked)))
+	}
+	sel := m.volPanel.Selected()
+	if sel == nil {
+		return m, nil
+	}
+	return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
 }
 
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
-	pending := m.pending
+	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
 	m.mode = modeBrowse
-	m.pending = ""
+	m.pendingIDs = nil
 	m.pendingLbl = ""
+	if len(ids) == 0 {
+		return m, nil
+	}
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		var err error
-		switch {
-		case strings.HasPrefix(pending, "image:"):
-			err = client.RemoveImage(ctx, strings.TrimPrefix(pending, "image:"))
-		case strings.HasPrefix(pending, "volume:"):
-			err = client.RemoveVolume(ctx, strings.TrimPrefix(pending, "volume:"))
-		case strings.HasPrefix(pending, "bulk:"):
-			ids := strings.Split(strings.TrimPrefix(pending, "bulk:"), ",")
+		switch kind {
+		case deleteImages:
+			err = client.RemoveImage(ctx, ids...)
+		case deleteVolumes:
+			err = client.RemoveVolume(ctx, ids...)
+		case deleteContainers:
 			for _, id := range ids {
 				if e := client.RemoveContainer(ctx, id); e != nil {
 					err = e
@@ -751,7 +790,7 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 				}
 			}
 		default:
-			err = client.RemoveContainer(ctx, pending)
+			return actionDoneMsg{err: fmt.Errorf("delete: unhandled target kind %d", kind)}
 		}
 		if err != nil {
 			return actionDoneMsg{err: err}
@@ -1234,7 +1273,7 @@ func (m Model) helpView() string {
 func (m Model) confirmModal() string {
 	label := m.pendingLbl
 	if label == "" {
-		label = m.pending
+		label = strings.Join(m.pendingIDs, ", ")
 	}
 	body := fmt.Sprintf("Delete %s?\n\n[y] confirm   [n/esc] cancel", label)
 	return lipgloss.NewStyle().
