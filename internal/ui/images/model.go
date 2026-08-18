@@ -324,8 +324,8 @@ func (m Model) DetailView(width, height int) string {
 			Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	keybar := dim.Render("[p] pull  [c] run  [d] delete  [P] prune")
-	reserved := 1 + uiutil.RowsFor(keybar, width)
+	keybar := dim.Render(uiutil.Truncate("[p] pull  [c] run  [d] delete  [P] prune", width-1))
+	reserved := uiutil.Reserve(1+uiutil.RowsFor(keybar, width), height)
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(

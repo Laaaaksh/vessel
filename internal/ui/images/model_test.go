@@ -424,15 +424,55 @@ func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
 		v := ansi.Strip(m.DetailView(40, height))
 		assertFitsHeight(t, v, height)
 		assertNoDanglingHeader(t, v)
-		// The bar itself wraps at this width; its last token proves the
-		// reservation covered every rendered row of it.
-		if !strings.Contains(v, "prune") {
-			t.Errorf("key hints clipped at height %d: %q", height, v)
+		// The bar is truncated to a single row so it cannot crowd out the
+		// image itself, which must still be identifiable.
+		if !strings.Contains(v, "[p] pull") {
+			t.Errorf("key hints missing at height %d: %q", height, v)
+		}
+		for _, want := range []string{"docker.io/library/alpine:latest", "ID", "Size"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("detail missing %q at height %d: %q", want, height, v)
+			}
 		}
 	}
 	// At least one of those sizes must actually render a section, or the
 	// dangling-header assertion above proves nothing.
 	if v := ansi.Strip(m.DetailView(40, 24)); !strings.Contains(v, "-- Env --") {
 		t.Fatalf("no section rendered, the header assertions are vacuous: %q", v)
+	}
+}
+
+func TestDetailView_narrowPaneStillIdentifiesTheImage(t *testing.T) {
+	// 18x8 is the detail pane on the app's minimum 60x12 terminal, where the
+	// key bar is wider than the pane and every row wraps.
+	ins := cachedInspect("28bd5fe8b56d", "sha256:e7a1a92a5bfeee40966aea60f0796b0e")
+	ins.Cmd = []string{"/bin/sh"}
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
+	}).SetInspect(testRef, ins, nil)
+
+	v := ansi.Strip(m.DetailView(18, 8))
+
+	assertFitsHeight(t, v, 8)
+	for _, want := range []string{"alpine", "ID", "28bd5fe8b56d"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("narrow pane dropped %q for key hints: %q", want, v)
+		}
+	}
+}
+
+func TestDetailView_rowsRenderInOrderWhenTheyDoNotAllFit(t *testing.T) {
+	ins := cachedInspect("28bd5fe8b56d", "sha256:e7a1a92a5bfeee40966aea60f0796b0e")
+	ins.Cmd = []string{"/bin/sh"}
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
+	}).SetInspect(testRef, ins, nil)
+
+	// The ID row wraps at this width and does not fit, while the shorter Cmd
+	// row that follows it would fit in the gap the ID row left behind.
+	v := ansi.Strip(m.DetailView(18, 8))
+
+	if strings.Contains(v, "Cmd") && !strings.Contains(v, "ID") {
+		t.Errorf("Cmd rendered while the earlier ID row was dropped: %q", v)
 	}
 }

@@ -130,10 +130,11 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
 	metrics := metricRows(sel, poller, width)
-	reserved := 0
+	metricRowCount := 0
 	for _, r := range metrics {
-		reserved += uiutil.RowsFor(r, width)
+		metricRowCount += uiutil.RowsFor(r, width)
 	}
+	reserved := uiutil.Reserve(metricRowCount, height)
 
 	p := uiutil.NewPane(width, height-reserved)
 	p.Add(
