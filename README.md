@@ -99,4 +99,4 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) - all contribu
 
 ## License
 
-Apache 2.0 - see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
