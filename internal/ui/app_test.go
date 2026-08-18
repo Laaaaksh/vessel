@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 func TestView_shellModeEmpty(t *testing.T) {
@@ -496,6 +498,209 @@ func TestSelectionChanged_nilHandling(t *testing.T) {
 	}
 	if !selectionNameChanged(vol, nil) {
 		t.Error("non-nil to nil volume selection changed")
+	}
+}
+
+func TestConfirmPruneModalMode(t *testing.T) {
+	cases := []struct {
+		name string
+		view View
+		want string
+	}{
+		{"containers", ViewContainers, "Prune stopped containers?"},
+		{"images", ViewImages, "Prune unused images?"},
+		{"volumes", ViewVolumes, "Prune unused volumes?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New()
+			m.width, m.height = 100, 30
+			m.activeView = tc.view
+			m.focus = FocusList
+			next, _ := m.handleKey(keyMsg("P"))
+			m = next.(Model)
+			if m.mode != modeConfirmDelete {
+				t.Fatalf("mode=%v want confirm before prune", m.mode)
+			}
+			got := ansi.Strip(viewString(m.View()))
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("confirm modal must ask %q, got %q", tc.want, got)
+			}
+			next, _ = m.handleKey(keyMsg("n"))
+			m = next.(Model)
+			if m.mode != modeBrowse {
+				t.Fatalf("cancel should return to browse, got %v", m.mode)
+			}
+		})
+	}
+}
+
+func TestConfirmPrune_actionMenuPath(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	next, _ := m.handleKey(keyMsg("x"))
+	m = next.(Model)
+	if m.mode != modeActions {
+		t.Fatalf("mode=%v want actions", m.mode)
+	}
+	// Containers menu: Start, Stop, Restart, Logs, Shell, Prune stopped (idx 0..5).
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	for range 4 {
+		next, _ = m.handleKey(keyMsg("j"))
+		m = next.(Model)
+	}
+	next, _ = m.handleKey(keyMsg("enter"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("prune from action menu must confirm, mode=%v", m.mode)
+	}
+	got := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(got, "Prune stopped containers?") {
+		t.Fatalf("confirm modal must ask prune question, got %q", got)
+	}
+}
+
+func TestConfirmStop_configOff(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.cfg.ConfirmStop = false
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("s"))
+	m = next.(Model)
+	if m.mode == modeConfirmDelete {
+		t.Fatalf("confirm_stop off must stop immediately, mode=%v", m.mode)
+	}
+	if m.status == "nothing selected" {
+		t.Fatal("stop should have selected the container")
+	}
+}
+
+func TestConfirmStop_configOn(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.cfg.ConfirmStop = true
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("s"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("confirm_stop on must open confirm, mode=%v", m.mode)
+	}
+	got := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(got, "Stop web?") {
+		t.Fatalf("confirm modal must ask Stop web?, got %q", got)
+	}
+	next, _ = m.handleKey(keyMsg("n"))
+	if next.(Model).mode != modeBrowse {
+		t.Fatalf("cancel should return to browse, mode=%v", next.(Model).mode)
+	}
+}
+
+func TestCustomCommandKeyDispatch(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "inspect", Key: "z", Command: "container inspect {{.ID}}"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "vessel-probe", Name: "web", Status: "running"}})
+
+	next, cmd := m.handleKey(keyMsg("z"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("custom key must run in browse, mode=%v", m.mode)
+	}
+	if !strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("custom command should have dispatched, status=%q", m.status)
+	}
+	if cmd == nil {
+		t.Fatal("custom key should return a command")
+	}
+}
+
+func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	// User binds 'y' (normally yank) to a custom command; the configured key wins.
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "redefine", Key: "y", Command: "echo redefined"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if !strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("configured custom key must shadow builtin, status=%q", m.status)
+	}
+}
+
+func TestFooterView_servicesDownHint(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. Start the container system services and retry:" +
+		"\n\n    container system start\n)")
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("services-down error must surface the hint, footer=%q", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("raw error must be truncated before the hint rather than the hint pushed off, footer=%q", out)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out), "to start services") {
+		t.Fatalf("hint must be the last visible text in the footer, footer=%q", out)
+	}
+}
+
+func TestFooterView_noHintForOtherErrors(t *testing.T) {
+	m := New()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	out := ansi.Strip(viewString(m.View()))
+	if strings.Contains(out, "system start") {
+		t.Fatalf("unrelated error must not get the service hint, footer=%q", out)
+	}
+}
+
+func TestHelpBindingsCoverAllKeys(t *testing.T) {
+	tokens := map[string]bool{}
+	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		for _, b := range helpBindings(v, FocusList, modeBrowse) {
+			for _, tok := range strings.FieldsFunc(b.key, func(r rune) bool {
+				return r == ' ' || r == '←' || r == '→' || r == '↑' || r == '↓'
+			}) {
+				if tok != "" {
+					tokens[tok] = true
+				}
+			}
+		}
+	}
+	km := DefaultKeyMap()
+	rt := reflect.TypeOf(km)
+	rv := reflect.ValueOf(km)
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		val := rv.Field(i).String()
+		if val == "" {
+			continue
+		}
+		needle := val
+		if val == " " {
+			needle = "space"
+		}
+		if !tokens[needle] {
+			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
+		}
+	}
+}
+
+func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
+	var sb strings.Builder
+	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		for _, b := range helpBindings(v, FocusList, modeBrowse) {
+			sb.WriteString(b.key + " ")
+			sb.WriteString(b.desc + "\n")
+		}
+	}
+	all := sb.String()
+	for _, k := range []string{"`", "ctrl+c", "esc", "enter", "1 2 3"} {
+		if !strings.Contains(all, k) {
+			t.Fatalf("reachable key %q missing from help", k)
+		}
 	}
 }
 
