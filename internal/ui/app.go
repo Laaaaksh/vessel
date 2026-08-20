@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -18,6 +19,13 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
+
+// keySpace is the literal tea.KeyPressMsg.String() serialisation of a space
+// bar press: ultraviolet's Keystroke() special-cases KeySpace to the word
+// "space" rather than a literal " " (see AGENTS.md, UI key handling), so a
+// prompt that only appended len==1 runes silently dropped every space typed
+// into it.
+const keySpace = "space"
 
 type tickMsg time.Time
 
@@ -1136,11 +1144,19 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 		return m.handlePrompt(promptDoneMsg{kind: kind, text: text})
 	case "backspace":
 		if len(m.promptBuf) > 0 {
-			m.promptBuf = m.promptBuf[:len(m.promptBuf)-1]
+			_, size := utf8.DecodeLastRuneInString(m.promptBuf)
+			m.promptBuf = m.promptBuf[:len(m.promptBuf)-size]
 		}
 		return m, nil
+	case keySpace:
+		m.promptBuf += " "
+		return m, nil
 	default:
-		if len(k) == 1 {
+		// A byte-length check here would reject any multi-byte rune (accents,
+		// CJK, emoji) even though it is exactly one printable character; count
+		// runes instead so only real multi-key strings ("tab", "ctrl+a", ...)
+		// are excluded.
+		if utf8.RuneCountInString(k) == 1 {
 			m.promptBuf += k
 		}
 		return m, nil
