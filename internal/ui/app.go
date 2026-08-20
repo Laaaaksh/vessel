@@ -111,6 +111,7 @@ const (
 	modeShell
 	modeActions
 	modePrompt
+	modeRunForm
 )
 
 // deleteKind names which panel a staged delete belongs to, so the confirmation
@@ -162,6 +163,7 @@ type Model struct {
 	actionItems []actionItem
 	promptKind  string
 	promptBuf   string
+	runForm     runForm
 }
 
 type actionItem struct {
@@ -386,6 +388,9 @@ func (m Model) browseView() string {
 	}
 	if m.mode == modePrompt {
 		content = m.overlayModal(content, m.promptModal())
+	}
+	if m.mode == modeRunForm {
+		content = m.overlayModal(content, m.runFormModal())
 	}
 	return content
 }
@@ -623,6 +628,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modePrompt {
 		return m.handlePromptKey(k)
 	}
+	if m.mode == modeRunForm {
+		return m.handleRunFormKey(k)
+	}
 	if m.mode == modeActions {
 		return m.handleActionsKey(k)
 	}
@@ -763,7 +771,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m.client.PruneContainers(ctx)
 			})
 		case Match(k, m.keys.Create):
-			return m.beginPrompt("run", "image to run")
+			return m.beginRunForm("")
+		case Match(k, m.keys.Exec):
+			return m.beginExec()
 		}
 	case ViewImages:
 		switch {
@@ -776,14 +786,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m.client.PruneImages(ctx)
 			})
 		case Match(k, m.keys.Create):
-			sel := m.imgPanel.Selected()
-			if sel == nil {
-				return m.beginPrompt("run", "image to run")
+			ref := ""
+			if sel := m.imgPanel.Selected(); sel != nil {
+				ref = backend.FormatRef(*sel)
 			}
-			ref := backend.FormatRef(*sel)
-			return m.runGlobal("run "+ref, func(ctx context.Context) error {
-				return m.client.RunDetached(ctx, ref)
-			})
+			return m.beginRunForm(ref)
 		}
 	case ViewVolumes:
 		switch {
@@ -1174,11 +1181,8 @@ func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 		return m.runGlobal("pull "+ref, func(ctx context.Context) error {
 			return m.client.PullImage(ctx, ref)
 		})
-	case "run":
-		ref := msg.text
-		return m.runGlobal("run "+ref, func(ctx context.Context) error {
-			return m.client.RunDetached(ctx, ref)
-		})
+	case "exec":
+		return m.submitExec(msg.text)
 	case "volcreate":
 		name := msg.text
 		return m.runGlobal("create volume "+name, func(ctx context.Context) error {
@@ -1188,6 +1192,105 @@ func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 		return m.runCustom(msg.text)
 	}
 	return m, nil
+}
+
+// beginRunForm opens the run/create form, prefilled with image when one was
+// already selected (Images view); Containers view opens it blank since there
+// is no image selection to seed it from.
+func (m Model) beginRunForm(image string) (tea.Model, tea.Cmd) {
+	m.mode = modeRunForm
+	m.runForm = newRunForm(image)
+	return m, nil
+}
+
+func (m Model) handleRunFormKey(k string) (tea.Model, tea.Cmd) {
+	switch {
+	case k == "esc":
+		m.mode = modeBrowse
+		m.status = "cancelled"
+		return m, nil
+	case Match(k, m.keys.Enter):
+		return m.submitRunForm()
+	case Match(k, m.keys.Tab) || m.keys.NavDown(k):
+		m.runForm.move(1)
+		return m, nil
+	case m.keys.NavUp(k):
+		m.runForm.move(-1)
+		return m, nil
+	case k == "backspace":
+		m.runForm.backspace()
+		return m, nil
+	default:
+		m.runForm.insert(k)
+		return m, nil
+	}
+}
+
+// submitRunForm validates the form and, if valid, runs the container and
+// closes the form. An invalid field reports its own message inline and
+// leaves the form open rather than reaching the CLI with bad input.
+func (m Model) submitRunForm() (tea.Model, tea.Cmd) {
+	image, opts, errMsg := m.runForm.validate()
+	if errMsg != "" {
+		m.runForm.err = errMsg
+		return m, nil
+	}
+	m.mode = modeBrowse
+	client := m.client
+	return m.runGlobal("run "+image, func(ctx context.Context) error {
+		_, err := client.Run(ctx, image, opts)
+		return err
+	})
+}
+
+// execTimeout bounds a one-shot exec, matching runOnSelected's per-item budget.
+const execTimeout = 30 * time.Second
+
+// execOutputTruncate keeps a one-shot exec's result on one footer line, the
+// same width runCustom truncates a custom command's output to.
+const execOutputTruncate = 80
+
+// beginExec starts the one-shot exec prompt: a single command line run once
+// in the selected running container via its shell, not an interactive
+// session (see openShell for that).
+func (m Model) beginExec() (tea.Model, tea.Cmd) {
+	sel := m.cntPanel.Selected()
+	if sel == nil {
+		m.status = "nothing selected"
+		return m, nil
+	}
+	if !sel.IsRunning() {
+		m.status = "exec disabled: container is not running"
+		return m, nil
+	}
+	return m.beginPrompt("exec", "command to run in "+sel.Name)
+}
+
+// submitExec runs command in the container selected when the exec prompt was
+// opened (selection cannot change while a prompt has key focus) and reports
+// its output, truncated like other one-off command results in this app.
+func (m Model) submitExec(command string) (tea.Model, tea.Cmd) {
+	sel := m.cntPanel.Selected()
+	if sel == nil {
+		m.status = "nothing selected"
+		return m, nil
+	}
+	id, name := sel.ID, sel.Name
+	client := m.client
+	shell := m.cfg.Shell
+	m.status = "exec: " + command + "…"
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+		defer cancel()
+		out, err := client.Exec(ctx, id, shell, command)
+		if err != nil {
+			return actionDoneMsg{err: err}
+		}
+		if out == "" {
+			out = "exec ok (no output)"
+		}
+		return actionDoneMsg{msg: "exec " + name + ": " + uiutilTruncate(out, execOutputTruncate)}
+	}
 }
 
 func (m Model) openActions() (tea.Model, tea.Cmd) {
@@ -1233,6 +1336,10 @@ func (m Model) buildActions() []actionItem {
 				x, c := m.openShell()
 				return x.(Model), c
 			}},
+			actionItem{"Exec…", func(m Model) (Model, tea.Cmd) {
+				x, c := m.beginExec()
+				return x.(Model), c
+			}},
 			actionItem{"Prune stopped", func(m Model) (Model, tea.Cmd) {
 				x, c := m.runGlobal("prune stopped", func(ctx context.Context) error {
 					return m.client.PruneContainers(ctx)
@@ -1246,15 +1353,12 @@ func (m Model) buildActions() []actionItem {
 				x, c := m.beginPrompt("pull", "image")
 				return x.(Model), c
 			}},
-			actionItem{"Run", func(m Model) (Model, tea.Cmd) {
-				sel := m.imgPanel.Selected()
-				if sel == nil {
-					return m, nil
+			actionItem{"Run…", func(m Model) (Model, tea.Cmd) {
+				ref := ""
+				if sel := m.imgPanel.Selected(); sel != nil {
+					ref = backend.FormatRef(*sel)
 				}
-				ref := backend.FormatRef(*sel)
-				x, c := m.runGlobal("run "+ref, func(ctx context.Context) error {
-					return m.client.RunDetached(ctx, ref)
-				})
+				x, c := m.beginRunForm(ref)
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
@@ -1397,7 +1501,7 @@ func (m Model) footerView() string {
 	case ViewVolumes:
 		keys = "[c] create  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
 	default:
-		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
+		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [c] run  [e] exec  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
 	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
 }

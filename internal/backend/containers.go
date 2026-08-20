@@ -134,9 +134,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string) error {
 // Callers should run it via tea.ExecProcess. The terminal is cleared before
 // exec so bubbletea's last frame does not flash into the shell session.
 func (c *Client) ShellCmd(id, shell string) *exec.Cmd {
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	shell = resolveShell(shell)
 	// Clear screen then exec into the container. Using the host shell -c keeps
 	// stdin/stdout a TTY for `container exec -it`.
 	script := fmt.Sprintf(`printf '\033[2J\033[H'; exec %q exec -it %q %q`, c.binary, id, shell)
@@ -146,12 +144,6 @@ func (c *Client) ShellCmd(id, shell string) *exec.Cmd {
 // PruneContainers removes all stopped containers.
 func (c *Client) PruneContainers(ctx context.Context) error {
 	_, err := c.run(ctx, "prune")
-	return err
-}
-
-// RunDetached starts a container from an image in the background.
-func (c *Client) RunDetached(ctx context.Context, image string) error {
-	_, err := c.run(ctx, "run", "-d", image)
 	return err
 }
 
