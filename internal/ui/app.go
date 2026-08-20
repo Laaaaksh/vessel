@@ -16,6 +16,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/system"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -39,6 +40,17 @@ type imagesLoadedMsg struct {
 type volumesLoadedMsg struct {
 	items []backend.Volume
 	err   error
+}
+
+// systemLoadedMsg carries both system-status and disk-usage poll results.
+// They are combined into one message because the panel always shows them
+// together, and each field's error is independent: a services-down df
+// failure must not blank out a successful status, or vice versa.
+type systemLoadedMsg struct {
+	status    *backend.SystemStatus
+	statusErr error
+	usage     *backend.DiskUsage
+	usageErr  error
 }
 
 // inspectSettledMsg fires once the images/volumes selection has stopped
@@ -135,6 +147,7 @@ type Model struct {
 	cntPanel containers.Model
 	imgPanel images.Model
 	volPanel volumes.Model
+	sysPanel system.Model
 	logPanel logs.Model
 
 	lastErr     error
@@ -174,6 +187,7 @@ func New() Model {
 		cntPanel:   containers.New(),
 		imgPanel:   images.New(),
 		volPanel:   volumes.New(),
+		sysPanel:   system.New(),
 		logPanel:   logs.New(),
 	}
 	return m.withKeys(DefaultKeyMap())
@@ -217,6 +231,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cntPanel = m.cntPanel.SetPageRows(rows)
 		m.imgPanel = m.imgPanel.SetPageRows(rows)
 		m.volPanel = m.volPanel.SetPageRows(rows)
+		m.sysPanel = m.sysPanel.SetPageRows(rows)
 		m.logPanel = m.logPanel.SetSize(msg.Width, msg.Height)
 		return m, nil
 	case tickMsg:
@@ -240,6 +255,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.volPanel = m.volPanel.SetItems(msg.items)
 		}
 		return m.scheduleInspect()
+	case systemLoadedMsg:
+		// Errors stay local to the panel rather than the global error banner:
+		// a services-down df failure is this view's own normal subject, not
+		// an app-wide failure to report on.
+		m.sysPanel = m.sysPanel.SetStatus(msg.status, msg.statusErr).SetDiskUsage(msg.usage, msg.usageErr)
+		return m, nil
 	case inspectSettledMsg:
 		if msg.key == m.inspectKey {
 			m.inspectKey = ""
@@ -412,6 +433,9 @@ func (m Model) mainPanels(listW, detailW, height int) (string, string) {
 	case ViewVolumes:
 		list = m.volPanel.ListView(listW-2, height-2)
 		detail = m.volPanel.DetailView(detailW-2, height-2)
+	case ViewSystem:
+		list = m.sysPanel.ListView(listW-2, height-2)
+		detail = m.sysPanel.DetailView(detailW-2, height-2)
 	default:
 		list = m.cntPanel.ListView(listW-2, height-2, m.poller)
 		detail = m.cntPanel.DetailView(detailW-2, height-2, m.poller)
@@ -462,6 +486,8 @@ func (m Model) activeViewLoadCmd() tea.Cmd {
 		return m.loadImagesCmd()
 	case ViewVolumes:
 		return m.loadVolumesCmd()
+	case ViewSystem:
+		return m.loadSystemCmd()
 	default:
 		return m.loadContainersCmd()
 	}
@@ -494,6 +520,21 @@ func (m Model) loadVolumesCmd() tea.Cmd {
 		defer cancel()
 		items, err := client.ListVolumes(ctx)
 		return volumesLoadedMsg{items: items, err: err}
+	}
+}
+
+// loadSystemCmd loads service status and disk usage. Both are fetched
+// unconditionally on every poll: unlike an inspect, this view has no
+// selection to debounce against, and a services-down df failure is expected
+// to happen alongside a perfectly good status result.
+func (m Model) loadSystemCmd() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		status, statusErr := client.SystemStatus(ctx)
+		usage, usageErr := client.DiskUsage(ctx)
+		return systemLoadedMsg{status: status, statusErr: statusErr, usage: usage, usageErr: usageErr}
 	}
 }
 
@@ -672,7 +713,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case Match(k, m.keys.Tab):
-		m.activeView = (m.activeView + 1) % 3
+		m.activeView = (m.activeView + 1) % viewCount
 		return m, m.activeViewLoadCmd()
 	case k == "1":
 		m.activeView = ViewContainers
@@ -682,6 +723,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.activeViewLoadCmd()
 	case k == "3":
 		m.activeView = ViewVolumes
+		return m, m.activeViewLoadCmd()
+	case k == "4":
+		m.activeView = ViewSystem
 		return m, m.activeViewLoadCmd()
 	case Match(k, m.keys.LayoutNext):
 		m.layout = (m.layout + 1) % 3
@@ -709,10 +753,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focus == FocusSidebar {
 		switch {
 		case m.keys.NavDown(k):
-			m.activeView = (m.activeView + 1) % 3
+			m.activeView = (m.activeView + 1) % viewCount
 			return m, m.activeViewLoadCmd()
 		case m.keys.NavUp(k):
-			m.activeView = (m.activeView + 2) % 3
+			m.activeView = (m.activeView + viewCount - 1) % viewCount
 			return m, m.activeViewLoadCmd()
 		case Match(k, m.keys.Enter):
 			m.focus = FocusList
@@ -802,6 +846,8 @@ func (m Model) panelFiltering() bool {
 		return m.imgPanel.Filtering()
 	case ViewVolumes:
 		return m.volPanel.Filtering()
+	case ViewSystem:
+		return false
 	default:
 		return m.cntPanel.Filtering()
 	}
@@ -824,6 +870,8 @@ func (m Model) routeToPanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			next, icmd := m.scheduleInspect()
 			return next, tea.Batch(cmd, icmd)
 		}
+	case ViewSystem:
+		m.sysPanel, cmd = m.sysPanel.Update(msg)
 	default:
 		m.cntPanel, cmd = m.cntPanel.Update(msg)
 	}
@@ -871,6 +919,8 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		if selectionNameChanged(before, m.volPanel.Selected()) {
 			return m.scheduleInspect()
 		}
+	case ViewSystem:
+		m.sysPanel = m.sysPanel.SetCursor(row)
 	default:
 		m.cntPanel = m.cntPanel.SetCursor(row)
 	}
@@ -899,6 +949,8 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		if selectionNameChanged(before, m.volPanel.Selected()) {
 			return m.scheduleInspect()
 		}
+	case ViewSystem:
+		m.sysPanel = m.sysPanel.MoveBy(delta)
 	default:
 		m.cntPanel = m.cntPanel.MoveBy(delta)
 	}
@@ -1101,6 +1153,8 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 				text = sel.Name
 			}
 		}
+	case ViewSystem:
+		text = m.sysPanel.YankText()
 	default:
 		if sel := m.cntPanel.Selected(); sel != nil {
 			text = sel.ID
@@ -1308,6 +1362,11 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		if sel := m.volPanel.Selected(); sel != nil {
 			id, name = sel.Name, sel.Name
 		}
+	case ViewSystem:
+		// No selection this view reports on maps to {{.ID}}/{{.Name}}/{{.Image}};
+		// a custom command run here gets none of them rather than borrowing
+		// the container panel's, which routeToPanel keeps updated in the
+		// background regardless of the active view.
 	default:
 		if sel := m.cntPanel.Selected(); sel != nil {
 			id, name, image = sel.ID, sel.Name, sel.Image
@@ -1357,6 +1416,8 @@ func (m Model) viewName() string {
 		return "images"
 	case ViewVolumes:
 		return "volumes"
+	case ViewSystem:
+		return "system"
 	default:
 		return "containers"
 	}
@@ -1380,6 +1441,8 @@ func (m Model) footerView() string {
 		keys = "[p] pull  [c] run  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
 	case ViewVolumes:
 		keys = "[c] create  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
+	case ViewSystem:
+		keys = "[j/k] navigate  [y] yank  (read-only)"
 	default:
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
@@ -1392,6 +1455,8 @@ func (m Model) cursorInfo() (int, int) {
 		return m.imgPanel.Cursor(), m.imgPanel.Len()
 	case ViewVolumes:
 		return m.volPanel.Cursor(), m.volPanel.Len()
+	case ViewSystem:
+		return m.sysPanel.Cursor(), m.sysPanel.Len()
 	default:
 		return m.cntPanel.Cursor(), m.cntPanel.Len()
 	}
@@ -1405,6 +1470,7 @@ func (m Model) sidebarView(width, height int) string {
 		{"Containers", ViewContainers},
 		{"Images", ViewImages},
 		{"Volumes", ViewVolumes},
+		{"System", ViewSystem},
 	}
 
 	focused := m.focus == FocusSidebar

@@ -1,0 +1,9 @@
+{
+  "apiServerAppName": "container-apiserver",
+  "apiServerBuild": "release",
+  "apiServerCommit": "unspecified",
+  "apiServerVersion": "container-apiserver version 1.2.0 (build: release, commit: unspeci)",
+  "appRoot": "/Users/laksh/Library/Application Support/com.apple.container/",
+  "installRoot": "/opt/homebrew/Cellar/container/1.2.0/",
+  "status": "running"
+}

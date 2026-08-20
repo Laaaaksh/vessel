@@ -130,3 +130,34 @@ type VolumeInspect struct {
 func (c Container) IsRunning() bool {
 	return c.Status == "running"
 }
+
+// SystemStatus reports whether the container services are running, plus the
+// identifying info the CLI reports.
+type SystemStatus struct {
+	// Status is the raw status string reported by the CLI, e.g. "running" or
+	// "unregistered" when the services have never been started.
+	Status      string
+	Version     string
+	AppRoot     string
+	InstallRoot string
+}
+
+// IsRunning reports whether the container services are up.
+func (s SystemStatus) IsRunning() bool {
+	return s.Status == systemStatusRunning
+}
+
+// DiskUsage reports disk usage for containers, images and volumes.
+type DiskUsage struct {
+	Containers DiskUsageCategory
+	Images     DiskUsageCategory
+	Volumes    DiskUsageCategory
+}
+
+// DiskUsageCategory is the disk usage breakdown for one resource kind.
+type DiskUsageCategory struct {
+	Total            int
+	Active           int
+	SizeBytes        uint64
+	ReclaimableBytes uint64
+}

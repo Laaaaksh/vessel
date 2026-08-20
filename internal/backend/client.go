@@ -67,6 +67,19 @@ func (c *Client) recordCmd(args []string) {
 
 // run executes a container CLI subcommand and returns its stdout.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := c.runRaw(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// runRaw executes a container CLI subcommand like run, but also returns
+// whatever stdout the process wrote when it exits non-zero, instead of
+// discarding it. Most commands print nothing useful on failure, but "system
+// status" prints a real, parseable body even on a non-zero exit; callers
+// that need that body use this directly.
+func (c *Client) runRaw(ctx context.Context, args ...string) ([]byte, error) {
 	c.recordCmd(args)
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -77,7 +90,7 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("container %v: %w (stderr: %s)", args, err, stderr.String())
+		return stdout.Bytes(), fmt.Errorf("container %v: %w (stderr: %s)", args, err, stderr.String())
 	}
 	return stdout.Bytes(), nil
 }
