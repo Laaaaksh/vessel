@@ -240,6 +240,24 @@ func (s *ignoredKeysSuite) TestStartupSetsFooterStatusAtSmallestTerminal() {
 	s.Contains(view, "Networks")
 }
 
+func (s *ignoredKeysSuite) TestTestModelStartsWithAnUnstampedFooter() {
+	stamped := newModel(config.Config{CustomCommands: []config.CustomCommand{{
+		Name: testNoticeNameInspect, Key: testNoticeReservedKey, Command: testNoticeCommand,
+	}}})
+	s.NotZero(stamped.footerSeq)
+
+	m := newTestModel()
+
+	// Every footer-recency assertion in this package reads a tie between an
+	// unstamped status and an unstamped error, so the harness model must carry
+	// no startup notice and no generation from one, whatever the host's
+	// dotfiles hold.
+	s.Empty(m.status)
+	s.Zero(m.footerSeq)
+	s.Zero(m.statusGen)
+	s.Zero(m.errGen)
+}
+
 func (s *ignoredKeysSuite) TestStartupNoticeIsDismissedLikeAnyStatusMessage() {
 	cfg := config.Config{CustomCommands: []config.CustomCommand{{
 		Name: testNoticeNameInspect, Key: testNoticeReservedKey, Command: testNoticeCommand,

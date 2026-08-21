@@ -1094,14 +1094,13 @@ func TestStopTimeoutMatchesUnconfirmedStop(t *testing.T) {
 }
 
 // newTestModel is New() with the developer's ~/.config/vessel/config.toml
-// dropped, so assertions never depend on the host's dotfiles. That includes a
-// startup ignored-binding notice: a broken binding in the host config would
-// otherwise leak its footer status into every test below.
+// dropped, so assertions never depend on the host's dotfiles. It drops the
+// config before construction rather than after: a broken binding in the host
+// config makes newModel stamp a startup notice through setStatus, and clearing
+// the status afterwards would still leave footerSeq/statusGen ahead of errGen,
+// silently flipping every footer-recency tie below.
 func newTestModel() Model {
-	m := New()
-	m.cfg = config.Config{}
-	m.status = ""
-	return m
+	return newModel(config.Config{})
 }
 
 func TestFooterView_alwaysOneLine(t *testing.T) {
@@ -2523,7 +2522,10 @@ func TestImagesAction_Tag_promptNamesSourceAndWantsNewRef(t *testing.T) {
 }
 
 func TestFooterView_clampsWideRunesByDisplayWidth(t *testing.T) {
-	m := New()
+	// newTestModel, not New(): a host config with an ignored custom binding
+	// would put its short startup notice in the footer and the wide-rune error
+	// this names would never be the thing rendered.
+	m := newTestModel()
 	m.width, m.height = 80, 24
 	m.lastErr = errors.New(strings.Repeat("容器", 120))
 	assertOneRow(t, m, "wide-rune error")
