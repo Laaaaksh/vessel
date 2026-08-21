@@ -14,6 +14,7 @@ brew install vessel
 - Live container list with status, CPU %, memory, and sparklines
 - Start, stop, restart, remove, and prune
 - Drop into a shell inside any running container (clean UI restore on exit)
+- Run a one-shot command in a running container and see its output (`e`)
 - Stream logs with follow freeze and in-buffer search
 - Inspect containers: ports, mounts, networks and IP, CPUs, memory, platform, hostname, env, labels
 - Inspect images (digest, layers, command, platform variants) and volumes (quota, format, labels, options)
@@ -55,8 +56,9 @@ vessel doctor   # check CLI, system status, config
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `g` / `G` | Go to top / bottom |
-| `pgup` / `pgdn` / `ctrl+u` / `ctrl+d` | Page scroll |
+| `pgup` / `pgdown` / `ctrl+u` / `ctrl+d` | Page scroll |
 | `enter` | Open shell in container |
+| `e` | Run a one-shot command in the selected running container |
 | `L` | View logs |
 | `f` | Freeze / follow logs |
 | `s` / `u` / `r` | Stop / start / restart (stop asks to confirm when `confirm_stop` is set) |
@@ -67,7 +69,7 @@ vessel doctor   # check CLI, system status, config
 | `x` | Action menu |
 | `p` | Pull image (images view) |
 | `P` | Prune (stopped containers / images / volumes), confirm with `y` |
-| `c` | Create / run (prompt) |
+| `c` | New container (form) / new volume (name prompt) |
 | `+` / `_` | Cycle layout |
 | `` ` `` | Toggle command log |
 | `tab` / `1`-`5` | Containers / Images / Volumes / System / Networks |
@@ -99,9 +101,6 @@ Known limits:
   `-d` holds the action status until that budget expires instead of streaming
   output; streaming or detached-launch support for long-running foreground
   sessions is future work.
-- The prompt drops the space bar and non-ASCII characters, so a path containing either
-  cannot be typed yet - save would write somewhere you did not name, and load reports a
-  missing file for one that exists.
 
 ## Configuration
 
