@@ -145,8 +145,15 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 // (18x4 at 60x12 with the command log open) holds roughly three wrapped rows.
 const (
 	PushAuthNotice = "push rejected — run `container registry login`"
-	// A 403 means the session is valid but the account cannot write here, so
-	// repeating the login it already holds would send the user in a circle.
+	// A 403 usually means the session is valid but the account cannot write
+	// here, so repeating the login it already holds would send the user in a
+	// circle. Known limitation: that premise is not universal — Google Artifact
+	// Registry and Docker Hub both answer an *unauthenticated* push with 403
+	// rather than 401, and the distribution wording is identical either way, so
+	// a logged-out user pushing there is told login will not help when it is
+	// exactly what they need. The blunter wording is a deliberate simplification
+	// held for the smallest pane; tracked separately as
+	// vessel-403-unauthenticated-push.
 	PushPermissionNotice = "push forbidden — no write access; login won't help"
 )
 
