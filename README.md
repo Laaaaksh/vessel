@@ -17,7 +17,7 @@ brew install vessel
 - Stream logs with follow freeze and in-buffer search
 - Inspect containers: ports, mounts, networks and IP, CPUs, memory, platform, hostname, env, labels
 - Inspect images (digest, layers, command, platform variants) and volumes (quota, format, labels, options)
-- Browse / pull / prune images; create / prune volumes
+- Browse / pull / prune images; tag, save, load, and push them; create / prune volumes
 - Filter on every list; multi-select; action menu; custom commands
 - Vim-style navigation, pane focus, mouse click/wheel
 
@@ -76,6 +76,24 @@ vessel doctor   # check CLI, system status, config
 | `q` / `ctrl+c` | Quit |
 
 A custom command with a `key` set fires on that key and replaces the built-in action on it, except on reserved keys (navigation, filtering, and the global keys) - `config.example.toml` documents which keys can be taken over. The in-app help (`?`) always lists what each key currently does.
+
+### Images: tag, save, load, push
+
+Pick an image, press `x`, and choose `Tag…`, `Save…`, `Load…` or `Push`. Tag, save and
+push need a named reference, so an untagged row is refused rather than quietly resolved
+to `:latest`. Save prompts for an archive path and confirms before overwriting a file
+that already exists; load prompts for an existing archive and says so plainly when the
+path is missing; push confirms first, because it publishes.
+
+Known limits:
+
+- vessel never manages registry credentials. Push reuses whatever session
+  `container registry login` has already established - running that login is yours to do.
+- Every `container` invocation is capped at 10 seconds, so saving, loading or pushing a
+  large image is cut off mid-transfer and reported as a timeout rather than a real failure.
+- The prompt drops the space bar and non-ASCII characters, so a path containing either
+  cannot be typed yet - save would write somewhere you did not name, and load reports a
+  missing file for one that exists.
 
 ## Configuration
 
