@@ -341,17 +341,25 @@ func (m Model) DetailView(width, height int) string {
 		uiutil.KVFit("Path", sel.Mountpoint, width),
 	)
 
+	// The list already carries size, format, labels and options, so the pane
+	// shows them from the moment it paints and keeps them when the inspect
+	// fails. A successful inspect is the more authoritative source and wins.
 	same := sel.Name == m.inspectName && m.inspect != nil
+	format, sizeBytes := sel.Format, sel.SizeBytes
+	labels, options := sel.Labels, sel.Options
 	if same {
-		if m.inspect.Format != "" {
-			p.Add(uiutil.KV("Format", m.inspect.Format))
-		}
-		if m.inspect.SizeBytes > 0 {
-			p.Add(uiutil.KV("Size", uiutil.HumanBytes(int64(m.inspect.SizeBytes))))
-		}
-		p.Section(dim.Render("-- Labels --"), uiutil.PairRows(m.inspect.Labels, dim, width))
-		p.Section(dim.Render("-- Options --"), uiutil.PairRows(m.inspect.Options, dim, width))
-	} else if m.inspectErr != nil && sel.Name == m.inspectName {
+		format, sizeBytes = m.inspect.Format, m.inspect.SizeBytes
+		labels, options = m.inspect.Labels, m.inspect.Options
+	}
+	if format != "" {
+		p.Add(uiutil.KV("Format", format))
+	}
+	if sizeBytes > 0 {
+		p.Add(uiutil.KV("Size", uiutil.HumanBytes(int64(sizeBytes))))
+	}
+	p.Section(dim.Render("-- Labels --"), uiutil.PairRows(labels, dim, width))
+	p.Section(dim.Render("-- Options --"), uiutil.PairRows(options, dim, width))
+	if !same && m.inspectErr != nil && sel.Name == m.inspectName {
 		p.Add("")
 		p.Add(uiutil.IndentedRows([]string{m.inspectErr.Error()}, errStyle, width)...)
 	}
