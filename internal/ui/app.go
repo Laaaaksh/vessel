@@ -121,9 +121,13 @@ const (
 	stopContainer
 )
 
-// isPrune reports whether kind is a prune, which stages no ids of its own.
+// isPrune reports whether kind is a prune, which stages no ids of its own. It
+// derives from pruneSpecs so the two can never disagree about which kinds are
+// prunes: a kind listed here without a spec of its own would sweep whatever
+// store the fallback picked.
 func (k deleteKind) isPrune() bool {
-	return k == pruneContainers || k == pruneImages || k == pruneVolumes
+	_, ok := pruneSpecs[k]
+	return ok
 }
 
 const (
@@ -1069,11 +1073,9 @@ var pruneSpecs = map[deleteKind]pruneSpec{
 	}},
 }
 
-func pruneSpecFor(kind deleteKind) pruneSpec {
-	if spec, ok := pruneSpecs[kind]; ok {
-		return spec
-	}
-	return pruneSpecs[pruneContainers]
+func pruneSpecFor(kind deleteKind) (pruneSpec, bool) {
+	spec, ok := pruneSpecs[kind]
+	return spec, ok
 }
 
 // pendingAction describes a confirmed action: the footer label shown while it
@@ -1082,8 +1084,8 @@ func pruneSpecFor(kind deleteKind) pruneSpec {
 // before it was routed through the confirm modal; the other paths remove a
 // single resource.
 func pendingAction(kind deleteKind) (label, done string, timeout time.Duration) {
-	if kind.isPrune() {
-		return pruneSpecFor(kind).label, "pruned", globalTimeout
+	if spec, ok := pruneSpecFor(kind); ok {
+		return spec.label, "pruned", globalTimeout
 	}
 	switch kind {
 	case stopContainer:
@@ -1108,24 +1110,26 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		var err error
-		switch kind {
-		case pruneContainers, pruneImages, pruneVolumes:
-			err = pruneSpecFor(kind).run(ctx, client)
-		case stopContainer:
-			err = client.StopContainer(ctx, ids[0])
-		case deleteImages:
-			err = client.RemoveImage(ctx, ids...)
-		case deleteVolumes:
-			err = client.RemoveVolume(ctx, ids...)
-		case deleteContainers:
-			for _, id := range ids {
-				if e := client.RemoveContainer(ctx, id); e != nil {
-					err = e
-					break
+		if spec, ok := pruneSpecFor(kind); ok {
+			err = spec.run(ctx, client)
+		} else {
+			switch kind {
+			case stopContainer:
+				err = client.StopContainer(ctx, ids[0])
+			case deleteImages:
+				err = client.RemoveImage(ctx, ids...)
+			case deleteVolumes:
+				err = client.RemoveVolume(ctx, ids...)
+			case deleteContainers:
+				for _, id := range ids {
+					if e := client.RemoveContainer(ctx, id); e != nil {
+						err = e
+						break
+					}
 				}
+			default:
+				return actionDoneMsg{err: fmt.Errorf("delete: unhandled target kind %d", kind)}
 			}
-		default:
-			return actionDoneMsg{err: fmt.Errorf("delete: unhandled target kind %d", kind)}
 		}
 		if err != nil {
 			return actionDoneMsg{err: err}
@@ -1663,8 +1667,8 @@ func (m Model) helpView() string {
 // confirmQuestion returns the concrete question for the pending confirm (delete,
 // prune, stop), rather than a generic "are you sure?".
 func (m Model) confirmQuestion() string {
-	if m.pendingKind.isPrune() {
-		return pruneSpecFor(m.pendingKind).question
+	if spec, ok := pruneSpecFor(m.pendingKind); ok {
+		return spec.question
 	}
 	label := m.pendingLbl
 	if label == "" {

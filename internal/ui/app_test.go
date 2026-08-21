@@ -81,7 +81,7 @@ func TestConfirmModalMode(t *testing.T) {
 }
 
 func TestImageBulkDeleteConfirm(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -119,7 +119,7 @@ func TestImageBulkDeleteConfirm(t *testing.T) {
 }
 
 func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "a", Repository: "alpine", Tag: "latest"}})
 	next, _ := m.handleKey(spaceKey())
@@ -133,7 +133,7 @@ func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
 }
 
 func TestVolumeBulkDeleteConfirm(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
@@ -1279,7 +1279,7 @@ func enterKey() tea.KeyPressMsg {
 // the same image or volume cannot resurface a mark and re-arm a bulk delete
 // nobody asked for.
 func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -1312,7 +1312,7 @@ func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 }
 
 func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
@@ -1334,7 +1334,7 @@ func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 }
 
 func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	items := []backend.Container{
 		{ID: "1", Name: "web", Status: "running"},
@@ -1360,7 +1360,7 @@ func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 // Prune removes the same objects without passing through the confirmation, so
 // the mark drop has to hold there too.
 func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
 	m.volPanel = m.volPanel.SetItems(items)
@@ -1383,7 +1383,7 @@ func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
 // A delete that fails leaves its objects in place, so the marks must still be
 // there afterwards and the action must stay retryable without re-marking.
 func TestFailedDeleteKeepsMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -1407,7 +1407,7 @@ func TestFailedDeleteKeepsMarks(t *testing.T) {
 // The cursor row wins over a single mark, so this delete never touches "b" -
 // and a mark on an object the delete left alone must survive it.
 func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -1436,7 +1436,7 @@ func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
 // A mark hidden behind an active filter is not a delete target: it survives a
 // delete of something else, and disappears only when its own volume does.
 func TestVolumeMarkHiddenByFilterTracksItsOwnVolume(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
@@ -1485,7 +1485,7 @@ func markRows(t *testing.T, m Model, n int) Model {
 }
 
 func TestCancelledDeleteKeepsMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -1510,7 +1510,7 @@ func TestCancelledDeleteKeepsMarks(t *testing.T) {
 // The mark key is a KeyMap binding, not a literal in each panel: rebinding it
 // has to reach every pane and the bulk delete that acts on the marks.
 func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
-	m := New().withKeys(rebound("m"))
+	m := newTestModel().withKeys(rebound("m"))
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -1551,7 +1551,7 @@ func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
 // The default binding is what a real space bar press produces, so marking and
 // bulk-deleting work end to end out of the box.
 func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -1571,7 +1571,7 @@ func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
 // The delete command is the one path that destroys user state, so an unhandled
 // kind must fail loudly instead of falling through to a container delete.
 func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
 	m.mode = modeConfirmDelete
 	m.pendingKind = deleteKind(99)
@@ -1587,6 +1587,36 @@ func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
 	}
 	if done.err == nil {
 		t.Fatal("an unhandled delete kind must report an error, not delete containers")
+	}
+}
+
+// A prune kind that has no spec of its own would ask about, and then sweep,
+// whichever store the lookup fell back to. Every kind isPrune reports true for
+// must therefore own a distinct question.
+func TestEveryPruneKindAsksAboutItsOwnStore(t *testing.T) {
+	asked := map[string]deleteKind{}
+	prunes := 0
+	for k := deleteKind(0); k < deleteKind(64); k++ {
+		if !k.isPrune() {
+			continue
+		}
+		prunes++
+		m := newTestModel()
+		m.pendingKind = k
+		q := m.confirmQuestion()
+		if q == "" {
+			t.Fatalf("prune kind %d asks nothing before sweeping a store", k)
+		}
+		if prev, dup := asked[q]; dup {
+			t.Fatalf("prune kinds %d and %d both ask %q: one of them has no spec and would sweep the other's store", k, prev, q)
+		}
+		asked[q] = k
+		if label, done, timeout := pendingAction(k); label == "" || done != "pruned" || timeout != globalTimeout {
+			t.Fatalf("prune kind %d reports (%q, %q, %v) instead of its own prune action", k, label, done, timeout)
+		}
+	}
+	if prunes != 3 {
+		t.Fatalf("expected the three prune kinds, found %d", prunes)
 	}
 }
 
