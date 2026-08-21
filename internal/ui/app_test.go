@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1025,6 +1026,79 @@ func TestHelpView_keyColumnNeverRunsIntoItsDescription(t *testing.T) {
 				t.Errorf("%s help: key %q runs straight into its description", m.viewName(), b.key)
 			}
 		}
+	}
+}
+
+func TestActionsModal_fitsTheSmallestSupportedFrame(t *testing.T) {
+	for _, view := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		m := New()
+		m.width, m.height = 60, 12
+		m.activeView = view
+		m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+		m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
+		next, _ := m.handleKey(keyMsg("x"))
+		mm := next.(Model)
+		if mm.mode != modeActions {
+			t.Fatalf("%s: x should open the actions menu, got mode %v", m.viewName(), mm.mode)
+		}
+		frame := ansi.Strip(viewString(mm.View()))
+		if rows := len(strings.Split(strings.TrimRight(frame, "\n"), "\n")); rows > mm.height {
+			t.Errorf("%s actions menu renders %d rows into a %d-row frame", m.viewName(), rows, mm.height)
+		}
+	}
+}
+
+func TestActionsModal_windowFollowsTheSelection(t *testing.T) {
+	m := New()
+	m.width, m.height = 60, 12
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	next, _ := m.handleKey(keyMsg("x"))
+	mm := next.(Model)
+	if len(mm.actionItems) < 5 {
+		t.Fatalf("precondition: this test needs a menu taller than the window, got %d items", len(mm.actionItems))
+	}
+	last := mm.actionItems[len(mm.actionItems)-1].label
+
+	if strings.Contains(modalText(t, mm), last) {
+		t.Fatalf("precondition: the last item should start outside the window, got %q", modalText(t, mm))
+	}
+	for i := 0; i < len(mm.actionItems)-1; i++ {
+		n, _ := mm.handleKey(keyMsg("j"))
+		mm = n.(Model)
+	}
+	view := modalText(t, mm)
+	if !strings.Contains(view, last) {
+		t.Fatalf("the window must scroll to the selection, got %q", view)
+	}
+	if !strings.Contains(view, fmt.Sprintf("%d/%d", len(mm.actionItems), len(mm.actionItems))) {
+		t.Fatalf("a windowed menu should say where the selection sits, got %q", view)
+	}
+	frame := ansi.Strip(viewString(mm.View()))
+	if rows := len(strings.Split(strings.TrimRight(frame, "\n"), "\n")); rows > mm.height {
+		t.Errorf("scrolled menu renders %d rows into a %d-row frame", rows, mm.height)
+	}
+}
+
+func TestImagesDetail_forbiddenPushDoesNotBlameCredentials(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "forbidden")
+	m := beginPush(t, imagesModel(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "myorg/app", Tag: "v1"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected the forbidden push to fail")
+	}
+	out, _ := next.(Model).Update(done)
+	om := out.(Model)
+
+	detail := squash(ansi.Strip(om.imgPanel.DetailView(40, 20)))
+	if !strings.Contains(detail, squash("no write access")) {
+		t.Fatalf("a 403 must be explained as a permission problem, got: %q", detail)
+	}
+	if strings.Contains(detail, squash("push rejected — run")) {
+		t.Fatalf("a 403 must not tell the user to re-run a login they already hold, got: %q", detail)
 	}
 }
 

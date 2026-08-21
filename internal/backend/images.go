@@ -129,49 +129,94 @@ func FileExists(path string) bool {
 // PushImage pushes an image to its registry.
 func (c *Client) PushImage(ctx context.Context, ref string) error {
 	_, err := c.run(ctx, "image", "push", ref)
-	if err != nil && IsPushAuthError(err) {
+	switch pushDenialOf(err) {
+	case denialCredentials:
 		return fmt.Errorf("%w%s", err, pushAuthHint)
+	case denialPermission:
+		return fmt.Errorf("%w%s", err, pushPermissionHint)
 	}
 	return err
 }
 
-// PushAuthNotice is what the images detail pane shows after a rejected push.
-// Container registry login is intentionally out of vessel's scope: the user owns
-// their registry session. It leads with the command and carries no more prose
-// than that, because the smallest supported pane (18x4 at 60x12 with the command
-// log open) has room for roughly three wrapped rows.
-const PushAuthNotice = "push rejected — run `container registry login`"
+// PushAuthNotice and PushPermissionNotice are what the images detail pane shows
+// after a refused push. Container registry login is intentionally out of
+// vessel's scope: the user owns their registry session. Both lead with the
+// verdict and carry no more prose than that, because the smallest supported pane
+// (18x4 at 60x12 with the command log open) holds roughly three wrapped rows.
+const (
+	PushAuthNotice = "push rejected — run `container registry login`"
+	// A 403 means the session is valid but the account cannot write here, so
+	// repeating the login it already holds would send the user in a circle.
+	PushPermissionNotice = "push forbidden — no write access; login won't help"
+)
 
-// pushAuthHint is the fuller instruction appended to the error itself, which the
-// footer renders. It stays on one line because the footer budgets exactly one row.
-const pushAuthHint = " — registry rejected these credentials; run `container registry login`, then retry"
+// The fuller instructions appended to the error itself, which the footer
+// renders. Each stays on one line because the footer budgets exactly one row.
+const (
+	pushAuthHint       = " — registry rejected these credentials; run `container registry login`, then retry"
+	pushPermissionHint = " — registry refused the push: this account has no write access to that repository, so `container registry login` again will not help"
+)
 
-// authStderrPhrases are multi-word phrases only a registry emits. Matching bare
-// words would misread the reference: the CLI echoes it into stderr, so pushing
+// Multi-word phrases only a registry emits. Matching bare words would misread
+// the reference: the CLI echoes it into stderr, so pushing
 // myorg/authentication-service:v1 would classify any failure as a credentials
 // problem. A reference cannot contain a space, so a phrase cannot collide.
-var authStderrPhrases = []string{
-	"401 unauthorized",
-	"403 forbidden",
-	"no credentials found",
-	"authentication required",
-	"unauthorized: authentication",
-}
+var (
+	permissionStderrPhrases = []string{
+		"403 forbidden",
+	}
+	credentialStderrPhrases = []string{
+		"401 unauthorized",
+		"no credentials found",
+		"authentication required",
+		"unauthorized: authentication",
+	}
+)
 
-// IsPushAuthError reports whether a push error is a credentials problem. It
-// reads only what the CLI printed, never the arguments it was handed.
-func IsPushAuthError(err error) bool {
+type pushDenial int
+
+const (
+	denialNone pushDenial = iota
+	denialCredentials
+	denialPermission
+)
+
+// pushDenialOf reports how the registry refused a push, reading only what the
+// CLI printed and never the arguments it was handed. Permission is checked
+// first: a 403 is the more specific verdict when both shapes appear.
+func pushDenialOf(err error) pushDenial {
 	var cliErr *CLIError
-	if !errors.As(err, &cliErr) {
-		return false
+	if err == nil || !errors.As(err, &cliErr) {
+		return denialNone
 	}
 	s := strings.ToLower(cliErr.Stderr)
-	for _, phrase := range authStderrPhrases {
+	for _, phrase := range permissionStderrPhrases {
 		if strings.Contains(s, phrase) {
-			return true
+			return denialPermission
 		}
 	}
-	return false
+	for _, phrase := range credentialStderrPhrases {
+		if strings.Contains(s, phrase) {
+			return denialCredentials
+		}
+	}
+	return denialNone
+}
+
+// IsPushAuthError reports whether the registry refused the push, for either
+// reason.
+func IsPushAuthError(err error) bool { return pushDenialOf(err) != denialNone }
+
+// PushDenialNotice returns the images-panel notice matching how the registry
+// refused a push, or "" when the failure was not a refusal.
+func PushDenialNotice(err error) string {
+	switch pushDenialOf(err) {
+	case denialCredentials:
+		return PushAuthNotice
+	case denialPermission:
+		return PushPermissionNotice
+	}
+	return ""
 }
 
 // PushTarget returns the registry host that pushing ref publishes to, and

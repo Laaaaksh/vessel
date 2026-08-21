@@ -17,6 +17,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -231,8 +232,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastErr = msg.err
 			m.status = ""
-			if msg.push && backend.IsPushAuthError(msg.err) {
-				m.imgPanel = m.imgPanel.SetNotice(backend.PushAuthNotice)
+			if msg.push {
+				if notice := backend.PushDenialNotice(msg.err); notice != "" {
+					m.imgPanel = m.imgPanel.SetNotice(notice)
+				}
 			}
 		} else {
 			m.lastErr = nil
@@ -1442,19 +1445,36 @@ func (m Model) confirmModal() string {
 		Render(body)
 }
 
+// actionsModalChrome is what the modal spends on border, padding, title, the
+// blank rows and the hint — everything that is not a menu item.
+const actionsModalChrome = 8
+
+// actionWindow is the slice of the menu that fits the frame. lipgloss.Place pads
+// but never truncates, so a menu taller than the terminal would push the header
+// off the alt-screen; the window follows the selection instead.
+func (m Model) actionWindow() (start, end int) {
+	size := len(m.actionItems)
+	if m.height > 0 {
+		size = min(size, max(1, m.height-actionsModalChrome))
+	}
+	return uiutil.Window(len(m.actionItems), m.actionIdx, size)
+}
+
 func (m Model) actionsModal() string {
-	var rows []string
-	rows = append(rows, m.st.title.Render("actions"))
-	rows = append(rows, "")
-	for i, a := range m.actionItems {
-		line := "  " + a.label
+	rows := []string{m.st.title.Render("actions"), ""}
+	start, end := m.actionWindow()
+	for i := start; i < end; i++ {
+		line := "  " + m.actionItems[i].label
 		if i == m.actionIdx {
-			line = m.st.navItemActive.Render("> " + a.label)
+			line = m.st.navItemActive.Render("> " + m.actionItems[i].label)
 		}
 		rows = append(rows, line)
 	}
-	rows = append(rows, "")
-	rows = append(rows, m.st.dimText.Render("[enter] run  [esc] close"))
+	hint := "[enter] run  [esc] close"
+	if end-start < len(m.actionItems) {
+		hint = fmt.Sprintf("%d/%d  ", m.actionIdx+1, len(m.actionItems)) + hint
+	}
+	rows = append(rows, "", m.st.dimText.Render(hint))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPurple).
