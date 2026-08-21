@@ -101,7 +101,9 @@ func (k KeyMap) NavUp(s string) bool { return Match(s, k.Up, "k") }
 // Reserved reports whether s is a navigation, filtering, layout or global
 // binding. Update() dispatches those before user-configured custom command
 // keys, so a custom command can never shadow them: binding "j" to a command
-// must not make the list unscrollable.
+// must not make the list unscrollable. The action menu is reserved too: it is
+// where every custom command that could not take its key still runs from, so
+// shadowing it would strand the rest of them.
 func (k KeyMap) Reserved(s string) bool {
 	if k.NavUp(s) || k.NavDown(s) {
 		return true
@@ -109,7 +111,7 @@ func (k KeyMap) Reserved(s string) bool {
 	if Match(s, k.Left, k.Right, k.FocusNext, k.FocusPrev,
 		k.PageUp, k.PageDown, k.HalfUp, k.HalfDown,
 		k.GotoTop, k.GotoBottom, k.Filter, k.Escape, k.Tab,
-		k.Quit, k.Help, k.LayoutNext, k.LayoutPrev) {
+		k.Quit, k.Help, k.LayoutNext, k.LayoutPrev, k.Actions) {
 		return true
 	}
 	return Match(s, "1", "2", "3", "`", "ctrl+c")
