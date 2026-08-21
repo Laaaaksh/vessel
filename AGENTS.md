@@ -65,6 +65,19 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   not yet filed, and is deliberately out of the image-mobility scope. The images
   help view states the same caveat to the user.
 
+## Release pipeline
+
+- `.goreleaser.yml` still uses `brews:`, not the newer `homebrew_casks:`, despite goreleaser's
+  deprecation warning. Confirmed via `goreleaser check` (installed v2.17.1) and goreleaser's own
+  deprecation notice: `homebrew_casks` installs via Homebrew Cask semantics, not a Formula - it
+  needs `brew install --cask` once any name collision exists, and even unambiguous installs go
+  through a Cask `binary` shim rather than a formula's direct `bin.install`. That's a real
+  `brew install` UX change for a plain CLI, so migrating now is deliberately deferred. When `brews:`
+  is finally removed upstream, re-evaluate against the then-current `homebrew_casks:` docs before
+  switching.
+- `version`/`commit`/`date` in `main.go` must stay package-level `var`s, not `const`s - the
+  `-X main.version=...` linker flag goreleaser passes silently no-ops against a `const`.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
