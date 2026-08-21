@@ -173,9 +173,12 @@ const (
 	globalTimeout = 120 * time.Second
 	// All three are outer bounds: backend.Client now applies a per-call
 	// budget of its own to the known-long verbs — the transfer/sweep window
-	// matches globalTimeout and the batched-delete window matches
-	// confirmTimeout (pinned by TestLongOperationBudgets) — while quick
-	// commands keep a short default of their own.
+	// matches globalTimeout, the batched-delete window matches confirmTimeout
+	// and the one-shot exec window matches execTimeout — while quick commands
+	// keep a short default of their own. Both halves of each pair are pinned
+	// (TestOuterBounds_matchBackendPerCallBudgets here,
+	// TestLongOperationBudgets_matchInternalUIOuterBounds in backend), so
+	// neither side can drift alone and quietly become the earlier deadline.
 )
 
 // Model is the root bubbletea model for vessel.
@@ -1612,7 +1615,8 @@ func (m Model) submitRunForm() (tea.Model, tea.Cmd) {
 	})
 }
 
-// execTimeout bounds a one-shot exec, matching runOnSelected's per-item budget.
+// execTimeout bounds a one-shot exec, matching runOnSelected's per-item budget
+// and backend's identically named per-call budget for the same verb.
 const execTimeout = 30 * time.Second
 
 // execOutputTruncate keeps a one-shot exec's result on one footer line, the

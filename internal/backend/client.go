@@ -30,6 +30,12 @@ const (
 	// the confirmed removal that issued it.
 	confirmTimeout = 60 * time.Second
 
+	// execTimeout bounds one `container exec`. The command is user-authored,
+	// so it can legitimately outlast a quick verb (installing a package,
+	// walking a filesystem) without being hung; it matches internal/ui's
+	// identically named outer bound for the one-shot exec that issued it.
+	execTimeout = 30 * time.Second
+
 	// cliName is the Apple Mac containers binary.
 	cliName = "container"
 	cmdLogN = 40
@@ -125,11 +131,7 @@ func (e *CLIError) Unwrap() error { return e.Err }
 // run executes a container CLI subcommand under the client's default budget
 // and returns its stdout.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
-	out, err := c.runRaw(ctx, args...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return c.runWithTimeout(ctx, c.timeout, args...)
 }
 
 // runWithTimeout is run with an explicit per-call budget that replaces the
