@@ -36,7 +36,7 @@ func TestTabCycling_visitsEachViewExactlyOnce(t *testing.T) {
 		m = next.(Model)
 		seen = append(seen, m.activeView)
 	}
-	want := []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem, ViewContainers}
+	want := []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem, ViewNetworks, ViewContainers}
 	if len(seen) != len(want) {
 		t.Fatalf("seen=%v want %v", seen, want)
 	}
@@ -58,8 +58,8 @@ func TestNumericShortcut_selectsSystemView(t *testing.T) {
 }
 
 // The sidebar's own up/down navigation uses separate arithmetic from Tab; it
-// must wrap through all four views too, in both directions.
-func TestSidebarNav_wrapsThroughAllFourViewsBothDirections(t *testing.T) {
+// must wrap through all five views too, in both directions.
+func TestSidebarNav_wrapsThroughAllFiveViewsBothDirections(t *testing.T) {
 	m := New()
 	m.width, m.height = 100, 30
 	m.focus = FocusSidebar
@@ -70,7 +70,7 @@ func TestSidebarNav_wrapsThroughAllFourViewsBothDirections(t *testing.T) {
 		m = next.(Model)
 		seen = append(seen, m.activeView)
 	}
-	want := []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem, ViewContainers}
+	want := []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem, ViewNetworks, ViewContainers}
 	for i := range want {
 		if seen[i] != want[i] {
 			t.Fatalf("down: seen=%v want %v", seen, want)
@@ -79,8 +79,8 @@ func TestSidebarNav_wrapsThroughAllFourViewsBothDirections(t *testing.T) {
 
 	next, _ := m.handleKey(keyMsg("k"))
 	m = next.(Model)
-	if m.activeView != ViewSystem {
-		t.Fatalf("up from Containers=%v want ViewSystem (wrap)", m.activeView)
+	if m.activeView != ViewNetworks {
+		t.Fatalf("up from Containers=%v want ViewNetworks (wrap)", m.activeView)
 	}
 }
 
