@@ -175,6 +175,33 @@ func TestDetailView_narrowPaneRendersRowsInOrder(t *testing.T) {
 	}
 }
 
+func TestDetailView_longImageRefDoesNotEvictLaterRows(t *testing.T) {
+	// The Image row is a key/value row like its siblings and must be bound to
+	// one rendered row the same way, or a long reference wraps and evicts
+	// every row after it at minimum terminal geometry.
+	m := New().SetItems([]backend.Container{{
+		ID:       "abc123456789",
+		Name:     "web",
+		Image:    "docker.io/library/postgres:16.2-alpine",
+		Status:   "running",
+		Ports:    []backend.PortMapping{{HostPort: 5432, ContainerPort: 5432}},
+		Hostname: "db",
+		Platform: "linux/arm64",
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	// The narrowest pane geometry the app accepts (60x12 terminal).
+	const width, height = 18, 10
+	v := ansi.Strip(m.DetailView(width, height, poller))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+	}
+	if !strings.Contains(v, "Status") {
+		t.Errorf("Status row evicted by an unbounded Image row: %q", v)
+	}
+}
+
 func TestDetailView_sectionsDoNotJumpAheadOfDroppedRows(t *testing.T) {
 	// A long image reference fills the pane before the identity rows are in;
 	// the live metrics still render because room was reserved for them, but a
