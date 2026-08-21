@@ -142,6 +142,24 @@ func (m Model) MarkedIDs() []string {
 	return out
 }
 
+// SingleMarked returns the one marked volume when exactly one visible row
+// carries a mark, and nil otherwise. A lone mark states its target more
+// precisely than the cursor does, so the delete path prefers it; with zero or
+// several marks the cursor keeps deciding.
+func (m Model) SingleMarked() *backend.Volume {
+	var found *backend.Volume
+	for i := range m.filtered {
+		if !m.marked[m.filtered[i].Name] {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = &m.filtered[i]
+	}
+	return found
+}
+
 // SetInspect stores the inspected detail for the given volume name, keyed by
 // name so a slow response never labels the wrong volume. A result for a volume
 // that is no longer selected is discarded rather than replacing the cache, so

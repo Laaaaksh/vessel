@@ -122,18 +122,32 @@ func TestImageBulkDeleteConfirm(t *testing.T) {
 	}
 }
 
-func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
+// Marking a row is an explicit intent signal: with exactly one mark, d stages
+// the marked image even though the cursor rests on a different row, and the
+// confirm names the marked reference rather than the cursor's.
+func TestImageSingleMarkWinsOverDistantCursor(t *testing.T) {
 	m := newTestModel()
+	m.width, m.height = 100, 30
 	m.activeView = ViewImages
-	m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "a", Repository: "alpine", Tag: "latest"}})
-	next, _ := m.handleKey(spaceKey())
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("k"))
 	m = next.(Model)
 	next, _ = m.handleKey(keyMsg("d"))
 	m = next.(Model)
 	if m.mode != modeConfirmDelete {
 		t.Fatalf("mode=%v want confirm delete", m.mode)
 	}
-	assertPending(t, m, deleteImages, "a")
+	assertPending(t, m, deleteImages, "b")
+	if m.pendingLbl != "busybox:latest" {
+		t.Fatalf("pendingLbl=%q want the marked row's ref 'busybox:latest'", m.pendingLbl)
+	}
 }
 
 func TestVolumeBulkDeleteConfirm(t *testing.T) {
@@ -1410,8 +1424,10 @@ func TestFailedDeleteKeepsMarks(t *testing.T) {
 	}
 }
 
-// The cursor row wins over a single mark, so this delete never touches "b" -
-// and a mark on an object the delete left alone must survive it.
+// The single mark wins over the cursor, so this delete stages "b" - the mark -
+// never the cursor's alpine. A delete that fails leaves its object in place,
+// so the refresh returns both rows and the mark must survive, keeping the
+// action retryable without re-marking.
 func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
@@ -1429,13 +1445,14 @@ func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
 	m = next.(Model)
 	next, _ = m.handleKey(keyMsg("d"))
 	m = next.(Model)
-	assertPending(t, m, deleteImages, "a")
+	assertPending(t, m, deleteImages, "b")
 	next, _ = m.handleKey(keyMsg("y"))
 	m = next.(Model)
-	m.imgPanel = m.imgPanel.SetItems(items[1:])
+	// The delete failed (image still referenced), so the refresh returns both.
+	m.imgPanel = m.imgPanel.SetItems(items)
 	got := m.imgPanel.MarkedIDs()
 	if len(got) != 1 || got[0] != "b" {
-		t.Fatalf("MarkedIDs = %v, want [b]: deleting alpine must not drop busybox's mark", got)
+		t.Fatalf("MarkedIDs after a failed delete = %v, want [b]: the mark is still retryable", got)
 	}
 }
 
@@ -1510,6 +1527,126 @@ func TestCancelledDeleteKeepsMarks(t *testing.T) {
 	m = next.(Model)
 	if got := m.imgPanel.MarkedIDs(); len(got) != 2 {
 		t.Fatalf("cancelling a delete must keep marks, got %v", got)
+	}
+}
+
+// Same rule as images, proven per pane: one mark beats the cursor's row.
+func TestContainerSingleMarkWinsOverDistantCursor(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
+		{ID: "1", Name: "web", Status: "running"},
+		{ID: "2", Name: "db", Status: "running"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("k"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("mode=%v want confirm delete", m.mode)
+	}
+	assertPending(t, m, deleteContainers, "2")
+	if m.pendingLbl != "db" {
+		t.Fatalf("pendingLbl=%q want the marked row's name 'db'", m.pendingLbl)
+	}
+}
+
+func TestVolumeSingleMarkWinsOverDistantCursor(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewVolumes
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(spaceKey())
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("k"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("mode=%v want confirm delete", m.mode)
+	}
+	assertPending(t, m, deleteVolumes, "logs")
+	if m.pendingLbl != "logs" {
+		t.Fatalf("pendingLbl=%q want the marked row's name 'logs'", m.pendingLbl)
+	}
+}
+
+// With no marks anywhere the cursor keeps deciding, exactly as before.
+func TestContainerZeroMarksFallsBackToCursor(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
+		{ID: "1", Name: "web", Status: "running"},
+		{ID: "2", Name: "db", Status: "running"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteContainers, "2")
+	if m.pendingLbl != "db" {
+		t.Fatalf("pendingLbl=%q want the cursor row's name 'db'", m.pendingLbl)
+	}
+}
+
+func TestImageZeroMarksFallsBackToCursor(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "a", Repository: "alpine", Tag: "latest"},
+		{ID: "b", Repository: "busybox", Tag: "latest"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteImages, "b")
+	if m.pendingLbl != "busybox:latest" {
+		t.Fatalf("pendingLbl=%q want the cursor row's ref 'busybox:latest'", m.pendingLbl)
+	}
+}
+
+func TestVolumeZeroMarksFallsBackToCursor(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewVolumes
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	next, _ = m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	assertPending(t, m, deleteVolumes, "logs")
+	if m.pendingLbl != "logs" {
+		t.Fatalf("pendingLbl=%q want the cursor row's name 'logs'", m.pendingLbl)
+	}
+}
+
+// Several marks still bulk-delete with the count label; only the exactly-one
+// mark case changed who decides.
+func TestContainerMultipleMarksStillBulkDelete(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	items := []backend.Container{
+		{ID: "1", Name: "web", Status: "running"},
+		{ID: "2", Name: "db", Status: "running"},
+	}
+	m.cntPanel = m.cntPanel.SetItems(items)
+	m = markRows(t, m, 2)
+	next, _ := m.handleKey(keyMsg("d"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("mode=%v want confirm delete", m.mode)
+	}
+	assertPending(t, m, deleteContainers, "1", "2")
+	if m.pendingLbl != "2 containers" {
+		t.Fatalf("pendingLbl=%q want '2 containers'", m.pendingLbl)
 	}
 }
 
