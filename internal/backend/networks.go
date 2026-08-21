@@ -26,7 +26,7 @@ type cliNetwork struct {
 }
 
 // ListNetworks returns all networks.
-func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
+func (c *Client) ListNetworks(ctx context.Context) ([]NetworkInfo, error) {
 	var raw []cliNetwork
 	if err := c.runJSON(ctx, &raw, "network", "list", "--format", "json"); err != nil {
 		return nil, fmt.Errorf("list networks: %w", err)
@@ -35,7 +35,7 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 }
 
 // NetworkInspect returns detailed info for a single network.
-func (c *Client) NetworkInspect(ctx context.Context, name string) (*Network, error) {
+func (c *Client) NetworkInspect(ctx context.Context, name string) (*NetworkInfo, error) {
 	var raw []cliNetwork
 	if err := c.runJSON(ctx, &raw, "network", "inspect", name); err != nil {
 		return nil, fmt.Errorf("inspect network %s: %w", name, err)
@@ -47,14 +47,14 @@ func (c *Client) NetworkInspect(ctx context.Context, name string) (*Network, err
 	return &ns[0], nil
 }
 
-func mapNetworks(raw []cliNetwork) []Network {
-	out := make([]Network, 0, len(raw))
+func mapNetworks(raw []cliNetwork) []NetworkInfo {
+	out := make([]NetworkInfo, 0, len(raw))
 	for _, r := range raw {
 		name := r.Configuration.Name
 		if name == "" {
 			name = r.ID
 		}
-		n := Network{
+		n := NetworkInfo{
 			Name:    name,
 			Mode:    r.Configuration.Mode,
 			Gateway: r.Status.IPv4Gateway,

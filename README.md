@@ -15,8 +15,9 @@ brew install vessel
 - Start, stop, restart, remove, and prune
 - Drop into a shell inside any running container (clean UI restore on exit)
 - Stream logs with follow freeze and in-buffer search
-- Inspect ports, env, labels, and details
-- Browse / pull / prune images; create / prune volumes
+- Inspect containers: ports, mounts, networks and IP, CPUs, memory, platform, hostname, env, labels
+- Inspect images (digest, layers, command, platform variants) and volumes (quota, format, labels, options)
+- Browse / pull / prune images; tag, save, load, and push them; create / prune volumes
 - Filter on every list; multi-select; action menu; custom commands
 - Vim-style navigation, pane focus, mouse click/wheel
 
@@ -58,21 +59,41 @@ vessel doctor   # check CLI, system status, config
 | `enter` | Open shell in container |
 | `L` | View logs |
 | `f` | Freeze / follow logs |
-| `s` / `u` / `r` | Stop / start / restart |
+| `s` / `u` / `r` | Stop / start / restart (stop asks to confirm when `confirm_stop` is set) |
 | `d` | Remove the selected row, or every marked row when 2+ are marked (confirm with `y`) |
 | `space` | Toggle multi-select mark (containers, images, volumes) |
 | `/` | Filter current list |
 | `y` | Yank id / name / path |
 | `x` | Action menu |
 | `p` | Pull image (images view) |
-| `P` | Prune (stopped containers / images / volumes) |
+| `P` | Prune (stopped containers / images / volumes), confirm with `y` |
 | `c` | Create / run (prompt) |
 | `+` / `_` | Cycle layout |
 | `` ` `` | Toggle command log |
 | `tab` / `1` `2` `3` | Containers / Images / Volumes |
 | `esc` | Close logs, help, modal, or clear filter |
 | `?` | Toggle help |
-| `q` | Quit |
+| `q` / `ctrl+c` | Quit |
+
+A custom command with a `key` set fires on that key and replaces the built-in action on it, except on reserved keys (navigation, filtering, and the global keys) - `config.example.toml` documents which keys can be taken over. The in-app help (`?`) always lists what each key currently does.
+
+### Images: tag, save, load, push
+
+Pick an image, press `x`, and choose `Tag…`, `Save…`, `Load…` or `Push`. Tag, save and
+push need a named reference, so an untagged row is refused rather than quietly resolved
+to `:latest`. Save prompts for an archive path and confirms before overwriting a file
+that already exists; load prompts for an existing archive and says so plainly when the
+path is missing; push confirms first, because it publishes.
+
+Known limits:
+
+- vessel never manages registry credentials. Push reuses whatever session
+  `container registry login` has already established - running that login is yours to do.
+- Every `container` invocation is capped at 10 seconds, so saving, loading or pushing a
+  large image is cut off mid-transfer and reported as a timeout rather than a real failure.
+- The prompt drops the space bar and non-ASCII characters, so a path containing either
+  cannot be typed yet - save would write somewhere you did not name, and load reports a
+  missing file for one that exists.
 
 ## Configuration
 
@@ -86,6 +107,7 @@ shell = "/bin/sh"
 
 # [[custom_commands]]
 # name = "inspect"
+# key = "z"          # optional: "z", "space", "enter", "f5", "ctrl+z"
 # command = "container inspect {{.ID}}"
 ```
 

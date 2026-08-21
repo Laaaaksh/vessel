@@ -24,8 +24,8 @@ func enterKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 }
 
-func net(name, mode string) backend.Network {
-	return backend.Network{Name: name, Mode: mode}
+func net(name, mode string) backend.NetworkInfo {
+	return backend.NetworkInfo{Name: name, Mode: mode}
 }
 
 type modelSuite struct {
@@ -48,14 +48,14 @@ func (s *modelSuite) typeFilter(m Model, text string) Model {
 }
 
 func (s *modelSuite) TestSetItemsPopulatesTheVisibleList() {
-	m := New().SetItems([]backend.Network{net("default", "nat"), net("bridge0", "bridge")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat"), net("bridge0", "bridge")})
 
 	s.Equal(2, m.Len())
 	s.Equal("default", m.Selected().Name)
 }
 
 func (s *modelSuite) TestCursorDownMovesToTheNextRow() {
-	m := New().SetItems([]backend.Network{net("default", "nat"), net("bridge0", "bridge")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat"), net("bridge0", "bridge")})
 
 	m, _ = m.Update(keyMsg("j"))
 
@@ -63,7 +63,7 @@ func (s *modelSuite) TestCursorDownMovesToTheNextRow() {
 }
 
 func (s *modelSuite) TestFilterNarrowsToMatchingNames() {
-	m := New().SetItems([]backend.Network{net("default", "nat"), net("isolated", "bridge")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat"), net("isolated", "bridge")})
 
 	m = s.typeFilter(m, "iso")
 
@@ -72,7 +72,7 @@ func (s *modelSuite) TestFilterNarrowsToMatchingNames() {
 }
 
 func (s *modelSuite) TestEscClearsAnActiveFilter() {
-	m := New().SetItems([]backend.Network{net("default", "nat"), net("isolated", "bridge")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat"), net("isolated", "bridge")})
 	m = s.typeFilter(m, "iso")
 
 	m, _ = m.Update(keyMsg("esc"))
@@ -81,10 +81,10 @@ func (s *modelSuite) TestEscClearsAnActiveFilter() {
 }
 
 func (s *modelSuite) TestSetItemsClampsCursorWhenTheListShrinks() {
-	m := New().SetItems([]backend.Network{net("default", "nat"), net("bridge0", "bridge")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat"), net("bridge0", "bridge")})
 	m, _ = m.Update(keyMsg("j"))
 
-	m = m.SetItems([]backend.Network{net("default", "nat")})
+	m = m.SetItems([]backend.NetworkInfo{net("default", "nat")})
 
 	s.Equal(0, m.Cursor())
 	s.Equal("default", m.Selected().Name)
@@ -97,7 +97,7 @@ func (s *modelSuite) TestSelectedOnAnEmptyListReturnsNil() {
 }
 
 func (s *modelSuite) TestDetailViewShowsTheSelectedNetworksIdentity() {
-	m := New().SetItems([]backend.Network{net("default", "nat")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat")})
 
 	view := ansi.Strip(m.DetailView(40, 12))
 
@@ -106,7 +106,7 @@ func (s *modelSuite) TestDetailViewShowsTheSelectedNetworksIdentity() {
 }
 
 func (s *modelSuite) TestDetailViewAtMinimumTerminalHeightKeepsTheNetworkName() {
-	m := New().SetItems([]backend.Network{net("default", "nat")})
+	m := New().SetItems([]backend.NetworkInfo{net("default", "nat")})
 
 	// 60x12 is the documented minimum terminal size; the body height handed to
 	// panels after chrome is smaller still.
@@ -126,7 +126,7 @@ func (s *modelSuite) column(line, sub string) int {
 // A long name must not push MODE out of its column: the list has no mark
 // gutter to absorb overflow into, so the column widths alone must hold.
 func (s *modelSuite) TestRenderRowAlignsWithHeader() {
-	m := New().SetItems([]backend.Network{
+	m := New().SetItems([]backend.NetworkInfo{
 		net("default", "nat"),
 		net("a-very-long-network-name-that-overflows-its-column", "bridge"),
 	})

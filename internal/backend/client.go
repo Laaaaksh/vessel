@@ -23,6 +23,31 @@ const (
 // caller bug that would otherwise surface only as a confusing CLI usage error.
 var errNoDeleteTargets = fmt.Errorf("delete requires at least one target")
 
+// servicesDownHints are fragments the container CLI emits (plugin-gated verbs,
+// e.g. image prune, volume create, volume prune) when the container system
+// services have not been started yet. See docs/APPLE_CONTAINER_MATRIX.md.
+var servicesDownHints = []string{
+	"Plugins are unavailable",
+	"system services are not running",
+	"has been started with `container system start`",
+	"has been started with \"container system start\"",
+}
+
+// IsServicesDown reports whether err is the "run `container system start` first"
+// failure class: system services down, so plugin-backed verbs fail.
+func IsServicesDown(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, h := range servicesDownHints {
+		if strings.Contains(msg, h) {
+			return true
+		}
+	}
+	return false
+}
+
 // Client is the adapter that shells out to the container CLI.
 type Client struct {
 	binary  string
@@ -65,8 +90,36 @@ func (c *Client) recordCmd(args []string) {
 	}
 }
 
+// CLIError is a failed container CLI invocation. It keeps stderr apart from the
+// command line so callers classify a failure by what the CLI reported rather
+// than by the arguments it was handed.
+type CLIError struct {
+	Args   []string
+	Stderr string
+	Err    error
+}
+
+func (e *CLIError) Error() string {
+	return fmt.Sprintf("container %v: %v (stderr: %s)", e.Args, e.Err, e.Stderr)
+}
+
+func (e *CLIError) Unwrap() error { return e.Err }
+
 // run executes a container CLI subcommand and returns its stdout.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := c.runRaw(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// runRaw executes a container CLI subcommand like run, but also returns
+// whatever stdout the process wrote when it exits non-zero, instead of
+// discarding it. Most commands print nothing useful on failure, but "system
+// status" prints a real, parseable body even on a non-zero exit; callers
+// that need that body use this directly.
+func (c *Client) runRaw(ctx context.Context, args ...string) ([]byte, error) {
 	c.recordCmd(args)
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -77,7 +130,7 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("container %v: %w (stderr: %s)", args, err, stderr.String())
+		return stdout.Bytes(), &CLIError{Args: args, Stderr: stderr.String(), Err: err}
 	}
 	return stdout.Bytes(), nil
 }
