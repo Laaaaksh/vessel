@@ -658,8 +658,7 @@ func TestFooterView_noHintForOtherErrors(t *testing.T) {
 }
 
 func TestApplyContainersLoaded_keepsServicesDownHint(t *testing.T) {
-	servicesDown := errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
-		"Start the container system services and retry:\n\n    container system start\n)")
+	servicesDown := servicesDownErr()
 
 	m := newTestModel()
 	m.width, m.height = 100, 30
@@ -677,12 +676,16 @@ func TestApplyContainersLoaded_keepsServicesDownHint(t *testing.T) {
 	}
 }
 
+func servicesDownErr() error {
+	return errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+}
+
 func TestFooterView_freshStatusNotMaskedBySickyServicesDownError(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
-	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
-		"Start the container system services and retry:\n\n    container system start\n)")
-	m.status = "copied container id"
+	m.setLastErr(servicesDownErr())
+	m.setStatus("copied container id")
 	out := ansi.Strip(viewString(m.View()))
 	if !strings.Contains(out, "copied container id") {
 		t.Fatalf("a fresh status must not be masked by a sticky services-down error, footer=%q", out)
@@ -692,18 +695,67 @@ func TestFooterView_freshStatusNotMaskedBySickyServicesDownError(t *testing.T) {
 	}
 	// The error itself must not have been discarded: once status is cleared,
 	// the hint is still there to show.
-	m.status = ""
+	m.setStatus("")
 	out = ansi.Strip(viewString(m.View()))
 	if !strings.Contains(out, "container system start") {
 		t.Fatalf("clearing status must reveal the still-sticky services-down hint, footer=%q", out)
 	}
 }
 
+func TestFooterView_staleStatusDoesNotMaskLaterError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// A layout keypress leaves a status behind that nothing ever clears; the
+	// poll failure that follows it must still reach the footer.
+	m.setStatus("layout wide")
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{err: servicesDownErr()})
+	m = next.(Model)
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("a failure after a status must surface its hint, footer=%q", out)
+	}
+	if strings.Contains(out, "layout wide") {
+		t.Fatalf("the stale status must not hold the footer over a newer error, footer=%q", out)
+	}
+	// And a status set after that error takes the line back.
+	m.setStatus("copied container id")
+	out = ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied container id") {
+		t.Fatalf("a status newer than the error must render, footer=%q", out)
+	}
+}
+
+func TestFooterView_untouchedGenerationsPreferError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// Neither field has been stamped (both generations zero): an error present
+	// alongside a status still wins, as it did before recency was introduced.
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	m.status = "copied container id"
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "boom") {
+		t.Fatalf("an unstamped error must still render, footer=%q", out)
+	}
+	if strings.Contains(out, "copied container id") {
+		t.Fatalf("an unstamped status must not win the tie, footer=%q", out)
+	}
+}
+
+func TestYankSelected_clipboardErrorNotMaskedByEarlierStatus(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setStatus("copied abc")
+	m.setLastErr(errors.New("clipboard unavailable"))
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "clipboard unavailable") {
+		t.Fatalf("a clipboard failure must not stay hidden behind the previous copy status, footer=%q", out)
+	}
+}
+
 func TestActionDoneMsg_successClearsServicesDownHint(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
-	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
-		"Start the container system services and retry:\n\n    container system start\n)")
+	m.setLastErr(servicesDownErr())
 	// A plugin-gated verb (image prune, volume create/prune) actually succeeding
 	// is real evidence the services came back - unlike an unrelated container
 	// list poll, which TestApplyContainersLoaded_keepsServicesDownHint asserts
@@ -829,6 +881,31 @@ func TestCustomCommandWithoutCommandKeepsBuiltin(t *testing.T) {
 	next, _ := m.handleKey(keyMsg("y"))
 	if status := next.(Model).status; strings.HasPrefix(status, "custom:") {
 		t.Fatalf("empty custom command must fall through to the built-in, status=%q", status)
+	}
+}
+
+func TestActionsKeyIsReservedFromCustomCommands(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "steal", Key: "x", Command: "echo nope"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+
+	if cmd := m.customCommandForKey("x"); cmd != "" {
+		t.Fatalf("the action-menu key must not dispatch a custom command, got %q", cmd)
+	}
+	next, _ := m.handleKey(keyMsg("x"))
+	m = next.(Model)
+	if m.mode != modeActions {
+		t.Fatalf("x must still open the action menu, mode=%v", m.mode)
+	}
+	if strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("a custom command bound to x must not have run, status=%q", m.status)
+	}
+	for _, row := range helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands) {
+		if strings.Contains(row.desc, "steal") {
+			t.Fatalf("help must not advertise a custom command that can never fire: %+v", row)
+		}
 	}
 }
 
