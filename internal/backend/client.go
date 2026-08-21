@@ -23,6 +23,31 @@ const (
 // caller bug that would otherwise surface only as a confusing CLI usage error.
 var errNoDeleteTargets = fmt.Errorf("delete requires at least one target")
 
+// servicesDownHints are fragments the container CLI emits (plugin-gated verbs,
+// e.g. image prune, volume create, volume prune) when the container system
+// services have not been started yet. See docs/APPLE_CONTAINER_MATRIX.md.
+var servicesDownHints = []string{
+	"Plugins are unavailable",
+	"system services are not running",
+	"has been started with `container system start`",
+	"has been started with \"container system start\"",
+}
+
+// IsServicesDown reports whether err is the "run `container system start` first"
+// failure class: system services down, so plugin-backed verbs fail.
+func IsServicesDown(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, h := range servicesDownHints {
+		if strings.Contains(msg, h) {
+			return true
+		}
+	}
+	return false
+}
+
 // Client is the adapter that shells out to the container CLI.
 type Client struct {
 	binary  string

@@ -61,8 +61,13 @@ case "$cmd" in
       *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;
+  run)
+    # Echo each remaining argument on its own line (not word-split) so tests
+    # can verify exact argv boundaries even for values containing spaces.
+    printf '%s\n' "$@"
+    ;;
   exec)
-    echo "fake exec $*" >&2
+    printf '%s\n' "$@"
     ;;
   system)
     sub="${1:-}"; shift || true
