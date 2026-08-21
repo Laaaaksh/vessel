@@ -98,6 +98,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Release pipeline
 
+- CI is least-privilege on purpose: `ci.yml` pins `permissions: contents: read`
+  (artifact upload uses the runner's runtime token, not GITHUB_TOKEN, so read
+  suffices) while `release.yml` keeps `contents: write` for goreleaser.
+  `.github/dependabot.yml` opens weekly gomod + github-actions update PRs -
+  expect them and treat them like any other PR (gate: make build/lint/test).
 - `.goreleaser.yml` still uses `brews:`, not the newer `homebrew_casks:`, despite goreleaser's
   deprecation warning. Confirmed via `goreleaser check` (installed v2.17.1) and goreleaser's own
   deprecation notice: `homebrew_casks` installs via Homebrew Cask semantics, not a Formula - it
