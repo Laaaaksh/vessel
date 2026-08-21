@@ -32,10 +32,11 @@ const (
 // bounds. Pinning both numbers here fails loudly if either side drifts
 // without the pairing being re-decided.
 const (
-	wantQuickBudget  = 10 * time.Second
-	wantGlobalBound  = 120 * time.Second
-	wantConfirmBound = 60 * time.Second
-	wantExecBound    = 30 * time.Second
+	wantQuickBudget    = 10 * time.Second
+	wantLifecycleBound = 30 * time.Second
+	wantGlobalBound    = 120 * time.Second
+	wantConfirmBound   = 60 * time.Second
+	wantExecBound      = 30 * time.Second
 )
 
 // slowClient hands back a client wired to the fake CLI where every verb takes
@@ -83,6 +84,9 @@ func TestLongOperationBudgets_matchInternalUIOuterBounds(t *testing.T) {
 	if defaultTimeout != wantQuickBudget {
 		t.Fatalf("quick-command default = %v, want %v", defaultTimeout, wantQuickBudget)
 	}
+	if lifecycleTimeout != wantLifecycleBound {
+		t.Fatalf("lifecycle budget = %v, want %v (internal/ui lifecycleTimeout)", lifecycleTimeout, wantLifecycleBound)
+	}
 	if globalTimeout != wantGlobalBound {
 		t.Fatalf("transfer/sweep budget = %v, want %v (internal/ui globalTimeout)", globalTimeout, wantGlobalBound)
 	}
@@ -122,6 +126,34 @@ func TestRun_defaultCapStillKillsAHungQuickCommand(t *testing.T) {
 	_, err := c.run(ctx, "start", "vessel-probe")
 	assertKilledByBudget(t, err)
 	want := []string{"container start vessel-probe"}
+	if got := recordedCalls(c); len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("command log = %v, want exactly %v", got, want)
+	}
+}
+
+func TestStartContainer_runsUnderLifecycleBudget(t *testing.T) {
+	c := slowClient(t)
+	ctx, cancel := scenarioCtx()
+	defer cancel()
+
+	if err := c.StartContainer(ctx, "vessel-probe"); err != nil {
+		t.Fatalf("a slow state transition must hold the lifecycle budget, not the quick default: %v", err)
+	}
+	want := []string{"container start vessel-probe"}
+	if got := recordedCalls(c); len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("command log = %v, want exactly %v", got, want)
+	}
+}
+
+func TestStopContainer_runsUnderLifecycleBudget(t *testing.T) {
+	c := slowClient(t)
+	ctx, cancel := scenarioCtx()
+	defer cancel()
+
+	if err := c.StopContainer(ctx, "vessel-probe"); err != nil {
+		t.Fatalf("a slow state transition must hold the lifecycle budget, not the quick default: %v", err)
+	}
+	want := []string{"container stop vessel-probe"}
 	if got := recordedCalls(c); len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("command log = %v, want exactly %v", got, want)
 	}
