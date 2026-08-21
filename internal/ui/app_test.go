@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -937,8 +938,9 @@ func TestImagesDetail_noticeNeverGrowsThePaneBeyondItsBudget(t *testing.T) {
 		SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}}).
 		SetNotice(backend.PushAuthNotice)
 	// The geometry mainPanels hands the detail pane on the smallest terminal
-	// View() still renders (60x12), and on 80x24 with the command log open.
-	for _, size := range []struct{ w, h int }{{18, 8}, {14, 16}, {40, 20}} {
+	// View() still renders (60x12) — 18x4 once the command log is open, 18x8
+	// without it — and on 80x24 with the command log open.
+	for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
 		rendered := ansi.Strip(panel.DetailView(size.w, size.h))
 		rows := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 		if len(rows) > size.h {
@@ -1076,6 +1078,55 @@ func TestActionsModal_longLabelCannotOutgrowTheFrame(t *testing.T) {
 		}
 		n, _ := mm.handleKey(keyMsg("j"))
 		mm = n.(Model)
+	}
+}
+
+// modalRows returns a modal's inner rows: ANSI stripped, border column and the
+// modal's two cells of left padding removed, right padding trimmed. That is the
+// shape a reader sees.
+func modalRows(t *testing.T, modal string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(ansi.Strip(modal), "\n") {
+		if !strings.HasPrefix(line, "│") {
+			continue
+		}
+		inner := strings.TrimSuffix(strings.TrimPrefix(line, "│"), "│")
+		out = append(out, strings.TrimRight(strings.TrimPrefix(inner, "  "), " "))
+	}
+	return out
+}
+
+// A menu that already fits must render as it did before windowing existed: every
+// item on its own row in order, the two blank spacers, and the plain hint with
+// no position marker.
+func TestActionsModal_shortMenuRendersWithoutWindowing(t *testing.T) {
+	for _, view := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		m := New()
+		m.width, m.height = 100, 30
+		m.activeView = view
+		m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+		m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
+		next, _ := m.handleKey(keyMsg("x"))
+		mm := next.(Model)
+		if len(mm.actionItems) > mm.height-actionsModalChrome {
+			t.Fatalf("precondition: the %s menu must already fit, got %d items in a %d-row window",
+				m.viewName(), len(mm.actionItems), mm.height-actionsModalChrome)
+		}
+
+		want := []string{"", "actions", ""}
+		for i, item := range mm.actionItems {
+			if i == mm.actionIdx {
+				want = append(want, " > "+item.label)
+				continue
+			}
+			want = append(want, "  "+item.label)
+		}
+		want = append(want, "", "[enter] run  [esc] close", "")
+
+		if got := modalRows(t, mm.actionsModal()); !slices.Equal(got, want) {
+			t.Errorf("%s actions modal shape:\n got %q\nwant %q", m.viewName(), got, want)
+		}
 	}
 }
 
