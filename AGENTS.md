@@ -76,6 +76,19 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   and the constants mirror internal/ui's outer bounds (see the budgets entry
   above). Remaining sharp edge: `image pull` still runs on the quick default,
   so a multi-GB pull can still be killed mid-transfer.
+- Digest-pinned image names are real CLI list output: after
+  `container image pull <repo>@sha256:<digest>`, `container image list --format
+  json` emits a row named exactly `<repo>@sha256:<digest>` (verified live on
+  1.2.2; fixture at `internal/backend/testdata/images-digest.json`, and
+  `image inspect` accepts the pinned ref too). `splitRef`/`FormatRef`
+  (`internal/backend/images.go`) must round-trip that name byte-for-byte —
+  `Image.Digest` is the reference digest, deliberately distinct from
+  `ImageInspect.Digest` (the run-variant manifest digest). Tag/save/push still
+  refuse digest-pinned rows (`ExactRef` + `imageActionRef`) because the CLI's
+  acceptance of pinned sources for those verbs is unverified; the refusal keys
+  off a non-empty `Image.Digest`, NOT off the tag, because `repo:tag@sha256:…`
+  is a real list name that parses to a non-empty tag AND digest. Revisit only
+  with a probe, and note push needs registry credentials to test fully.
 
 ## Release pipeline
 

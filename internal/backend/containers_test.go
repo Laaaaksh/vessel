@@ -148,6 +148,34 @@ func TestMapImages_fromLiveFixture(t *testing.T) {
 	}
 }
 
+// images-digest.json is real `container image list --format json` output
+// captured after `image pull <repo>@sha256:…`: the CLI does emit digest-pinned
+// names, so a list row must carry its pin through to FormatRef unchanged.
+func TestMapImages_digestPinnedFixtureRoundTripsExactName(t *testing.T) {
+	raw := loadFixture[[]cliImage](t, "images-digest.json")
+	var pinned *cliImage
+	for i := range raw {
+		if strings.Contains(raw[i].Configuration.Name, refDigestSep) {
+			pinned = &raw[i]
+			break
+		}
+	}
+	if pinned == nil {
+		t.Fatal("fixture carries no digest-pinned name")
+	}
+	want := pinned.Configuration.Name
+	got := mapImages([]cliImage{*pinned})[0]
+	if got.Digest == "" {
+		t.Fatal("mapped image lost the reference digest")
+	}
+	if got.Tag != "" {
+		t.Errorf("pinned row must keep an empty tag, got %q", got.Tag)
+	}
+	if ref := FormatRef(got); ref != want {
+		t.Fatalf("FormatRef must rebuild the exact CLI name:\n got %q\nwant %q", ref, want)
+	}
+}
+
 func TestImageSize_fallsBackToDescriptorWithoutVariants(t *testing.T) {
 	var r cliImage
 	r.Configuration.Descriptor.Size = 9218
@@ -211,25 +239,68 @@ func TestIsRunning(t *testing.T) {
 	}
 }
 
-func TestSplitRef(t *testing.T) {
-	repo, tag := splitRef("docker.io/library/alpine:latest")
-	if repo != "docker.io/library/alpine" || tag != "latest" {
-		t.Fatalf("got %s %s", repo, tag)
+func TestSplitRef_taggedReference(t *testing.T) {
+	repo, tag, digest := splitRef("docker.io/library/alpine:latest")
+	if repo != "docker.io/library/alpine" || tag != "latest" || digest != "" {
+		t.Fatalf("got %q %q %q", repo, tag, digest)
 	}
-	repo, tag = splitRef("alpine")
-	if repo != "alpine" || tag != "latest" {
-		t.Fatalf("got %s %s", repo, tag)
+}
+
+func TestSplitRef_nameOnlyDefaultsLatestTag(t *testing.T) {
+	repo, tag, digest := splitRef("alpine")
+	if repo != "alpine" || tag != "latest" || digest != "" {
+		t.Fatalf("got %q %q %q", repo, tag, digest)
 	}
-	repo, tag = splitRef("docker.io/library/alpine@sha256:abc123")
-	if repo != "docker.io/library/alpine" || tag != "" {
-		t.Fatalf("digest ref: got %q %q", repo, tag)
+}
+
+func TestSplitRef_registryPortIsNotATag(t *testing.T) {
+	repo, tag, digest := splitRef("registry.local:5000/team/app")
+	if repo != "registry.local:5000/team/app" || tag != "latest" || digest != "" {
+		t.Fatalf("got %q %q %q", repo, tag, digest)
 	}
-	if got := FormatRef(Image{Repository: repo, Tag: tag}); got != "docker.io/library/alpine" {
-		t.Fatalf("digest FormatRef: got %q", got)
+}
+
+func TestSplitRef_digestPinnedKeepsDigestAndEmptyTag(t *testing.T) {
+	repo, tag, digest := splitRef("docker.io/library/alpine@sha256:abc123")
+	if repo != "docker.io/library/alpine" || tag != "" || digest != "sha256:abc123" {
+		t.Fatalf("got %q %q %q", repo, tag, digest)
 	}
-	repo, tag = splitRef("registry.local:5000/team/app")
-	if repo != "registry.local:5000/team/app" || tag != "latest" {
-		t.Fatalf("registry port: got %q %q", repo, tag)
+}
+
+func TestSplitRef_taggedDigestPinnedKeepsBoth(t *testing.T) {
+	repo, tag, digest := splitRef("registry.local:5000/team/app:v1@sha256:abc123")
+	if repo != "registry.local:5000/team/app" || tag != "v1" || digest != "sha256:abc123" {
+		t.Fatalf("got %q %q %q", repo, tag, digest)
+	}
+}
+
+func TestFormatRef_digestPinnedRoundTripsByteForByte(t *testing.T) {
+	const pinned = "docker.io/library/alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
+	repo, tag, digest := splitRef(pinned)
+	img := Image{Repository: repo, Tag: tag, Digest: digest}
+	if got := FormatRef(img); got != pinned {
+		t.Fatalf("digest ref must survive FormatRef exactly:\n got %q\nwant %q", got, pinned)
+	}
+}
+
+func TestFormatRef_taggedDigestRoundTripsByteForByte(t *testing.T) {
+	const pinned = "registry.local:5000/team/app:v1@sha256:abc123"
+	repo, tag, digest := splitRef(pinned)
+	img := Image{Repository: repo, Tag: tag, Digest: digest}
+	if got := FormatRef(img); got != pinned {
+		t.Fatalf("tagged digest ref must survive FormatRef exactly:\n got %q\nwant %q", got, pinned)
+	}
+}
+
+func TestFormatRef_nonDigestReferencesUnchanged(t *testing.T) {
+	if got := FormatRef(Image{Repository: "alpine", Tag: latestRef}); got != "alpine:latest" {
+		t.Fatalf("tag-only ref changed: %q", got)
+	}
+	if got := FormatRef(Image{Repository: "alpine", Tag: untaggedMarker}); got != "alpine" {
+		t.Fatalf("<none>-tagged ref changed: %q", got)
+	}
+	if got := FormatRef(Image{Repository: "alpine"}); got != "alpine" {
+		t.Fatalf("untagged ref changed: %q", got)
 	}
 }
 
