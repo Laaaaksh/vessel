@@ -4,6 +4,7 @@ poll_interval = "2s"
 log_tail_lines = 100
 mouse_enabled = true
 shell = "/bin/sh"
+# Ask before stopping a container (the `s` key and the action menu's Stop entry).
 confirm_stop = false
 
 # Optional theme overrides (hex). Leave empty for defaults.
@@ -14,7 +15,17 @@ confirm_stop = false
 
 # Custom commands appear in the action menu (x).
 # Templates: {{.ID}} {{.Name}} {{.Image}}
+# key is optional: a single character ("z"), a named key ("space", "enter",
+# "f5"), or a modifier combination ("ctrl+z"). Write a shifted character as the
+# character it types ("Z", not "shift+z"); shift only pairs with a named key
+# ("shift+tab"). A configured key replaces the built-in action on that key;
+# reserved keys cannot be taken over: navigation (h/j/k/l, arrows, g/G, pgup,
+# pgdown, ctrl+u, ctrl+d), filtering (/), esc, tab and 1/2/3, layout (+/_),
+# help (?), the action menu (x), the command log (`) and quit (q, ctrl+c).
+# A key that is reserved, or that no keypress can produce, is ignored and the
+# command stays in the action menu. Leave it empty to run from the action menu
+# only.
 # [[custom_commands]]
 # name = "inspect"
-# key = ""
+# key = "z"
 # command = "container inspect {{.ID}}"

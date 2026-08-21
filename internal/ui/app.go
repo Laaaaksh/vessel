@@ -17,6 +17,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -114,14 +115,42 @@ const (
 	modeRunForm
 )
 
-// deleteKind names which panel a staged delete belongs to, so the confirmation
-// carries its targets as plain ids instead of a prefix-encoded string.
+// deleteKind names what a staged confirmation will do, so the confirmation
+// carries its targets as plain ids instead of a prefix-encoded string. Prune and
+// stop reuse the same modeConfirmDelete plumbing as their own kinds.
 type deleteKind int
 
 const (
 	deleteContainers deleteKind = iota
 	deleteImages
 	deleteVolumes
+	pruneContainers
+	pruneImages
+	pruneVolumes
+	stopContainer
+)
+
+// isPrune reports whether kind is a prune, which stages no ids of its own. It
+// derives from pruneSpecs so the two can never disagree about which kinds are
+// prunes: a kind listed here without a spec of its own would sweep whatever
+// store the fallback picked.
+func (k deleteKind) isPrune() bool {
+	_, ok := pruneSpecs[k]
+	return ok
+}
+
+const (
+	// lifecycleTimeout bounds a container lifecycle verb (stop, start, restart),
+	// whether or not it went through the confirm modal.
+	lifecycleTimeout = 30 * time.Second
+	// confirmTimeout bounds a confirmed removal.
+	confirmTimeout = 60 * time.Second
+	// globalTimeout bounds whole-store verbs such as prune, which sweep every
+	// container/image/volume and take far longer than a single removal.
+	globalTimeout = 120 * time.Second
+	// All three are outer bounds only: backend.Client re-wraps every CLI
+	// invocation with its own 10s timeout and the earlier deadline wins, so
+	// today it is that one, not these, that actually fires.
 )
 
 // Model is the root bubbletea model for vessel.
@@ -139,6 +168,7 @@ type Model struct {
 	layout     LayoutMode
 	mode       Mode
 	showHelp   bool
+	helpScroll int
 	showCmdLog bool
 
 	cntPanel containers.Model
@@ -148,6 +178,9 @@ type Model struct {
 
 	lastErr     error
 	status      string
+	footerSeq   uint64
+	statusGen   uint64
+	errGen      uint64
 	pendingKind deleteKind
 	pendingIDs  []string
 	pendingLbl  string
@@ -169,6 +202,22 @@ type Model struct {
 type actionItem struct {
 	label string
 	run   func(Model) (Model, tea.Cmd)
+}
+
+// setStatus and setLastErr are the only writers of status and lastErr. Each
+// stamps its field with the next value of a shared counter, which is what lets
+// footerLine decide by recency in one place instead of every caller having to
+// clear the other field to be seen.
+func (m *Model) setStatus(s string) {
+	m.footerSeq++
+	m.statusGen = m.footerSeq
+	m.status = s
+}
+
+func (m *Model) setLastErr(err error) {
+	m.footerSeq++
+	m.errGen = m.footerSeq
+	m.lastErr = err
 }
 
 // New creates the root model. Backend connection happens in Init.
@@ -212,7 +261,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case initMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 			return m, nil
 		}
 		m.client = msg.client
@@ -238,14 +287,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyContainersLoaded(msg)
 	case imagesLoadedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		} else {
 			m.imgPanel = m.imgPanel.SetItems(msg.items)
 		}
 		return m.scheduleInspect()
 	case volumesLoadedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		} else {
 			m.volPanel = m.volPanel.SetItems(msg.items)
 		}
@@ -282,11 +331,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case actionDoneMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
-			m.status = ""
+			m.setLastErr(msg.err)
+			m.setStatus("")
 		} else {
-			m.lastErr = nil
-			m.status = msg.msg
+			m.setLastErr(nil)
+			m.setStatus(msg.msg)
 		}
 		m.mode = modeBrowse
 		m.pendingIDs = nil
@@ -294,7 +343,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 			return m, nil
 		}
 		m.mode = modeLogs
@@ -327,7 +376,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowse
 		m.tickPaused = false
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		}
 		return m, tea.Batch(tea.ClearScreen, m.refreshCmd(), m.scheduleTickCmd())
 	case promptDoneMsg:
@@ -607,9 +656,16 @@ func (m Model) loadVolumeInspectCmd() tea.Cmd {
 
 func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.lastErr = msg.err
+		m.setLastErr(msg.err)
 	} else {
-		m.lastErr = nil
+		// `container list` is a top-level verb that keeps working while the
+		// plugin-gated prune/create verbs report services-down, so a successful
+		// poll is not evidence the services came back. Keep a services-down hint
+		// visible until the user acts or a different failure replaces it, rather
+		// than wiping it on the next refresh.
+		if !backend.IsServicesDown(m.lastErr) {
+			m.setLastErr(nil)
+		}
 		m.cntPanel = m.cntPanel.SetItems(msg.items)
 	}
 	return m, nil
@@ -642,7 +698,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeBrowse
 			m.pendingIDs = nil
 			m.pendingLbl = ""
-			m.status = "cancelled"
+			m.setStatus("cancelled")
 			return m, nil
 		}
 		return m, nil
@@ -661,9 +717,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if Match(k, m.keys.Yank) {
 			if err := CopyToClipboard(m.logPanel.SelectedLine()); err != nil {
-				m.lastErr = err
+				m.setLastErr(err)
 			} else {
-				m.status = "copied log line"
+				m.setStatus("copied log line")
 			}
 			return m, nil
 		}
@@ -681,6 +737,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case Match(k, m.keys.Help):
 		m.showHelp = !m.showHelp
+		m.helpScroll = 0
 		return m, nil
 	case Match(k, m.keys.Escape):
 		if m.showHelp {
@@ -701,11 +758,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.activeViewLoadCmd()
 	case Match(k, m.keys.LayoutNext):
 		m.layout = (m.layout + 1) % 3
-		m.status = "layout " + m.layout.String()
+		m.setStatus("layout " + m.layout.String())
 		return m, nil
 	case Match(k, m.keys.LayoutPrev):
 		m.layout = (m.layout + 2) % 3
-		m.status = "layout " + m.layout.String()
+		m.setStatus("layout " + m.layout.String())
 		return m, nil
 	case k == "`":
 		m.showCmdLog = !m.showCmdLog
@@ -719,6 +776,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.showHelp {
+		page := helpVisibleRows(m.height)
+		switch {
+		case m.keys.NavDown(k):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll + 1)
+		case m.keys.NavUp(k):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll - 1)
+		case Match(k, m.keys.PageDown, m.keys.HalfDown):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll + page)
+		case Match(k, m.keys.PageUp, m.keys.HalfUp):
+			m.helpScroll = m.clampHelpScroll(m.helpScroll - page)
+		case Match(k, m.keys.GotoTop):
+			m.helpScroll = 0
+		case Match(k, m.keys.GotoBottom):
+			m.helpScroll = m.clampHelpScroll(len(m.helpBindings()))
+		}
 		return m, nil
 	}
 
@@ -737,6 +809,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A custom command configured with this key takes precedence over the
+	// built-in single-key actions below.
+	if cmd := m.customCommandForKey(k); cmd != "" {
+		return m.runCustom(cmd)
+	}
+
 	if Match(k, m.keys.Actions) {
 		return m.openActions()
 	}
@@ -749,9 +827,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case ViewContainers:
 		switch {
 		case Match(k, m.keys.Stop):
-			return m.runOnSelected("stop", func(ctx context.Context, id string) error {
-				return m.client.StopContainer(ctx, id)
-			})
+			return m.beginStop()
 		case Match(k, m.keys.Start):
 			return m.runOnSelected("start", func(ctx context.Context, id string) error {
 				return m.client.StartContainer(ctx, id)
@@ -767,9 +843,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case Match(k, m.keys.Enter) && m.focus != FocusDetail:
 			return m.openShell()
 		case Match(k, m.keys.Prune):
-			return m.runGlobal("prune stopped", func(ctx context.Context) error {
-				return m.client.PruneContainers(ctx)
-			})
+			return m.beginPrune(pruneContainers)
 		case Match(k, m.keys.Create):
 			return m.beginRunForm("")
 		case Match(k, m.keys.Exec):
@@ -782,9 +856,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case Match(k, m.keys.Pull):
 			return m.beginPrompt("pull", "image to pull")
 		case Match(k, m.keys.Prune):
-			return m.runGlobal("prune images", func(ctx context.Context) error {
-				return m.client.PruneImages(ctx)
-			})
+			return m.beginPrune(pruneImages)
 		case Match(k, m.keys.Create):
 			ref := ""
 			if sel := m.imgPanel.Selected(); sel != nil {
@@ -799,9 +871,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case Match(k, m.keys.Create):
 			return m.beginPrompt("volcreate", "volume name")
 		case Match(k, m.keys.Prune):
-			return m.runGlobal("prune volumes", func(ctx context.Context) error {
-				return m.client.PruneVolumes(ctx)
-			})
+			return m.beginPrune(pruneVolumes)
 		}
 	}
 
@@ -941,7 +1011,7 @@ func (m Model) beginDeleteContainer() (tea.Model, tea.Cmd) {
 	}
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	return m.beginDelete(deleteContainers, []string{sel.ID}, sel.Name)
@@ -969,52 +1039,134 @@ func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 	return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
 }
 
+// beginPrune opens the confirm modal before a destructive prune. A prune targets
+// whatever the CLI deems unused, so it stages a kind with no ids.
+func (m Model) beginPrune(kind deleteKind) (tea.Model, tea.Cmd) {
+	m.mode = modeConfirmDelete
+	m.pendingKind = kind
+	m.pendingIDs = nil
+	m.pendingLbl = ""
+	return m, nil
+}
+
+// beginStop stops the selected container, asking for confirmation first when
+// the user opted into Config.ConfirmStop.
+func (m Model) beginStop() (tea.Model, tea.Cmd) {
+	sel := m.cntPanel.Selected()
+	if sel == nil {
+		m.setStatus("nothing selected")
+		return m, nil
+	}
+	id, name := sel.ID, sel.Name
+	if !m.cfg.ConfirmStop {
+		return m.runOnSelected("stop", func(ctx context.Context, containerID string) error {
+			return m.client.StopContainer(ctx, containerID)
+		})
+	}
+	m.mode = modeConfirmDelete
+	m.pendingKind = stopContainer
+	m.pendingIDs = []string{id}
+	m.pendingLbl = name
+	return m, nil
+}
+
+// pruneSpec pairs the question asked about a prune target with the footer label
+// and the call that performs it, so the modal can never ask about one store and
+// sweep another.
+type pruneSpec struct {
+	label    string
+	question string
+	run      func(context.Context, *backend.Client) error
+}
+
+var pruneSpecs = map[deleteKind]pruneSpec{
+	pruneContainers: {"prune containers", "Prune stopped containers?", func(ctx context.Context, c *backend.Client) error {
+		return c.PruneContainers(ctx)
+	}},
+	pruneImages: {"prune images", "Prune unused images?", func(ctx context.Context, c *backend.Client) error {
+		return c.PruneImages(ctx)
+	}},
+	pruneVolumes: {"prune volumes", "Prune unused volumes?", func(ctx context.Context, c *backend.Client) error {
+		return c.PruneVolumes(ctx)
+	}},
+}
+
+func pruneSpecFor(kind deleteKind) (pruneSpec, bool) {
+	spec, ok := pruneSpecs[kind]
+	return spec, ok
+}
+
+// pendingAction describes a confirmed action: the footer label shown while it
+// runs, the message reported on success, and its time budget. A prune sweeps a
+// whole container/image/volume store, so it keeps the longer budget it had
+// before it was routed through the confirm modal; the other paths remove a
+// single resource.
+func pendingAction(kind deleteKind) (label, done string, timeout time.Duration) {
+	if spec, ok := pruneSpecFor(kind); ok {
+		return spec.label, "pruned", globalTimeout
+	}
+	switch kind {
+	case stopContainer:
+		return "stop", "stopped", lifecycleTimeout
+	default:
+		return "delete", "deleted", confirmTimeout
+	}
+}
+
 func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
+	label, done, timeout := pendingAction(kind)
 	m.mode = modeBrowse
 	m.pendingIDs = nil
 	m.pendingLbl = ""
-	if len(ids) == 0 {
+	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
+	m.setStatus(label + "…")
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		var err error
-		switch kind {
-		case deleteImages:
-			err = client.RemoveImage(ctx, ids...)
-		case deleteVolumes:
-			err = client.RemoveVolume(ctx, ids...)
-		case deleteContainers:
-			for _, id := range ids {
-				if e := client.RemoveContainer(ctx, id); e != nil {
-					err = e
-					break
+		if spec, ok := pruneSpecFor(kind); ok {
+			err = spec.run(ctx, client)
+		} else {
+			switch kind {
+			case stopContainer:
+				err = client.StopContainer(ctx, ids[0])
+			case deleteImages:
+				err = client.RemoveImage(ctx, ids...)
+			case deleteVolumes:
+				err = client.RemoveVolume(ctx, ids...)
+			case deleteContainers:
+				for _, id := range ids {
+					if e := client.RemoveContainer(ctx, id); e != nil {
+						err = e
+						break
+					}
 				}
+			default:
+				return actionDoneMsg{err: fmt.Errorf("delete: unhandled target kind %d", kind)}
 			}
-		default:
-			return actionDoneMsg{err: fmt.Errorf("delete: unhandled target kind %d", kind)}
 		}
 		if err != nil {
 			return actionDoneMsg{err: err}
 		}
-		return actionDoneMsg{msg: "deleted"}
+		return actionDoneMsg{msg: done}
 	}
 }
 
 func (m Model) runOnSelected(verb string, fn func(context.Context, string) error) (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	id := sel.ID
 	name := sel.Name
-	m.status = verb + " " + name + "…"
+	m.setStatus(verb + " " + name + "…")
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancel()
 		if err := fn(ctx, id); err != nil {
 			return actionDoneMsg{err: err}
@@ -1024,9 +1176,9 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 }
 
 func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
-	m.status = label + "…"
+	m.setStatus(label + "…")
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
 		if err := fn(ctx); err != nil {
 			return actionDoneMsg{err: err}
@@ -1038,7 +1190,7 @@ func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Mode
 func (m Model) openLogs() (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	id := sel.ID
@@ -1080,11 +1232,11 @@ func (m Model) waitLogLineCmd() tea.Cmd {
 func (m Model) openShell() (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	if !sel.IsRunning() {
-		m.status = "shell disabled: container is not running"
+		m.setStatus("shell disabled: container is not running")
 		return m, nil
 	}
 	m.mode = modeShell
@@ -1122,9 +1274,9 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 		}
 	}
 	if err := CopyToClipboard(text); err != nil {
-		m.lastErr = err
+		m.setLastErr(err)
 	} else {
-		m.status = "copied " + text
+		m.setStatus("copied " + text)
 	}
 	return m, nil
 }
@@ -1141,7 +1293,7 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = modeBrowse
 		m.promptBuf = ""
-		m.status = "cancelled"
+		m.setStatus("cancelled")
 		return m, nil
 	case "enter":
 		kind := m.promptKind
@@ -1172,7 +1324,7 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 
 func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.text == "" {
-		m.status = "empty input"
+		m.setStatus("empty input")
 		return m, nil
 	}
 	switch msg.kind {
@@ -1289,14 +1441,14 @@ func (m Model) submitExec(command string) (tea.Model, tea.Cmd) {
 		if out == "" {
 			out = "exec ok (no output)"
 		}
-		return actionDoneMsg{msg: "exec " + name + ": " + uiutilTruncate(out, execOutputTruncate)}
+		return actionDoneMsg{msg: "exec " + name + ": " + uiutil.Truncate(out, execOutputTruncate)}
 	}
 }
 
 func (m Model) openActions() (tea.Model, tea.Cmd) {
 	items := m.buildActions()
 	if len(items) == 0 {
-		m.status = "no actions"
+		m.setStatus("no actions")
 		return m, nil
 	}
 	m.mode = modeActions
@@ -1317,9 +1469,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Stop", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runOnSelected("stop", func(ctx context.Context, id string) error {
-					return m.client.StopContainer(ctx, id)
-				})
+				x, c := m.beginStop()
 				return x.(Model), c
 			}},
 			actionItem{"Restart", func(m Model) (Model, tea.Cmd) {
@@ -1341,9 +1491,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Prune stopped", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runGlobal("prune stopped", func(ctx context.Context) error {
-					return m.client.PruneContainers(ctx)
-				})
+				x, c := m.beginPrune(pruneContainers)
 				return x.(Model), c
 			}},
 		)
@@ -1362,9 +1510,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runGlobal("prune images", func(ctx context.Context) error {
-					return m.client.PruneImages(ctx)
-				})
+				x, c := m.beginPrune(pruneImages)
 				return x.(Model), c
 			}},
 		)
@@ -1375,9 +1521,7 @@ func (m Model) buildActions() []actionItem {
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
-				x, c := m.runGlobal("prune volumes", func(ctx context.Context) error {
-					return m.client.PruneVolumes(ctx)
-				})
+				x, c := m.beginPrune(pruneVolumes)
 				return x.(Model), c
 			}},
 		)
@@ -1417,6 +1561,15 @@ func (m Model) handleActionsKey(k string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// customCommandForKey returns the command string of the first custom command
+// configured with key k, or "" if none. A configured key is the user's explicit
+// opt-in and shadows the built-in action it collides with, except for the
+// reserved navigation/filter/global keys, which stay usable no matter what the
+// config binds.
+func (m Model) customCommandForKey(k string) string {
+	return customCommandFor(m.cfg.CustomCommands, m.keys, k)
+}
+
 func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 	id, name, image := "", "", ""
 	switch m.activeView {
@@ -1437,7 +1590,7 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.ID}}", id)
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.Name}}", name)
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.Image}}", image)
-	m.status = "custom: " + cmdStr
+	m.setStatus("custom: " + cmdStr)
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -1450,15 +1603,8 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		if msg == "" {
 			msg = "custom ok"
 		}
-		return actionDoneMsg{msg: uiutilTruncate(msg, 80)}
+		return actionDoneMsg{msg: uiutil.Truncate(msg, 80)}
 	}
-}
-
-func uiutilTruncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
 
 func (m Model) headerView() string {
@@ -1482,12 +1628,41 @@ func (m Model) viewName() string {
 	}
 }
 
+// footerView renders the footer. layoutDims reserves exactly one row for it
+// (bodyH = m.height-2-cmdH) and lipgloss word-wraps rather than truncates, so
+// every path is flattened onto one line and cut to the terminal width here.
 func (m Model) footerView() string {
-	if m.lastErr != nil {
-		return m.st.errorText.Width(m.width).Render("error: " + m.lastErr.Error())
+	style, line := m.footerLine()
+	line = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, line)
+	return style.Width(m.width).Render(uiutil.TruncateCells(line, m.width))
+}
+
+func (m Model) footerLine() (lipgloss.Style, string) {
+	// Whichever of status and lastErr was set last takes the footer. A status
+	// set after a sticky services-down hint must be visible (that hint survives
+	// an unrelated success, see applyContainersLoaded, so it would otherwise
+	// mask every later message), but a failure reported after that status must
+	// not stay hidden behind it. Neither field is cleared here: the loser just
+	// gives up the line until it is written again.
+	if m.status != "" && (m.lastErr == nil || m.statusGen > m.errGen) {
+		return m.st.footerHelp, strings.Join(strings.Fields(m.status), " ")
 	}
-	if m.status != "" {
-		return m.st.footerHelp.Width(m.width).Render(m.status)
+	if m.lastErr != nil {
+		const prefix = "error: "
+		hint := ""
+		if backend.IsServicesDown(m.lastErr) {
+			hint = " — run `container system start` to start services"
+		}
+		// The raw CLI error is long and multi-line; collapse and truncate it to
+		// what is left beside the hint so the hint itself is never cut.
+		msg := strings.Join(strings.Fields(m.lastErr.Error()), " ")
+		msg = uiutil.TruncateCells(msg, max(0, m.width-lipgloss.Width(prefix)-lipgloss.Width(hint)))
+		return m.st.errorText, prefix + msg + hint
 	}
 	cur, n := m.cursorInfo()
 	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)
@@ -1503,7 +1678,7 @@ func (m Model) footerView() string {
 	default:
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [c] run  [e] exec  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
-	return m.st.footerHelp.Width(m.width).Render(prefix + keys)
+	return m.st.footerHelp, prefix + keys
 }
 
 func (m Model) cursorInfo() (int, int) {
@@ -1563,29 +1738,73 @@ func (m Model) cmdLogView(height int) string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
+// helpVisibleRows is how many binding rows fit beside helpView's fixed chrome
+// (title, view/focus line, blank, blank, close hint). lipgloss pads a box to its
+// declared height but never truncates, so a help list longer than this would
+// render past the alt screen and lose its last rows.
+func helpVisibleRows(height int) int {
+	return max(1, height-5)
+}
+
+func (m Model) helpBindings() []helpRow {
+	return helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands)
+}
+
+func (m Model) clampHelpScroll(v int) int {
+	overflow := max(0, len(m.helpBindings())-helpVisibleRows(m.height))
+	return max(0, min(v, overflow))
+}
+
 func (m Model) helpView() string {
+	bindings := m.helpBindings()
+	start := m.clampHelpScroll(m.helpScroll)
+	end := min(len(bindings), start+helpVisibleRows(m.height))
+
+	keyW := 0
+	for _, b := range bindings {
+		keyW = max(keyW, lipgloss.Width(b.key))
+	}
+	keyW = min(keyW, max(1, m.width/2))
+	descW := max(1, m.width-keyW-1)
+
 	var rows []string
 	rows = append(rows, m.st.title.Render("vessel — keybindings"))
 	rows = append(rows, m.st.dimText.Render(fmt.Sprintf("view=%s focus=%s", m.viewName(), m.focus.String())))
 	rows = append(rows, "")
-	for _, b := range helpBindings(m.activeView, m.focus, m.mode) {
-		key := m.st.helpText.Width(22).Render(b.key)
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, key, b.desc))
+	for _, b := range bindings[start:end] {
+		key := m.st.helpText.Render(uiutil.PadCells(b.key, keyW))
+		rows = append(rows, key+" "+uiutil.TruncateCells(b.desc, descW))
 	}
 	rows = append(rows, "")
-	rows = append(rows, m.st.dimText.Render("press ? or esc to close"))
+	hint := "press ? or esc to close"
+	if end-start < len(bindings) {
+		hint = fmt.Sprintf("%d-%d of %d — j/k scroll — press ? or esc to close", start+1, end, len(bindings))
+	}
+	rows = append(rows, m.st.dimText.Render(uiutil.TruncateCells(hint, m.width)))
 	return lipgloss.NewStyle().
 		Width(m.width).Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center).
 		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
-func (m Model) confirmModal() string {
+// confirmQuestion returns the concrete question for the pending confirm (delete,
+// prune, stop), rather than a generic "are you sure?".
+func (m Model) confirmQuestion() string {
+	if spec, ok := pruneSpecFor(m.pendingKind); ok {
+		return spec.question
+	}
 	label := m.pendingLbl
 	if label == "" {
 		label = strings.Join(m.pendingIDs, ", ")
 	}
-	body := fmt.Sprintf("Delete %s?\n\n[y] confirm   [n/esc] cancel", label)
+	if m.pendingKind == stopContainer {
+		return fmt.Sprintf("Stop %s?", label)
+	}
+	return fmt.Sprintf("Delete %s?", label)
+}
+
+func (m Model) confirmModal() string {
+	body := fmt.Sprintf("%s\n\n[y] confirm   [n/esc] cancel", m.confirmQuestion())
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorRed).

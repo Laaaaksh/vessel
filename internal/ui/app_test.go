@@ -3,17 +3,20 @@ package ui
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 func TestView_shellModeEmpty(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width = 80
 	m.height = 24
 	m.mode = modeShell
@@ -27,7 +30,7 @@ func TestView_shellModeEmpty(t *testing.T) {
 }
 
 func TestSelection_listContainsRows(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width = 120
 	m.height = 40
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
@@ -42,7 +45,7 @@ func TestSelection_listContainsRows(t *testing.T) {
 }
 
 func TestFocusKeys(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.focus = FocusList
 	next, _ := m.handleKey(keyMsg("l"))
@@ -58,7 +61,7 @@ func TestFocusKeys(t *testing.T) {
 }
 
 func TestConfirmModalMode(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
 	next, _ := m.handleKey(keyMsg("d"))
@@ -78,7 +81,7 @@ func TestConfirmModalMode(t *testing.T) {
 }
 
 func TestImageBulkDeleteConfirm(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -116,7 +119,7 @@ func TestImageBulkDeleteConfirm(t *testing.T) {
 }
 
 func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "a", Repository: "alpine", Tag: "latest"}})
 	next, _ := m.handleKey(spaceKey())
@@ -130,7 +133,7 @@ func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
 }
 
 func TestVolumeBulkDeleteConfirm(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
@@ -499,6 +502,752 @@ func TestSelectionChanged_nilHandling(t *testing.T) {
 	}
 }
 
+func TestConfirmPruneModalMode(t *testing.T) {
+	cases := []struct {
+		name string
+		view View
+		want string
+	}{
+		{"containers", ViewContainers, "Prune stopped containers?"},
+		{"images", ViewImages, "Prune unused images?"},
+		{"volumes", ViewVolumes, "Prune unused volumes?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel()
+			m.width, m.height = 100, 30
+			m.activeView = tc.view
+			m.focus = FocusList
+			next, _ := m.handleKey(keyMsg("P"))
+			m = next.(Model)
+			if m.mode != modeConfirmDelete {
+				t.Fatalf("mode=%v want confirm before prune", m.mode)
+			}
+			got := ansi.Strip(viewString(m.View()))
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("confirm modal must ask %q, got %q", tc.want, got)
+			}
+			next, _ = m.handleKey(keyMsg("n"))
+			m = next.(Model)
+			if m.mode != modeBrowse {
+				t.Fatalf("cancel should return to browse, got %v", m.mode)
+			}
+		})
+	}
+}
+
+func TestConfirmPrune_actionMenuPath(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	next, _ := m.handleKey(keyMsg("x"))
+	m = next.(Model)
+	if m.mode != modeActions {
+		t.Fatalf("mode=%v want actions", m.mode)
+	}
+	// Containers menu: Start, Stop, Restart, Logs, Shell, Exec…, Prune stopped (idx 0..6).
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	for range 5 {
+		next, _ = m.handleKey(keyMsg("j"))
+		m = next.(Model)
+	}
+	next, _ = m.handleKey(keyMsg("enter"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("prune from action menu must confirm, mode=%v", m.mode)
+	}
+	got := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(got, "Prune stopped containers?") {
+		t.Fatalf("confirm modal must ask prune question, got %q", got)
+	}
+}
+
+func TestConfirmStop_configOff(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cfg.ConfirmStop = false
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("s"))
+	m = next.(Model)
+	if m.mode == modeConfirmDelete {
+		t.Fatalf("confirm_stop off must stop immediately, mode=%v", m.mode)
+	}
+	if m.status == "nothing selected" {
+		t.Fatal("stop should have selected the container")
+	}
+}
+
+func TestConfirmStop_configOn(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cfg.ConfirmStop = true
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("s"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("confirm_stop on must open confirm, mode=%v", m.mode)
+	}
+	got := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(got, "Stop web?") {
+		t.Fatalf("confirm modal must ask Stop web?, got %q", got)
+	}
+	next, _ = m.handleKey(keyMsg("n"))
+	if next.(Model).mode != modeBrowse {
+		t.Fatalf("cancel should return to browse, mode=%v", next.(Model).mode)
+	}
+}
+
+func TestCustomCommandKeyDispatch(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "inspect", Key: "z", Command: "container inspect {{.ID}}"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "vessel-probe", Name: "web", Status: "running"}})
+
+	next, cmd := m.handleKey(keyMsg("z"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("custom key must run in browse, mode=%v", m.mode)
+	}
+	if !strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("custom command should have dispatched, status=%q", m.status)
+	}
+	if cmd == nil {
+		t.Fatal("custom key should return a command")
+	}
+}
+
+func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// User binds 'y' (normally yank) to a custom command; the configured key wins.
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "redefine", Key: "y", Command: "echo redefined"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if !strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("configured custom key must shadow builtin, status=%q", m.status)
+	}
+}
+
+func TestFooterView_servicesDownHint(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. Start the container system services and retry:" +
+		"\n\n    container system start\n)")
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("services-down error must surface the hint, footer=%q", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("raw error must be truncated before the hint rather than the hint pushed off, footer=%q", out)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out), "to start services") {
+		t.Fatalf("hint must be the last visible text in the footer, footer=%q", out)
+	}
+}
+
+func TestFooterView_noHintForOtherErrors(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	out := ansi.Strip(viewString(m.View()))
+	if strings.Contains(out, "system start") {
+		t.Fatalf("unrelated error must not get the service hint, footer=%q", out)
+	}
+}
+
+func TestApplyContainersLoaded_keepsServicesDownHint(t *testing.T) {
+	servicesDown := servicesDownErr()
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = servicesDown
+	// A successful `container list` poll is a top-level verb that works while
+	// services are down; it must not wipe the services-down hint.
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr == nil {
+		t.Fatal("a successful top-level list must not clear a services-down hint")
+	}
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("services-down hint must survive the next successful poll, footer=%q", out)
+	}
+}
+
+func servicesDownErr() error {
+	return errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+}
+
+func TestFooterView_freshStatusNotMaskedBySickyServicesDownError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setLastErr(servicesDownErr())
+	m.setStatus("copied container id")
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied container id") {
+		t.Fatalf("a fresh status must not be masked by a sticky services-down error, footer=%q", out)
+	}
+	if strings.Contains(out, "system start") {
+		t.Fatalf("the sticky error must not render while a fresher status is set, footer=%q", out)
+	}
+	// The error itself must not have been discarded: once status is cleared,
+	// the hint is still there to show.
+	m.setStatus("")
+	out = ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("clearing status must reveal the still-sticky services-down hint, footer=%q", out)
+	}
+}
+
+func TestFooterView_staleStatusDoesNotMaskLaterError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// A layout keypress leaves a status behind that nothing ever clears; the
+	// poll failure that follows it must still reach the footer.
+	m.setStatus("layout wide")
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{err: servicesDownErr()})
+	m = next.(Model)
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("a failure after a status must surface its hint, footer=%q", out)
+	}
+	if strings.Contains(out, "layout wide") {
+		t.Fatalf("the stale status must not hold the footer over a newer error, footer=%q", out)
+	}
+	// And a status set after that error takes the line back.
+	m.setStatus("copied container id")
+	out = ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied container id") {
+		t.Fatalf("a status newer than the error must render, footer=%q", out)
+	}
+}
+
+func TestFooterView_untouchedGenerationsPreferError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// Neither field has been stamped (both generations zero): an error present
+	// alongside a status still wins, as it did before recency was introduced.
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	m.status = "copied container id"
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "boom") {
+		t.Fatalf("an unstamped error must still render, footer=%q", out)
+	}
+	if strings.Contains(out, "copied container id") {
+		t.Fatalf("an unstamped status must not win the tie, footer=%q", out)
+	}
+}
+
+func TestYankSelected_clipboardErrorNotMaskedByEarlierStatus(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setStatus("copied abc")
+	m.setLastErr(errors.New("clipboard unavailable"))
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "clipboard unavailable") {
+		t.Fatalf("a clipboard failure must not stay hidden behind the previous copy status, footer=%q", out)
+	}
+}
+
+func TestActionDoneMsg_successClearsServicesDownHint(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setLastErr(servicesDownErr())
+	// A plugin-gated verb (image prune, volume create/prune) actually succeeding
+	// is real evidence the services came back - unlike an unrelated container
+	// list poll, which TestApplyContainersLoaded_keepsServicesDownHint asserts
+	// must NOT clear it.
+	next, _ := m.Update(actionDoneMsg{msg: "pruned images"})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful action must clear a services-down hint, got %v", m.lastErr)
+	}
+}
+
+func TestApplyContainersLoaded_clearsOtherErrors(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful poll must clear a non-services-down error, got %v", m.lastErr)
+	}
+}
+
+func TestHelpBindingsCoverAllKeys(t *testing.T) {
+	tokens := map[string]bool{}
+	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
+			for _, tok := range helpKeyTokens(b.key) {
+				tokens[tok] = true
+			}
+		}
+	}
+	km := DefaultKeyMap()
+	rt := reflect.TypeOf(km)
+	rv := reflect.ValueOf(km)
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		val := rv.Field(i).String()
+		if val == "" {
+			continue
+		}
+		if !tokens[val] {
+			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
+		}
+	}
+}
+
+func TestHelpKeyTokens_separatorIsNotAKey(t *testing.T) {
+	got := helpKeyTokens("g / G")
+	want := []string{"g", "G"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the / between keys is a separator, not a key: got %q want %q", got, want)
+	}
+	if got := helpKeyTokens("/"); !reflect.DeepEqual(got, []string{"/"}) {
+		t.Fatalf("the filter row documents the / key itself, got %q", got)
+	}
+	if got := helpKeyTokens("space"); !reflect.DeepEqual(got, []string{"space"}) {
+		t.Fatalf("the space key is spelled %q by a keypress, got %q", "space", got)
+	}
+}
+
+func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
+	var sb strings.Builder
+	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
+			sb.WriteString(b.key + " ")
+			sb.WriteString(b.desc + "\n")
+		}
+	}
+	all := sb.String()
+	for _, k := range []string{"`", "ctrl+c", "esc", "enter", "1 2 3"} {
+		if !strings.Contains(all, k) {
+			t.Fatalf("reachable key %q missing from help", k)
+		}
+	}
+}
+
+func TestHelpBindings_shadowedRowNeverMislabelsSiblingKeys(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "up", Key: "u", Command: "echo up"}}
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		keys := helpKeyTokens(b.key)
+		for _, k := range keys {
+			if k == "u" && !strings.HasPrefix(b.desc, "custom:") {
+				t.Fatalf("shadowed key u still documented as %q", b.desc)
+			}
+		}
+		if len(keys) == 1 && keys[0] == "r" && !strings.Contains(b.desc, "restart") {
+			t.Fatalf("r documents restart, help says %q", b.desc)
+		}
+	}
+	for _, want := range []helpRow{{"s", "stop"}, {"r", "restart"}} {
+		found := false
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			if b.key == want.key && strings.Contains(b.desc, want.desc) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("key %q must keep its own %q entry when a sibling key is shadowed", want.key, want.desc)
+		}
+	}
+}
+
+func TestCustomCommandWithoutCommandKeepsBuiltin(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "empty", Key: "y", Command: ""}}
+
+	var listed []string
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		listed = append(listed, b.key+"\t"+b.desc)
+	}
+	all := strings.Join(listed, "\n")
+	if strings.Contains(all, "custom: empty") {
+		t.Fatalf("a custom command with no command never fires, so help must omit it:\n%s", all)
+	}
+	if !strings.Contains(all, "yank id/name to clipboard") {
+		t.Fatalf("the built-in y must keep its help entry:\n%s", all)
+	}
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = custom
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web"}})
+	next, _ := m.handleKey(keyMsg("y"))
+	if status := next.(Model).status; strings.HasPrefix(status, "custom:") {
+		t.Fatalf("empty custom command must fall through to the built-in, status=%q", status)
+	}
+}
+
+func TestActionsKeyIsReservedFromCustomCommands(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "steal", Key: "x", Command: "echo nope"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+
+	if cmd := m.customCommandForKey("x"); cmd != "" {
+		t.Fatalf("the action-menu key must not dispatch a custom command, got %q", cmd)
+	}
+	next, _ := m.handleKey(keyMsg("x"))
+	m = next.(Model)
+	if m.mode != modeActions {
+		t.Fatalf("x must still open the action menu, mode=%v", m.mode)
+	}
+	if strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("a custom command bound to x must not have run, status=%q", m.status)
+	}
+	for _, row := range helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands) {
+		if strings.Contains(row.desc, "steal") {
+			t.Fatalf("help must not advertise a custom command that can never fire: %+v", row)
+		}
+	}
+}
+
+func TestCustomCommandKeyDoesNotShadowNavigation(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "nav", Key: "j", Command: "echo nope"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
+		{ID: "a", Name: "one"}, {ID: "b", Name: "two"}, {ID: "c", Name: "three"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	if strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("navigation key must not be shadowed by a custom command, status=%q", m.status)
+	}
+	if m.cntPanel.Cursor() != 1 {
+		t.Fatalf("list must still scroll with j, cursor=%d", m.cntPanel.Cursor())
+	}
+}
+
+func TestHelpBindings_customCommands(t *testing.T) {
+	custom := []config.CustomCommand{
+		{Name: "redefine", Key: "y", Command: "echo redefined"},
+		{Name: "nav", Key: "j", Command: "echo nope"},
+	}
+	var rows []string
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		rows = append(rows, b.key+"\t"+b.desc)
+	}
+	all := strings.Join(rows, "\n")
+	if !strings.Contains(all, "custom: redefine") {
+		t.Fatalf("configured custom key must appear in help, got:\n%s", all)
+	}
+	if strings.Contains(all, "yank id/name to clipboard") {
+		t.Fatalf("shadowed builtin must not keep its old help entry, got:\n%s", all)
+	}
+	if strings.Contains(all, "custom: nav") {
+		t.Fatalf("custom command on a reserved key never fires, so help must omit it, got:\n%s", all)
+	}
+	if !strings.Contains(all, "move up / down (in list)") {
+		t.Fatalf("navigation help entry must survive a custom command bound to j, got:\n%s", all)
+	}
+}
+
+func TestFooterView_servicesDownStaysOneLine(t *testing.T) {
+	for _, w := range []int{60, 100, 183, 200} {
+		m := newTestModel()
+		m.width, m.height = w, 30
+		m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+			"Start the container system services and retry:\n\n    container system start\n)")
+		footer := m.footerView()
+		if got := strings.Count(footer, "\n") + 1; got != 1 {
+			t.Fatalf("width=%d: footer must render on one line, got %d lines: %q", w, got, footer)
+		}
+		if w >= 100 && !strings.Contains(ansi.Strip(footer), "container system start") {
+			t.Fatalf("width=%d: hint must survive truncation, footer=%q", w, footer)
+		}
+	}
+}
+
+func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
+	if _, _, timeout := pendingAction(pruneImages); timeout != globalTimeout {
+		t.Fatalf("prune must keep the global budget, got %v want %v", timeout, globalTimeout)
+	}
+	if _, _, timeout := pendingAction(deleteContainers); timeout != confirmTimeout {
+		t.Fatalf("single-resource delete budget = %v, want %v", timeout, confirmTimeout)
+	}
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.focus = FocusList
+	next, _ := m.handleKey(keyMsg("P"))
+	m = next.(Model)
+	next, cmd := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirming a prune should return a command")
+	}
+	if !strings.Contains(m.status, "prune") {
+		t.Fatalf("running prune must show progress in the footer, status=%q", m.status)
+	}
+}
+
+func TestHelpView_fitsTerminalHeight(t *testing.T) {
+	custom := []config.CustomCommand{
+		{Name: "one", Key: "z", Command: "echo 1"},
+		{Name: "two", Key: "Z", Command: "echo 2"},
+	}
+	for _, size := range []struct{ w, h int }{{80, 24}, {80, 12}, {120, 40}, {200, 60}} {
+		for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+			m := newTestModel()
+			m.width, m.height = size.w, size.h
+			m.activeView = v
+			m.cfg.CustomCommands = custom
+			m.showHelp = true
+			got := lipgloss.Height(viewString(m.View()))
+			if got > size.h {
+				t.Fatalf("%dx%d view=%d: help renders %d lines, alt screen only shows %d",
+					size.w, size.h, v, got, size.h)
+			}
+		}
+	}
+}
+
+func TestHelpView_scrollsToTheLastBinding(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.showHelp = true
+	bindings := m.helpBindings()
+	last := bindings[len(bindings)-1]
+
+	first := ansi.Strip(viewString(m.View()))
+	if strings.Contains(first, last.desc) {
+		t.Skip("help already fits, nothing to scroll")
+	}
+	if !strings.Contains(first, bindings[0].desc) {
+		t.Fatalf("help must start at the first binding, got %q", first)
+	}
+
+	next, _ := m.handleKey(keyMsg("G"))
+	m = next.(Model)
+	bottom := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(bottom, last.desc) {
+		t.Fatalf("every binding must be reachable in help, %q missing after scrolling:\n%s", last.desc, bottom)
+	}
+	if lines := lipgloss.Height(viewString(m.View())); lines > m.height {
+		t.Fatalf("scrolled help renders %d lines for a %d-row screen", lines, m.height)
+	}
+
+	next, _ = m.handleKey(keyMsg("?"))
+	next, _ = next.(Model).handleKey(keyMsg("?"))
+	if got := next.(Model).helpScroll; got != 0 {
+		t.Fatalf("reopening help must start at the top, scroll=%d", got)
+	}
+}
+
+func TestCustomCommandKeySpellings(t *testing.T) {
+	cases := []struct {
+		name      string
+		configKey string
+		press     string
+	}{
+		{"literal space", " ", "space"},
+		{"named space", "space", "space"},
+		{"dash modifier", "ctrl-z", "ctrl+z"},
+		{"uppercase name", "Enter", "enter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			custom := []config.CustomCommand{{Name: "probe", Key: tc.configKey, Command: "echo probe"}}
+			if got := customCommandFor(custom, DefaultKeyMap(), tc.press); got != "echo probe" {
+				t.Fatalf("config key %q must fire on %q, got %q", tc.configKey, tc.press, got)
+			}
+			rows := map[string]int{}
+			for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+				for _, k := range helpKeyTokens(b.key) {
+					rows[k]++
+				}
+			}
+			if rows[tc.press] != 1 {
+				t.Fatalf("key %q must have exactly one help row, got %d", tc.press, rows[tc.press])
+			}
+		})
+	}
+}
+
+func TestCustomCommandUnusableKeyIsNotAdvertised(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "phantom", Key: "not-a-key", Command: "echo nope"}}
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		if strings.Contains(b.desc, "phantom") {
+			t.Fatalf("a key no keypress produces must not appear in help: %q -> %q", b.key, b.desc)
+		}
+	}
+}
+
+func TestStopTimeoutMatchesUnconfirmedStop(t *testing.T) {
+	if _, _, timeout := pendingAction(stopContainer); timeout != lifecycleTimeout {
+		t.Fatalf("confirming a stop must not change its budget: got %v want %v", timeout, lifecycleTimeout)
+	}
+}
+
+// newTestModel is New() with the developer's ~/.config/vessel/config.toml
+// dropped, so assertions never depend on the host's dotfiles.
+func newTestModel() Model {
+	m := New()
+	m.cfg = config.Config{}
+	return m
+}
+
+func TestFooterView_alwaysOneLine(t *testing.T) {
+	servicesDown := errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+	states := []struct {
+		name  string
+		apply func(Model) Model
+	}{
+		{"resting key hints", func(m Model) Model { return m }},
+		{"status", func(m Model) Model {
+			m.status = "custom: " + strings.Repeat("echo hello ", 30)
+			return m
+		}},
+		{"multi-line status", func(m Model) Model {
+			m.status = "custom ok\nsecond line\tthird"
+			return m
+		}},
+		{"services down", func(m Model) Model {
+			m.lastErr = servicesDown
+			return m
+		}},
+		{"plain error", func(m Model) Model {
+			m.lastErr = errors.New("container [list]: exit status 1 (stderr: " + strings.Repeat("boom ", 40) + ")")
+			return m
+		}},
+		{"wide-rune status", func(m Model) Model {
+			m.status = "custom: " + strings.Repeat("世界", 60)
+			return m
+		}},
+		{"wide-rune error", func(m Model) Model {
+			m.lastErr = errors.New("container [volume create " + strings.Repeat("世界", 60) + "]: exit status 1")
+			return m
+		}},
+		{"wide-rune services-down error", func(m Model) Model {
+			m.lastErr = errors.New("container [volume create " + strings.Repeat("世界", 60) +
+				"]: exit status 1 (stderr: Error: Plugins are unavailable.\n\n    container system start\n)")
+			return m
+		}},
+	}
+	for _, st := range states {
+		for _, w := range []int{60, 72, 80, 100, 183, 200} {
+			for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+				m := newTestModel()
+				m.width, m.height = w, 24
+				m.activeView = v
+				m = st.apply(m)
+				footer := m.footerView()
+				if lines := lipgloss.Height(footer); lines != 1 {
+					t.Fatalf("%s at width %d view %d: footer must be one row, got %d: %q",
+						st.name, w, v, lines, footer)
+				}
+			}
+		}
+	}
+}
+
+func TestHelpView_fitsWithWideRuneCustomCommands(t *testing.T) {
+	custom := []config.CustomCommand{{Name: strings.Repeat("世界", 40), Key: "z", Command: "echo wide"}}
+	for _, size := range []struct{ w, h int }{{60, 24}, {80, 24}, {120, 24}} {
+		m := newTestModel()
+		m.width, m.height = size.w, size.h
+		m.cfg.CustomCommands = custom
+		m.showHelp = true
+		// The custom command is the last row, so scroll to it.
+		next, _ := m.handleKey(keyMsg("G"))
+		m = next.(Model)
+		out := ansi.Strip(viewString(m.View()))
+		if !strings.Contains(out, "custom:") {
+			t.Fatalf("%dx%d: the custom command row must be on screen, got:\n%s", size.w, size.h, out)
+		}
+		if got := lipgloss.Height(viewString(m.View())); got > size.h {
+			t.Fatalf("%dx%d: help renders %d lines for a %d-row screen", size.w, size.h, got, size.h)
+		}
+	}
+}
+
+func TestHelpBindings_keyStillLiveInLogViewKeepsARow(t *testing.T) {
+	km := DefaultKeyMap()
+	for _, key := range []string{km.Follow, km.Yank} {
+		custom := []config.CustomCommand{{Name: "taken", Key: key, Command: "echo taken"}}
+		var got []string
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, km, custom) {
+			for _, t := range helpKeyTokens(b.key) {
+				if t == key {
+					got = append(got, b.desc)
+				}
+			}
+		}
+		if len(got) != 2 {
+			t.Fatalf("key %q: want a custom row plus its surviving log-view row, got %q", key, got)
+		}
+		var custRow, logRow bool
+		for _, d := range got {
+			if strings.HasPrefix(d, "custom:") {
+				custRow = true
+			}
+			if strings.Contains(d, "log view") {
+				logRow = true
+			}
+		}
+		if !custRow || !logRow {
+			t.Fatalf("key %q: help must show both the custom command and what it still does in the log view, got %q", key, got)
+		}
+	}
+}
+
+func TestCustomCommandKeyModifierSpellings(t *testing.T) {
+	t.Run("modifier order is canonical", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "shift-ctrl-a", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "ctrl+shift+a"); got != "echo probe" {
+			t.Fatalf("a keypress spells modifiers ctrl+shift+…, so that config key must fire on it, got %q", got)
+		}
+	})
+	t.Run("shifted character is unmatchable", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "phantom", Key: "shift+z", Command: "echo nope"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "Z"); got != "" {
+			t.Fatalf("shift+z is not what a keypress reports; it must not claim to fire, got %q", got)
+		}
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			if strings.Contains(b.desc, "phantom") {
+				t.Fatalf("a binding that can never fire must not appear in help: %q -> %q", b.key, b.desc)
+			}
+		}
+	})
+	t.Run("modified character is lowercased", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "ctrl+Z", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "ctrl+z"); got != "echo probe" {
+			t.Fatalf("a modifier suppresses the typed text, so ctrl+Z must fire on ctrl+z, got %q", got)
+		}
+		rows := 0
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			for _, k := range helpKeyTokens(b.key) {
+				if k == "ctrl+Z" {
+					t.Fatalf("help must advertise the key a keypress reports, not %q", k)
+				}
+				if k == "ctrl+z" {
+					rows++
+				}
+			}
+		}
+		if rows != 1 {
+			t.Fatalf("want one ctrl+z help row, got %d", rows)
+		}
+	})
+	t.Run("shift plus a named key stays usable", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "shift+tab", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "shift+tab"); got != "echo probe" {
+			t.Fatalf("shift+tab is a real keypress spelling, got %q", got)
+		}
+	})
+}
+
 func viewString(v tea.View) string {
 	return v.Content
 }
@@ -530,7 +1279,7 @@ func enterKey() tea.KeyPressMsg {
 // the same image or volume cannot resurface a mark and re-arm a bulk delete
 // nobody asked for.
 func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -563,7 +1312,7 @@ func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 }
 
 func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
@@ -585,7 +1334,7 @@ func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 }
 
 func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	items := []backend.Container{
 		{ID: "1", Name: "web", Status: "running"},
@@ -611,7 +1360,7 @@ func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 // Prune removes the same objects without passing through the confirmation, so
 // the mark drop has to hold there too.
 func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
 	m.volPanel = m.volPanel.SetItems(items)
@@ -634,7 +1383,7 @@ func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
 // A delete that fails leaves its objects in place, so the marks must still be
 // there afterwards and the action must stay retryable without re-marking.
 func TestFailedDeleteKeepsMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -658,7 +1407,7 @@ func TestFailedDeleteKeepsMarks(t *testing.T) {
 // The cursor row wins over a single mark, so this delete never touches "b" -
 // and a mark on an object the delete left alone must survive it.
 func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -687,7 +1436,7 @@ func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
 // A mark hidden behind an active filter is not a delete target: it survives a
 // delete of something else, and disappears only when its own volume does.
 func TestVolumeMarkHiddenByFilterTracksItsOwnVolume(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
@@ -736,7 +1485,7 @@ func markRows(t *testing.T, m Model, n int) Model {
 }
 
 func TestCancelledDeleteKeepsMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -761,7 +1510,7 @@ func TestCancelledDeleteKeepsMarks(t *testing.T) {
 // The mark key is a KeyMap binding, not a literal in each panel: rebinding it
 // has to reach every pane and the bulk delete that acts on the marks.
 func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
-	m := New().withKeys(rebound("m"))
+	m := newTestModel().withKeys(rebound("m"))
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -802,7 +1551,7 @@ func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
 // The default binding is what a real space bar press produces, so marking and
 // bulk-deleting work end to end out of the box.
 func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -822,7 +1571,7 @@ func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
 // The delete command is the one path that destroys user state, so an unhandled
 // kind must fail loudly instead of falling through to a container delete.
 func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
 	m.mode = modeConfirmDelete
 	m.pendingKind = deleteKind(99)
@@ -838,6 +1587,36 @@ func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
 	}
 	if done.err == nil {
 		t.Fatal("an unhandled delete kind must report an error, not delete containers")
+	}
+}
+
+// A prune kind that has no spec of its own would ask about, and then sweep,
+// whichever store the lookup fell back to. Every kind isPrune reports true for
+// must therefore own a distinct question.
+func TestEveryPruneKindAsksAboutItsOwnStore(t *testing.T) {
+	asked := map[string]deleteKind{}
+	prunes := 0
+	for k := deleteKind(0); k < deleteKind(64); k++ {
+		if !k.isPrune() {
+			continue
+		}
+		prunes++
+		m := newTestModel()
+		m.pendingKind = k
+		q := m.confirmQuestion()
+		if q == "" {
+			t.Fatalf("prune kind %d asks nothing before sweeping a store", k)
+		}
+		if prev, dup := asked[q]; dup {
+			t.Fatalf("prune kinds %d and %d both ask %q: one of them has no spec and would sweep the other's store", k, prev, q)
+		}
+		asked[q] = k
+		if label, done, timeout := pendingAction(k); label == "" || done != "pruned" || timeout != globalTimeout {
+			t.Fatalf("prune kind %d reports (%q, %q, %v) instead of its own prune action", k, label, done, timeout)
+		}
+	}
+	if prunes != 3 {
+		t.Fatalf("expected the three prune kinds, found %d", prunes)
 	}
 }
 
