@@ -1294,6 +1294,10 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	client := m.client
 	label, done, timeout := pendingAction(kind)
 	m = m.clearPending()
+	if client == nil {
+		m.setStatus(label + "…")
+		return m, unavailableCmd()
+	}
 	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
@@ -1339,6 +1343,9 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 	id := sel.ID
 	name := sel.Name
 	m.setStatus(verb + " " + name + "…")
+	if m.client == nil {
+		return m, unavailableCmd()
+	}
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancel()
@@ -1361,6 +1368,9 @@ func (m Model) runPush(label, ref string, fn func(context.Context) error) (tea.M
 
 func (m Model) runAction(label, pushRef string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
 	m.setStatus(label + "…")
+	if m.client == nil {
+		return m, unavailableCmd()
+	}
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
@@ -1368,6 +1378,16 @@ func (m Model) runAction(label, pushRef string, fn func(context.Context) error) 
 			return actionDoneMsg{err: err, pushRef: pushRef}
 		}
 		return actionDoneMsg{msg: label + " ok"}
+	}
+}
+
+// unavailableCmd is what a write action returns when Init could not find the
+// container CLI (m.client == nil): an ordinary failed-action message through
+// the one error-rendering path, instead of the action closure dereferencing
+// the nil client inside its goroutine and panicking.
+func unavailableCmd() tea.Cmd {
+	return func() tea.Msg {
+		return actionDoneMsg{err: errors.New("container CLI unavailable")}
 	}
 }
 

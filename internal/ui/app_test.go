@@ -995,6 +995,71 @@ func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
 	}
 }
 
+// When Init cannot find the container CLI the model keeps running with a nil
+// client. Every write action reachable in that state - prunes (no selection
+// needed) and typed prompts like pull/run/volume-create - used to dereference
+// the nil client inside its action goroutine and panic the whole TUI. The
+// actions must instead fail through the ordinary actionDoneMsg error path.
+func TestActionsWithoutClient_failNotPanic(t *testing.T) {
+	run := func(cmd tea.Cmd) actionDoneMsg {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("action without a client must still produce its command")
+		}
+		done, ok := cmd().(actionDoneMsg)
+		if !ok {
+			t.Fatalf("action without a client produced %T, want actionDoneMsg", cmd())
+		}
+		if done.err == nil || !strings.Contains(done.err.Error(), "container CLI unavailable") {
+			t.Fatalf("action without a client must report unavailability, got %+v", done)
+		}
+		return done
+	}
+
+	// Prune: P opens the confirm, y confirms.
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	next, _ := m.handleKey(keyMsg("P"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("P must open the prune confirm, mode=%v", m.mode)
+	}
+	var cmd tea.Cmd
+	next, cmd = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("confirming must close the modal, mode=%v", m.mode)
+	}
+	run(cmd)
+
+	// Pull prompt: type a reference and submit.
+	m = newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	next, _ = m.handleKey(keyMsg("p"))
+	m = next.(Model)
+	for _, r := range "alpine" {
+		next, _ = m.handleKey(keyMsg(string(r)))
+		m = next.(Model)
+	}
+	next, cmd = m.handleKey(enterKey())
+	m = next.(Model)
+	run(cmd)
+
+	// Run form: fill the image field and submit.
+	m = newTestModel()
+	m.width, m.height = 100, 30
+	next, _ = m.handleKey(keyMsg("c"))
+	m = next.(Model)
+	for _, r := range "alpine" {
+		next, _ = m.handleKey(keyMsg(string(r)))
+		m = next.(Model)
+	}
+	next, cmd = m.handleKey(enterKey())
+	m = next.(Model)
+	run(cmd)
+}
+
 func TestHelpView_fitsTerminalHeight(t *testing.T) {
 	custom := []config.CustomCommand{
 		{Name: "one", Key: "z", Command: "echo 1"},
