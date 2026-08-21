@@ -91,6 +91,27 @@ case "$cmd" in
   exec)
     printf '%s\n' "$@"
     ;;
+  system)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      status)
+        if [[ "${FAKE_CONTAINER_SYSTEM_DOWN:-}" == "1" ]]; then
+          cat "$DATA/system-status-down.json"
+          exit 1
+        fi
+        cat "$DATA/system-status.json"
+        ;;
+      df)
+        if [[ "${FAKE_CONTAINER_SYSTEM_DOWN:-}" == "1" ]]; then
+          echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2
+          echo "Ensure container system service has been started with \`container system start\`." >&2
+          exit 1
+        fi
+        cat "$DATA/system-df.json"
+        ;;
+      *) echo "unknown system subcommand: $sub" >&2; exit 1 ;;
+    esac
+    ;;
   *)
     echo "fake-container: unknown command: $cmd $*" >&2
     exit 1
