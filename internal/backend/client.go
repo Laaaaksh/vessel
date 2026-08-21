@@ -90,6 +90,21 @@ func (c *Client) recordCmd(args []string) {
 	}
 }
 
+// CLIError is a failed container CLI invocation. It keeps stderr apart from the
+// command line so callers classify a failure by what the CLI reported rather
+// than by the arguments it was handed.
+type CLIError struct {
+	Args   []string
+	Stderr string
+	Err    error
+}
+
+func (e *CLIError) Error() string {
+	return fmt.Sprintf("container %v: %v (stderr: %s)", e.Args, e.Err, e.Stderr)
+}
+
+func (e *CLIError) Unwrap() error { return e.Err }
+
 // run executes a container CLI subcommand and returns its stdout.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	c.recordCmd(args)
@@ -102,7 +117,7 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("container %v: %w (stderr: %s)", args, err, stderr.String())
+		return nil, &CLIError{Args: args, Stderr: stderr.String(), Err: err}
 	}
 	return stdout.Bytes(), nil
 }
