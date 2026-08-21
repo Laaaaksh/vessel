@@ -99,7 +99,7 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 		{"k / ↑", "move up (in list)"},
 		{"g / G", "top / bottom"},
 		{"pgup / pgdn", "page scroll"},
-		{"tab / 1 2 3", "switch Containers / Images / Volumes"},
+		{"tab / 1 2 3 4", "switch Containers / Images / Volumes / Networks"},
 		{"+ / _", "cycle layout"},
 		{"space", "toggle multi-select mark"},
 		{"y", "yank id/name to clipboard"},
@@ -122,6 +122,8 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 			{"P", "prune unused volumes"},
 			{"d", "delete marked (confirm)"},
 		}, base...)
+	case ViewNetworks:
+		// Read-only: list and inspect only, no view-specific bindings to add.
 	default:
 		base = append([]struct{ key, desc string }{
 			{"enter", "open shell in running container"},

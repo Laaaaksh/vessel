@@ -8,4 +8,8 @@ const (
 	ViewContainers View = iota
 	ViewImages
 	ViewVolumes
+	ViewNetworks
 )
+
+// numViews is the count of View constants above, for cycling arithmetic.
+const numViews = 4
