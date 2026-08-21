@@ -1786,6 +1786,107 @@ func TestImagesAction_Load_missingFile(t *testing.T) {
 	}
 }
 
+// beginLoadFailure drives the images Load… action to its missing-file
+// failure and returns the resulting model, mirroring
+// TestImagesAction_Load_missingFile up to the actionDoneMsg Update.
+func beginLoadFailure(t *testing.T, m Model) Model {
+	t.Helper()
+	run := findAction(m.buildActions(), "Load…")
+	if run == nil {
+		t.Fatal("Load action missing")
+	}
+	next, _ := run(m)
+	res, cmd := next.handlePrompt(promptDoneMsg{kind: "load from", text: "/no/such/archive.tar"})
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected a missing-file error")
+	}
+	out, _ := res.Update(done)
+	return out.(Model)
+}
+
+// TestActionDoneMsg_errorSurvivesFollowingRefresh reproduces the reported
+// bug: images view -> Load… -> a nonexistent path used to show the failure
+// for one frame, then the containers refresh actionDoneMsg triggers wiped
+// it via applyContainersLoaded's unconditional clear-on-success.
+func TestActionDoneMsg_errorSurvivesFollowingRefresh(t *testing.T) {
+	m := beginLoadFailure(t, imagesModelWithItems(t, nil))
+	if m.lastErr == nil || !strings.Contains(m.lastErr.Error(), "no such file") {
+		t.Fatalf("precondition: action failure must set the footer error, got: %v", m.lastErr)
+	}
+
+	// The refreshCmd the failed action itself triggers must not clear it.
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr == nil || !strings.Contains(m.lastErr.Error(), "no such file") {
+		t.Fatalf("action error must survive the refresh that follows it, got: %v", m.lastErr)
+	}
+}
+
+// TestActionDoneMsg_errorSurvivesPeriodicTick extends the above across a
+// second, later refresh - the kind a periodic tick issues once the app is
+// idle - to prove the error is not merely delayed by one cycle.
+func TestActionDoneMsg_errorSurvivesPeriodicTick(t *testing.T) {
+	m := beginLoadFailure(t, imagesModelWithItems(t, nil))
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+
+	next, _ = m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr == nil || !strings.Contains(m.lastErr.Error(), "no such file") {
+		t.Fatalf("action error must survive a further periodic-tick refresh, got: %v", m.lastErr)
+	}
+}
+
+// TestActionDoneMsg_successReplacesDurableError checks the first of the two
+// legitimate ways to supersede a durable action error: a later action
+// actually succeeding.
+func TestActionDoneMsg_successReplacesDurableError(t *testing.T) {
+	m := beginLoadFailure(t, imagesModelWithItems(t, nil))
+	next, _ := m.Update(actionDoneMsg{msg: "load ok"})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful subsequent action must replace a durable error, got: %v", m.lastErr)
+	}
+	if m.status != "load ok" {
+		t.Fatalf("successful action status: got %q", m.status)
+	}
+}
+
+// TestFooterView_newerStatusReplacesDurableError checks the second
+// legitimate supersession: a newer deliberate status message takes the
+// footer even while the durable error is still present in the model (it is
+// not discarded, only outranked - matching the sticky services-down case).
+func TestFooterView_newerStatusReplacesDurableError(t *testing.T) {
+	m := beginLoadFailure(t, imagesModelWithItems(t, nil))
+	m.setStatus("copied alpine:latest")
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied alpine:latest") {
+		t.Fatalf("a fresher status must win the footer over a durable error, got: %q", out)
+	}
+	if m.lastErr == nil {
+		t.Fatal("the durable error must still be held, only outranked, not discarded")
+	}
+}
+
+// TestFooterView_durableErrorAt60x12KeepsIdentityRows covers the smallest
+// supported terminal: the persisted error must render in the footer without
+// pushing the detail pane's identity rows (repository/tag) out of its
+// row budget - the sharp edge AGENTS.md documents for uiutil.Pane.Add.
+func TestFooterView_durableErrorAt60x12KeepsIdentityRows(t *testing.T) {
+	m := beginLoadFailure(t, imagesModelWithItems(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
+	}))
+	m.width, m.height = 60, 12
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "no such file") {
+		t.Fatalf("footer must render the durable error at 60x12, got: %q", out)
+	}
+	if !strings.Contains(out, "alpine") {
+		t.Fatalf("detail pane must keep the selected image's identity row at 60x12, got: %q", out)
+	}
+}
+
 // beginPush selects Push from the images action menu and returns the model
 // sitting in the confirmation it must open before anything is published.
 func beginPush(t *testing.T, m Model) Model {
