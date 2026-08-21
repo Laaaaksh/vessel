@@ -2019,6 +2019,35 @@ func TestImagesActions_refuseUntaggedImage(t *testing.T) {
 	}
 }
 
+func TestImagesActions_refuseDigestPinnedImage(t *testing.T) {
+	// The reference is exact once the digest survives formatting, but tag,
+	// save and push stay refused until the CLI's acceptance of digest-pinned
+	// sources for those verbs is verified — the conservative side of that.
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Digest: "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"}})
+	if ref := backend.FormatRef(*m.imgPanel.Selected()); !strings.Contains(ref, "@") {
+		t.Fatalf("precondition: pinned row must format with its digest, got %q", ref)
+	}
+	for _, label := range []string{"Tag…", "Save…", "Push"} {
+		run := findAction(m.buildActions(), label)
+		if run == nil {
+			t.Fatalf("missing action %q", label)
+		}
+		next, cmd := run(m)
+		if cmd != nil {
+			t.Fatalf("%s must not act on a digest-pinned image", label)
+		}
+		if next.mode != modeBrowse {
+			t.Fatalf("%s on a digest-pinned image opened mode %v", label, next.mode)
+		}
+		if !strings.Contains(next.status, "no named reference") {
+			t.Fatalf("%s status must explain why the row is unaddressable, got %q", label, next.status)
+		}
+		if got := lastCLICommand(next); got != "" {
+			t.Fatalf("%s on a digest-pinned image shelled out: %q", label, got)
+		}
+	}
+}
+
 func TestImagesAction_Save_confirmsOverwrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "existing.tar")
 	if err := os.WriteFile(path, []byte("precious"), 0o600); err != nil {
