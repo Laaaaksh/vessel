@@ -57,6 +57,10 @@ case "$cmd" in
             echo "Error: HTTP request to https://registry-1.docker.io/v2/library/foo/blobs/sha256:abc failed with response: 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io" >&2
             exit 1
             ;;
+          forbidden)
+            echo "Error: HTTP request to https://registry-1.docker.io/v2/myorg/app/blobs/uploads/ failed with response: 403 Forbidden. Reason: requested access to the resource is denied" >&2
+            exit 1
+            ;;
           generic)
             # The real CLI echoes the reference back into stderr; keep that so
             # tests exercise a reference whose own words look like an auth error.
