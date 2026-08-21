@@ -162,6 +162,9 @@ type Model struct {
 
 	lastErr     error
 	status      string
+	footerSeq   uint64
+	statusGen   uint64
+	errGen      uint64
 	pendingKind deleteKind
 	pendingIDs  []string
 	pendingLbl  string
@@ -182,6 +185,22 @@ type Model struct {
 type actionItem struct {
 	label string
 	run   func(Model) (Model, tea.Cmd)
+}
+
+// setStatus and setLastErr are the only writers of status and lastErr. Each
+// stamps its field with the next value of a shared counter, which is what lets
+// footerLine decide by recency in one place instead of every caller having to
+// clear the other field to be seen.
+func (m *Model) setStatus(s string) {
+	m.footerSeq++
+	m.statusGen = m.footerSeq
+	m.status = s
+}
+
+func (m *Model) setLastErr(err error) {
+	m.footerSeq++
+	m.errGen = m.footerSeq
+	m.lastErr = err
 }
 
 // New creates the root model. Backend connection happens in Init.
@@ -225,7 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case initMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 			return m, nil
 		}
 		m.client = msg.client
@@ -251,14 +270,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyContainersLoaded(msg)
 	case imagesLoadedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		} else {
 			m.imgPanel = m.imgPanel.SetItems(msg.items)
 		}
 		return m.scheduleInspect()
 	case volumesLoadedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		} else {
 			m.volPanel = m.volPanel.SetItems(msg.items)
 		}
@@ -295,11 +314,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case actionDoneMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
-			m.status = ""
+			m.setLastErr(msg.err)
+			m.setStatus("")
 		} else {
-			m.lastErr = nil
-			m.status = msg.msg
+			m.setLastErr(nil)
+			m.setStatus(msg.msg)
 		}
 		m.mode = modeBrowse
 		m.pendingIDs = nil
@@ -307,7 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 			return m, nil
 		}
 		m.mode = modeLogs
@@ -340,7 +359,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowse
 		m.tickPaused = false
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		}
 		return m, tea.Batch(tea.ClearScreen, m.refreshCmd(), m.scheduleTickCmd())
 	case promptDoneMsg:
@@ -617,7 +636,7 @@ func (m Model) loadVolumeInspectCmd() tea.Cmd {
 
 func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.lastErr = msg.err
+		m.setLastErr(msg.err)
 	} else {
 		// `container list` is a top-level verb that keeps working while the
 		// plugin-gated prune/create verbs report services-down, so a successful
@@ -625,7 +644,7 @@ func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cm
 		// visible until the user acts or a different failure replaces it, rather
 		// than wiping it on the next refresh.
 		if !backend.IsServicesDown(m.lastErr) {
-			m.lastErr = nil
+			m.setLastErr(nil)
 		}
 		m.cntPanel = m.cntPanel.SetItems(msg.items)
 	}
@@ -656,7 +675,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeBrowse
 			m.pendingIDs = nil
 			m.pendingLbl = ""
-			m.status = "cancelled"
+			m.setStatus("cancelled")
 			return m, nil
 		}
 		return m, nil
@@ -675,9 +694,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if Match(k, m.keys.Yank) {
 			if err := CopyToClipboard(m.logPanel.SelectedLine()); err != nil {
-				m.lastErr = err
+				m.setLastErr(err)
 			} else {
-				m.status = "copied log line"
+				m.setStatus("copied log line")
 			}
 			return m, nil
 		}
@@ -716,11 +735,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.activeViewLoadCmd()
 	case Match(k, m.keys.LayoutNext):
 		m.layout = (m.layout + 1) % 3
-		m.status = "layout " + m.layout.String()
+		m.setStatus("layout " + m.layout.String())
 		return m, nil
 	case Match(k, m.keys.LayoutPrev):
 		m.layout = (m.layout + 2) % 3
-		m.status = "layout " + m.layout.String()
+		m.setStatus("layout " + m.layout.String())
 		return m, nil
 	case k == "`":
 		m.showCmdLog = !m.showCmdLog
@@ -970,7 +989,7 @@ func (m Model) beginDeleteContainer() (tea.Model, tea.Cmd) {
 	}
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	return m.beginDelete(deleteContainers, []string{sel.ID}, sel.Name)
@@ -1013,7 +1032,7 @@ func (m Model) beginPrune(kind deleteKind) (tea.Model, tea.Cmd) {
 func (m Model) beginStop() (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	id, name := sel.ID, sel.Name
@@ -1084,7 +1103,7 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
-	m.status = label + "…"
+	m.setStatus(label + "…")
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -1118,12 +1137,12 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 func (m Model) runOnSelected(verb string, fn func(context.Context, string) error) (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	id := sel.ID
 	name := sel.Name
-	m.status = verb + " " + name + "…"
+	m.setStatus(verb + " " + name + "…")
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancel()
@@ -1135,7 +1154,7 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 }
 
 func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
-	m.status = label + "…"
+	m.setStatus(label + "…")
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
@@ -1149,7 +1168,7 @@ func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Mode
 func (m Model) openLogs() (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	id := sel.ID
@@ -1191,11 +1210,11 @@ func (m Model) waitLogLineCmd() tea.Cmd {
 func (m Model) openShell() (tea.Model, tea.Cmd) {
 	sel := m.cntPanel.Selected()
 	if sel == nil {
-		m.status = "nothing selected"
+		m.setStatus("nothing selected")
 		return m, nil
 	}
 	if !sel.IsRunning() {
-		m.status = "shell disabled: container is not running"
+		m.setStatus("shell disabled: container is not running")
 		return m, nil
 	}
 	m.mode = modeShell
@@ -1233,9 +1252,9 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 		}
 	}
 	if err := CopyToClipboard(text); err != nil {
-		m.lastErr = err
+		m.setLastErr(err)
 	} else {
-		m.status = "copied " + text
+		m.setStatus("copied " + text)
 	}
 	return m, nil
 }
@@ -1252,7 +1271,7 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = modeBrowse
 		m.promptBuf = ""
-		m.status = "cancelled"
+		m.setStatus("cancelled")
 		return m, nil
 	case "enter":
 		kind := m.promptKind
@@ -1275,7 +1294,7 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 
 func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.text == "" {
-		m.status = "empty input"
+		m.setStatus("empty input")
 		return m, nil
 	}
 	switch msg.kind {
@@ -1303,7 +1322,7 @@ func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 func (m Model) openActions() (tea.Model, tea.Cmd) {
 	items := m.buildActions()
 	if len(items) == 0 {
-		m.status = "no actions"
+		m.setStatus("no actions")
 		return m, nil
 	}
 	m.mode = modeActions
@@ -1444,7 +1463,7 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.ID}}", id)
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.Name}}", name)
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.Image}}", image)
-	m.status = "custom: " + cmdStr
+	m.setStatus("custom: " + cmdStr)
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -1497,13 +1516,13 @@ func (m Model) footerView() string {
 }
 
 func (m Model) footerLine() (lipgloss.Style, string) {
-	// A fresh status (e.g. "copied ...", "layout ...") always takes the footer,
-	// even while lastErr is a sticky services-down hint: that hint deliberately
-	// survives an unrelated success (see applyContainersLoaded), so without this
-	// check it would permanently mask every later status message. lastErr itself
-	// is untouched here - it renders again as soon as status is cleared or
-	// overwritten.
-	if m.status != "" {
+	// Whichever of status and lastErr was set last takes the footer. A status
+	// set after a sticky services-down hint must be visible (that hint survives
+	// an unrelated success, see applyContainersLoaded, so it would otherwise
+	// mask every later message), but a failure reported after that status must
+	// not stay hidden behind it. Neither field is cleared here: the loser just
+	// gives up the line until it is written again.
+	if m.status != "" && (m.lastErr == nil || m.statusGen > m.errGen) {
 		return m.st.footerHelp, strings.Join(strings.Fields(m.status), " ")
 	}
 	if m.lastErr != nil {
