@@ -26,6 +26,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Destroy nothing shared: a probe machine's containers, images and volumes may belong to someone else. Exercise prune and other destructive verbs through the confirm modal's cancel path, or against throwaway resources cleaned up immediately.
 - To reproduce the "services down" string-matched hint while services are up, shadow PATH with a wrapper returning the CLI's documented error for one verb and delegating the rest, then run the real binary in a PTY.
 
+## Detail-pane row budgets
+
+- `uiutil.Pane.Add` charges each row against a fixed rendered-row budget and drops everything from the first row that doesn't fit onward (`internal/ui/uiutil/layout.go`); `uiutil.KV` gives a value no width bound, so a value long enough to wrap (a version string, a long path) can consume the whole remaining budget and silently drop every row after it, not just wrap ugly. Any value whose length isn't already bounded by the data (contrast a short "local"/"ext4" driver/format) must go through `KVFit`, not `KV`. Reproduce with the real pane width, not the terminal width: `internal/ui/app.go`'s `layoutDims` shrinks a 60-wide terminal's detail pane down to ~18 columns, and a value string short enough to fit a 60-wide test render can still overflow that.
+- `container system status --format json` exits 1 while still printing a valid, parseable JSON body (`status: "unregistered"`) when the services have never been started - `backend.Client.runRaw` exists so that body isn't discarded the way `run`/`runJSON` discard stdout on any non-zero exit. `container system df --format json` has no such fallback: it prints a plain-text error on the same down state, so a services-down `DiskUsage` call is a real error for the caller to handle, even though the sibling `SystemStatus` call for the same state is not. See `internal/backend/system.go`.
+
 ## Container CLI sharp edges
 
 - Vessel deliberately does NOT own registry login. A refused `image push` splits
