@@ -85,11 +85,13 @@ func (c *Client) ImageInspect(ctx context.Context, ref string) (*ImageInspect, e
 }
 
 // RemoveImage removes one or more images by ID or name in a single call.
+// The batched invocation shares one budget across every target, so it gets
+// the confirmed-removal window rather than the quick default.
 func (c *Client) RemoveImage(ctx context.Context, ids ...string) error {
 	if len(ids) == 0 {
 		return errNoDeleteTargets
 	}
-	_, err := c.run(ctx, append([]string{"image", "delete"}, ids...)...)
+	_, err := c.runWithTimeout(ctx, confirmTimeout, append([]string{"image", "delete"}, ids...)...)
 	return err
 }
 
@@ -99,31 +101,36 @@ func (c *Client) PullImage(ctx context.Context, ref string) error {
 	return err
 }
 
-// PruneImages removes unused images.
+// PruneImages removes unused images. A prune sweeps the whole store, so it
+// runs under the long sweep budget rather than the quick default.
 func (c *Client) PruneImages(ctx context.Context) error {
-	_, err := c.run(ctx, "image", "prune")
+	_, err := c.runWithTimeout(ctx, globalTimeout, "image", "prune")
 	return err
 }
 
-// TagImage creates a new reference for an existing image.
+// TagImage creates a new reference for an existing image. Tagging itself is
+// quick, but it travels with the transfer verbs whose budget it shares.
 func (c *Client) TagImage(ctx context.Context, ref, newRef string) error {
-	_, err := c.run(ctx, "image", "tag", ref, newRef)
+	_, err := c.runWithTimeout(ctx, globalTimeout, "image", "tag", ref, newRef)
 	return err
 }
 
-// SaveImage writes one image to an OCI-compatible tar archive at path.
+// SaveImage writes one image to an OCI-compatible tar archive at path. A
+// large image streams at a fixed rate, so the transfer runs under the long
+// transfer budget; the quick default would kill it mid-write.
 func (c *Client) SaveImage(ctx context.Context, ref, path string) error {
 	path, err := ExpandPath(path)
 	if err != nil {
 		return fmt.Errorf("save image: %w", err)
 	}
-	_, err = c.run(ctx, "image", "save", "--output", path, ref)
+	_, err = c.runWithTimeout(ctx, globalTimeout, "image", "save", "--output", path, ref)
 	return err
 }
 
 // LoadImage imports images from an OCI-compatible tar archive at path.
 // The path is checked up front so a missing file reports plainly instead of
-// surfacing as a raw CLI error.
+// surfacing as a raw CLI error. Like SaveImage it streams a potentially
+// large archive, so it shares the long transfer budget.
 func (c *Client) LoadImage(ctx context.Context, path string) error {
 	path, err := ExpandPath(path)
 	if err != nil {
@@ -132,7 +139,7 @@ func (c *Client) LoadImage(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("load image: %w", err)
 	}
-	_, err = c.run(ctx, "image", "load", "--input", path)
+	_, err = c.runWithTimeout(ctx, globalTimeout, "image", "load", "--input", path)
 	return err
 }
 
@@ -164,9 +171,10 @@ func FileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// PushImage pushes an image to its registry.
+// PushImage pushes an image to its registry. Uploading a large image is the
+// slowest verb here, so it shares the long transfer budget.
 func (c *Client) PushImage(ctx context.Context, ref string) error {
-	_, err := c.run(ctx, "image", "push", ref)
+	_, err := c.runWithTimeout(ctx, globalTimeout, "image", "push", ref)
 	switch pushDenialOf(err) {
 	case denialCredentials:
 		return fmt.Errorf("%w%s", err, pushAuthHint)

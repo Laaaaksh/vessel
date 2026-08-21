@@ -12,7 +12,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Image marks key on digest+reference, not the digest alone (`markKey` in `internal/ui/images/model.go`): two tags of one digest are two rows, and `MarkedIDs()` still emits each digest once because the delete takes digests.
 - Panel rows carry a 1-char mark cell absorbed into the first column (`mark + Pad(value, col-1)`), so rows stay aligned with an unchanged header. Column widths are named constants per panel; `TestRenderRowAlignsWithHeader` guards the invariant in each package.
 - `backend.Client.RemoveImage`/`RemoveVolume` take variadic ids/names and refuse an empty call (`errNoDeleteTargets` in `internal/backend/client.go`). A bare `container image delete` destroys nothing - the CLI needs `--all` for that - so the guard is there to catch a caller bug that would otherwise surface as a confusing CLI usage error.
-- Every CLI invocation is re-wrapped with `Client.timeout` (10s, `internal/backend/client.go`), so the context a caller passes never widens it. A bulk image or volume delete batches every id into one invocation and shares that single 10s budget, so a large one can be killed partway and reported as a failure with nothing actually wrong; bulk container deletes issue one call per id and so get 10s each.
+- CLI invocation budgets live at the shared run boundary (`internal/backend/client.go`): quick commands get `defaultTimeout` (10s), while the known-long set passes an explicit override via `runWithTimeout` — image tag/save/load/push and all three prunes share `globalTimeout` (120s), batched `RemoveImage`/`RemoveVolume` calls get `confirmTimeout` (60s) for the whole call. Those two constants mirror identically sized outer bounds in `internal/ui/app.go`; the pairing is pinned by `TestLongOperationBudgets_matchInternalUIOuterBounds`, so change both sides together or expect a red test. Bulk container deletes still issue one call per id on the quick default (a single delete is quick). `image pull` is deliberately not in the long set yet - a huge pull can still hit the short default cap.
 - The sidebar `View` enum (`internal/ui/types.go`) has a matching `viewCount` constant; Tab/j/k cycling in `internal/ui/app.go` uses `% viewCount`, not a hardcoded modulo — adding a view means bumping that constant, not counting cases by hand. Numeric shortcuts `1`-`5` and Tab/sidebar-nav order both follow enum order: Containers, Images, Volumes, System, Networks.
 - `internal/ui/networks/` is deliberately list-and-inspect only (no create/delete/prune) — the network view was scoped that way on purpose, to confirm the live `container network` JSON shape before any destructive action is built on it. It has no mark/multi-select support for the same reason (nothing to bulk-delete). Its tests, and `internal/backend/networks_test.go`, use `testify/suite` with camelCase scenario methods and named (non-table-driven) tests; every other package in this repo still uses plain `testing.T` — that split is intentional per the task that introduced networks, not drift to reconcile in either direction without asking.
 - A modal built from `Border` + `Padding` must size its inner content from that style's own `lipgloss.Style.GetFrameSize()`, not a guessed constant: guessing (e.g. `width-4`) is exactly what silently overflowed the run form past a 60x12 terminal during development. See `runFormModal` in `internal/ui/runform.go` for the pattern.
@@ -70,13 +70,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
 - `image tag <source> <target>` and `image save --output <path> <ref>` argument
   order is asserted in tests via `Client.CommandLog`; don't swap the order.
-- `Client.run` caps EVERY invocation at `defaultTimeout` (10s, see
-  `internal/backend/client.go`), which silently overrides the longer budget the
-  UI passes in. So `image save`/`load`/`push`/`pull` of a large image is killed
-  mid-transfer and reports a context deadline, not a real failure. This ships
-  known-broken for large images. The shared-timeout fix is a known limitation,
-  not yet filed, and is deliberately out of the image-mobility scope. The images
-  help view states the same caveat to the user.
+- The old "every invocation capped at 10s" bug is fixed: `runWithTimeout`
+  (`internal/backend/client.go`) lets the known-long verbs pass a real budget,
+  and the constants mirror internal/ui's outer bounds (see the budgets entry
+  above). Remaining sharp edge: `image pull` still runs on the quick default,
+  so a multi-GB pull can still be killed mid-transfer.
 
 ## Release pipeline
 

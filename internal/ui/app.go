@@ -171,9 +171,11 @@ const (
 	// globalTimeout bounds whole-store verbs such as prune, which sweep every
 	// container/image/volume and take far longer than a single removal.
 	globalTimeout = 120 * time.Second
-	// All three are outer bounds only: backend.Client re-wraps every CLI
-	// invocation with its own 10s timeout and the earlier deadline wins, so
-	// today it is that one, not these, that actually fires.
+	// All three are outer bounds: backend.Client now applies a per-call
+	// budget of its own to the known-long verbs — the transfer/sweep window
+	// matches globalTimeout and the batched-delete window matches
+	// confirmTimeout (pinned by TestLongOperationBudgets) — while quick
+	// commands keep a short default of their own.
 )
 
 // Model is the root bubbletea model for vessel.

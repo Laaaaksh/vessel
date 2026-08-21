@@ -98,8 +98,8 @@ func TestLive_ImageSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The 10s per-invocation cap makes a big image unusable here, so pick the
-	// smallest named reference present; alpine-sized images save well inside it.
+	// Pick the smallest named reference so the round-trip stays quick; the
+	// transfer budget is generous but this probe need not spend it.
 	var ref string
 	var size int64
 	for _, img := range imgs {
