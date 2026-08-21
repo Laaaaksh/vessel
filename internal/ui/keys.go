@@ -29,6 +29,7 @@ type KeyMap struct {
 	Pull       string
 	Prune      string
 	Create     string
+	Exec       string
 	Follow     string
 	LayoutNext string
 	LayoutPrev string
@@ -66,6 +67,7 @@ func DefaultKeyMap() KeyMap {
 		Pull:       "p",
 		Prune:      "P",
 		Create:     "c",
+		Exec:       "e",
 		Follow:     "f",
 		LayoutNext: "+",
 		LayoutPrev: "_",
@@ -114,7 +116,7 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 			{"p", "pull image (prompt)"},
 			{"P", "prune unused images"},
 			{"d", "delete marked (confirm)"},
-			{"c", "run container from image"},
+			{"c", "run container from image (form)"},
 		}, base...)
 	case ViewVolumes:
 		base = append([]struct{ key, desc string }{
@@ -129,7 +131,8 @@ func helpBindings(view View, focus Focus, mode Mode) []struct{ key, desc string 
 			{"s / u / r", "stop / start / restart"},
 			{"d", "delete marked (confirm)"},
 			{"P", "prune stopped containers"},
-			{"c", "run new container (prompt image)"},
+			{"c", "run new container (form)"},
+			{"e", "one-shot exec in running container"},
 		}, base...)
 	}
 	_ = focus
