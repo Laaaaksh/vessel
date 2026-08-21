@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -359,4 +360,64 @@ func TestClient_LoadImage_expandsHomePath(t *testing.T) {
 	if got := lastCmdOrEmpty(c); got != want {
 		t.Fatalf("load must expand ~: got %q want %q", got, want)
 	}
+}
+
+func TestClient_PushImage_forbiddenIsNotACredentialsFailure(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "forbidden")
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := c.PushImage(ctx, "myorg/app:v1")
+	if err == nil {
+		t.Fatal("expected the forbidden push to fail")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "rejected these credentials") {
+		t.Errorf("a 403 does not establish that the credentials were rejected, got: %v", err)
+	}
+	if !strings.Contains(msg, "no write access") {
+		t.Errorf("a 403 should be explained as a permission problem, got: %v", err)
+	}
+	if !strings.Contains(msg, "will not help") {
+		t.Errorf("a 403 should say that logging in again does not help, got: %v", err)
+	}
+	if got := strings.Count(msg, "\n"); got != strings.Count(pushErrText(t, "generic"), "\n") {
+		t.Errorf("the permission hint must stay on one footer row, got %d line breaks", got)
+	}
+}
+
+func TestPushDenialNotice_distinguishesTheTwoRefusals(t *testing.T) {
+	credentials := &CLIError{
+		Stderr: "Error: ... 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io\n",
+		Err:    errors.New("exit status 1"),
+	}
+	permission := &CLIError{
+		Stderr: "Error: ... 403 Forbidden. Reason: requested access to the resource is denied\n",
+		Err:    errors.New("exit status 1"),
+	}
+	if got := PushDenialNotice(credentials); got != PushAuthNotice {
+		t.Errorf("401 notice = %q, want %q", got, PushAuthNotice)
+	}
+	if got := PushDenialNotice(permission); got != PushPermissionNotice {
+		t.Errorf("403 notice = %q, want %q", got, PushPermissionNotice)
+	}
+	if got := PushDenialNotice(&CLIError{Stderr: "Error: unexpected network failure\n", Err: errors.New("exit status 1")}); got != "" {
+		t.Errorf("a non-refusal should offer no notice, got %q", got)
+	}
+	if got := PushDenialNotice(errors.New("plain")); got != "" {
+		t.Errorf("a non-CLI error should offer no notice, got %q", got)
+	}
+}
+
+func pushErrText(t *testing.T, mode string) string {
+	t.Helper()
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", mode)
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := c.PushImage(ctx, "myorg/app:v1")
+	if err == nil {
+		t.Fatalf("expected the %s push to fail", mode)
+	}
+	return err.Error()
 }
