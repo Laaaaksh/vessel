@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a problem with vessel
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        Tip: running `vessel doctor` prints diagnostics about your environment
+        (container CLI, system status, config) that often speed up triage.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: |
+        Steps to reproduce the problem, and what you expected vs what actually happened.
+      placeholder: |
+        1. Open vessel
+        2. Press '...'
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: vessel-version
+    attributes:
+      label: vessel version
+      description: Output of `vessel --version`.
+      placeholder: "vessel version 0.2.1 (commit …, built …)"
+    validations:
+      required: true
+  - type: input
+    id: container-version
+    attributes:
+      label: container CLI version
+      description: Output of `container --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: macos-version
+    attributes:
+      label: macOS version
+      description: Output of `sw_vers`, or the version shown under About This Mac.
+      placeholder: "macOS 26.2 (25C57)"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor-output
+    attributes:
+      label: vessel doctor output
+      description: Optional but helpful — paste the output of `vessel doctor`.
+    validations:
+      required: false
