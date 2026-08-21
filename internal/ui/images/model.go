@@ -33,7 +33,11 @@ type Model struct {
 	inspect    *backend.ImageInspect
 	inspectRef string
 	inspectErr error
-	// inspectID is the content id inspectRef was resolved against, so a failed
+	// inspectKey identifies the row the result was accepted for. A reference
+	// alone is not an identity - every dangling image has an empty one - so a
+	// result keyed by reference would surface under all of them.
+	inspectKey string
+	// inspectID is the content id inspectKey was resolved against, so a failed
 	// inspect is invalidated on the same terms as a successful one instead of
 	// outliving the row that produced it.
 	inspectID string
@@ -102,18 +106,19 @@ func (m Model) SetItems(items []backend.Image) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
-	if m.inspectRef != "" && !inspectMatchesList(items, m.inspectRef, m.inspectID) {
+	if m.inspectKey != "" && !inspectMatchesList(items, m.inspectKey, m.inspectID) {
 		m.inspect = nil
 		m.inspectRef = ""
 		m.inspectErr = nil
+		m.inspectKey = ""
 		m.inspectID = ""
 	}
 	return m
 }
 
-func inspectMatchesList(items []backend.Image, ref, id string) bool {
+func inspectMatchesList(items []backend.Image, key, id string) bool {
 	for _, it := range items {
-		if backend.FormatRef(it) == ref {
+		if markKey(it) == key {
 			return it.ID == id
 		}
 	}
@@ -156,6 +161,7 @@ func (m Model) SetInspect(ref string, ins *backend.ImageInspect, err error) Mode
 	m.inspect = ins
 	m.inspectRef = ref
 	m.inspectErr = err
+	m.inspectKey = markKey(*sel)
 	// A successful inspect reports the digest it actually resolved; a failure
 	// leaves only the list row it was asked for. Either way that id is what a
 	// later list must still agree with for the result to stay valid.
@@ -345,12 +351,15 @@ func (m Model) DetailView(width, height int) string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
 			Render(uiutil.Headline(backend.FormatRef(*sel), width, height)),
 		"",
+		// Deliberately not KVFit: the id is the identity content the pane must
+		// still show at minimum geometry, so binding it to the pane width would
+		// defeat the rule that binding its siblings serves.
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
 		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
 	)
 
-	if m.inspect != nil && m.inspectRef == backend.FormatRef(*sel) {
+	if m.inspect != nil && m.inspectKey == markKey(*sel) {
 		if d := m.inspect.Digest; d != "" {
 			p.Add(uiutil.KVFit("Digest", d, width))
 		}
@@ -371,7 +380,7 @@ func (m Model) DetailView(width, height int) string {
 			platforms = append(platforms, pf.OS+"/"+pf.Architecture+"  "+uiutil.HumanBytes(pf.Size))
 		}
 		p.Section(dim.Render("-- Platforms --"), uiutil.IndentedRows(platforms, dim, width))
-	} else if m.inspectErr != nil && m.inspectRef == backend.FormatRef(*sel) {
+	} else if m.inspectErr != nil && m.inspectKey == markKey(*sel) {
 		p.Add("")
 		p.Add(uiutil.IndentedRows([]string{m.inspectErr.Error()}, errStyle, width)...)
 	}

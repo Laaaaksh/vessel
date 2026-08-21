@@ -140,3 +140,71 @@ func TestDetailView_longInspectErrorOccupiesOneRow(t *testing.T) {
 		}
 	}
 }
+
+// richVolume is a list row as `container volume list` reports it: size, format,
+// labels and options all arrive before any inspect is run.
+func richVolume() backend.Volume {
+	return backend.Volume{
+		Name:       "vessel-test-vol",
+		Driver:     "local",
+		Mountpoint: "/var/lib/vessel/vessel-test-vol",
+		SizeBytes:  1 << 30,
+		Format:     "ext4",
+		Labels:     map[string]string{"owner": "vessel"},
+		Options:    map[string]string{"sync": "fsync"},
+	}
+}
+
+// The list already carries these fields, so the pane must show them on first
+// paint rather than staying blank for the debounce plus subprocess.
+func TestDetailView_showsListFieldsBeforeInspectArrives(t *testing.T) {
+	m := New().SetItems([]backend.Volume{richVolume()})
+
+	v := ansi.Strip(m.DetailView(60, 40))
+	for _, want := range []string{"ext4", "1 GiB", "-- Labels --", "owner=vessel", "-- Options --", "sync=fsync"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("pre-inspect pane missing %q: %q", want, v)
+		}
+	}
+}
+
+// A failed inspect must not take the list data down with it.
+func TestDetailView_keepsListFieldsWhenInspectFails(t *testing.T) {
+	m := New().SetItems([]backend.Volume{richVolume()}).
+		SetInspect("vessel-test-vol", nil, errors.New("boom"))
+
+	v := ansi.Strip(m.DetailView(60, 40))
+	for _, want := range []string{"ext4", "1 GiB", "owner=vessel", "sync=fsync", "boom"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("pane after a failed inspect missing %q: %q", want, v)
+		}
+	}
+}
+
+// A successful inspect is the more authoritative source and replaces the
+// list-sourced values rather than rendering alongside them.
+func TestDetailView_inspectFieldsWinOverListFields(t *testing.T) {
+	list := richVolume()
+	m := New().SetItems([]backend.Volume{list}).
+		SetInspect("vessel-test-vol", &backend.VolumeInspect{
+			Name:      list.Name,
+			Driver:    list.Driver,
+			Created:   list.Created,
+			SizeBytes: list.SizeBytes,
+			Format:    "xfs",
+			Labels:    map[string]string{"owner": "inspect"},
+			Options:   map[string]string{"sync": "none"},
+		}, nil)
+
+	v := ansi.Strip(m.DetailView(60, 40))
+	for _, want := range []string{"xfs", "owner=inspect", "sync=none"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("inspect-sourced value %q missing: %q", want, v)
+		}
+	}
+	for _, stale := range []string{"ext4", "owner=vessel", "sync=fsync"} {
+		if strings.Contains(v, stale) {
+			t.Errorf("list-sourced value %q rendered alongside the inspect: %q", stale, v)
+		}
+	}
+}
