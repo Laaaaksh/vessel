@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
 	"github.com/Laaaaksh/vessel/internal/config"
@@ -73,6 +74,10 @@ type volumeInspectMsg struct {
 type actionDoneMsg struct {
 	err error
 	msg string
+	// pushRef names the image an image push was attempted for, empty for every
+	// other verb. It both limits credential advice to the verb the user actually
+	// ran and pins the advice to the row it is about.
+	pushRef string
 }
 
 type logsOpenedMsg struct {
@@ -184,6 +189,8 @@ type Model struct {
 	pendingKind deleteKind
 	pendingIDs  []string
 	pendingLbl  string
+	pendingVerb string
+	pendingAct  func(Model) (Model, tea.Cmd)
 	logCancel   context.CancelFunc
 	logCh       chan backend.LogLine
 	logID       string
@@ -195,7 +202,9 @@ type Model struct {
 	actionIdx   int
 	actionItems []actionItem
 	promptKind  string
+	promptLabel string
 	promptBuf   string
+	promptRef   string
 	runForm     runForm
 }
 
@@ -330,16 +339,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.volPanel = m.volPanel.SetInspect(msg.name, msg.ins, msg.err)
 		return m, nil
 	case actionDoneMsg:
+		// Known limitation: m.lastErr set here reaches the footer for one frame
+		// only. refreshCmd below always batches loadContainersCmd, and a
+		// successful containersLoadedMsg clears lastErr unconditionally in
+		// applyContainersLoaded, as does the next tick. Push is the one verb
+		// with a durable surface — the images detail-pane notice set below — so
+		// a tag/save/load failure is reported but not durably shown. Left as is
+		// by decision; the fix belongs in shared refresh plumbing.
+		m.imgPanel = m.imgPanel.SetNotice("", "")
 		if msg.err != nil {
 			m.setLastErr(msg.err)
 			m.setStatus("")
+			if msg.pushRef != "" {
+				if notice := backend.PushDenialNotice(msg.err); notice != "" {
+					m.imgPanel = m.imgPanel.SetNotice(msg.pushRef, notice)
+				}
+			}
 		} else {
 			m.setLastErr(nil)
 			m.setStatus(msg.msg)
 		}
-		m.mode = modeBrowse
-		m.pendingIDs = nil
-		m.pendingLbl = ""
+		m = m.clearPending()
 		return m, m.refreshCmd()
 	case logsOpenedMsg:
 		if msg.err != nil {
@@ -373,7 +393,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case shellDoneMsg:
-		m.mode = modeBrowse
+		m = m.clearPending()
 		m.tickPaused = false
 		if msg.err != nil {
 			m.setLastErr(msg.err)
@@ -693,11 +713,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeConfirmDelete {
 		switch k {
 		case "y":
-			return m.confirmDelete()
+			return m.confirmPending()
 		case "n", "esc":
-			m.mode = modeBrowse
-			m.pendingIDs = nil
-			m.pendingLbl = ""
+			m = m.clearPending()
 			m.setStatus("cancelled")
 			return m, nil
 		}
@@ -998,10 +1016,9 @@ func (m Model) beginDelete(kind deleteKind, ids []string, label string) (tea.Mod
 	if len(ids) == 0 {
 		return m, nil
 	}
-	m.mode = modeConfirmDelete
+	m = m.beginConfirm("Delete", label, nil)
 	m.pendingKind = kind
 	m.pendingIDs = ids
-	m.pendingLbl = label
 	return m, nil
 }
 
@@ -1037,6 +1054,39 @@ func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
+}
+
+// beginConfirm parks an action behind the confirm modal, labelled with the
+// concrete target it will act on. Delete stages its targets as pendingIDs; the
+// image actions carry more than one value, so they hand over a closure. Every
+// confirmation opens through here, so a closure can never outlive its modal and
+// be picked up by the next one.
+func (m Model) beginConfirm(verb, label string, act func(Model) (Model, tea.Cmd)) Model {
+	m = m.clearPending()
+	m.mode = modeConfirmDelete
+	m.pendingLbl = label
+	m.pendingVerb = verb
+	m.pendingAct = act
+	return m
+}
+
+func (m Model) clearPending() Model {
+	m.mode = modeBrowse
+	m.pendingIDs = nil
+	m.pendingLbl = ""
+	m.pendingVerb = ""
+	m.pendingAct = nil
+	return m
+}
+
+// confirmPending runs whatever the confirm modal is currently holding. Delete
+// is the common case; push and an overwriting save are routed here too because
+// publishing an image or truncating a local file is as unrecoverable.
+func (m Model) confirmPending() (tea.Model, tea.Cmd) {
+	if act := m.pendingAct; act != nil {
+		return act(m.clearPending())
+	}
+	return m.confirmDelete()
 }
 
 // beginPrune opens the confirm modal before a destructive prune. A prune targets
@@ -1117,9 +1167,7 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	kind, ids := m.pendingKind, m.pendingIDs
 	client := m.client
 	label, done, timeout := pendingAction(kind)
-	m.mode = modeBrowse
-	m.pendingIDs = nil
-	m.pendingLbl = ""
+	m = m.clearPending()
 	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
@@ -1176,12 +1224,22 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 }
 
 func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+	return m.runAction(label, "", fn)
+}
+
+// runPush is runGlobal for the one verb whose failures may carry registry
+// credential advice; ref is the image that advice would be about.
+func (m Model) runPush(label, ref string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+	return m.runAction(label, ref, fn)
+}
+
+func (m Model) runAction(label, pushRef string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
 	m.setStatus(label + "…")
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
 		if err := fn(ctx); err != nil {
-			return actionDoneMsg{err: err}
+			return actionDoneMsg{err: err, pushRef: pushRef}
 		}
 		return actionDoneMsg{msg: label + " ok"}
 	}
@@ -1281,18 +1339,38 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) beginPrompt(kind, _ string) (tea.Model, tea.Cmd) {
+func (m Model) beginPrompt(kind, label string) (tea.Model, tea.Cmd) {
 	m.mode = modePrompt
 	m.promptKind = kind
+	m.promptLabel = label
 	m.promptBuf = ""
 	return m, nil
 }
 
+// beginPromptForImage opens a prompt that remembers a selected image ref so the
+// submitted text can be combined with it (e.g. a live image + a new tag). The
+// label names both halves, since the field wants the other one.
+func (m Model) beginPromptForImage(kind, label, ref string) (tea.Model, tea.Cmd) {
+	m.mode = modePrompt
+	m.promptKind = kind
+	m.promptLabel = label
+	m.promptBuf = ""
+	m.promptRef = ref
+	return m, nil
+}
+
+// handlePromptKey drives the text prompt. Phase 3's Save… and Load… prompts
+// take filesystem paths, so the space bar (which serialises as the literal
+// string "space", never " ") and multi-byte non-ASCII runes must round-trip
+// correctly: a dropped space would make Save write to a path the user never
+// typed and Load report "no such file" for a file that exists.
 func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "esc":
 		m.mode = modeBrowse
 		m.promptBuf = ""
+		m.promptRef = ""
+		m.promptLabel = ""
 		m.setStatus("cancelled")
 		return m, nil
 	case "enter":
@@ -1323,6 +1401,8 @@ func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
+	ref := m.promptRef
+	m.promptRef = ""
 	if msg.text == "" {
 		m.setStatus("empty input")
 		return m, nil
@@ -1339,6 +1419,28 @@ func (m Model) handlePrompt(msg promptDoneMsg) (tea.Model, tea.Cmd) {
 		name := msg.text
 		return m.runGlobal("create volume "+name, func(ctx context.Context) error {
 			return m.client.CreateVolume(ctx, name)
+		})
+	case "tag":
+		newRef := msg.text
+		return m.runGlobal("tag "+newRef, func(ctx context.Context) error {
+			return m.client.TagImage(ctx, ref, newRef)
+		})
+	case "save to":
+		imageRef, path := ref, msg.text
+		save := func(m Model) (Model, tea.Cmd) {
+			x, c := m.runGlobal("save "+imageRef+" → "+path, func(ctx context.Context) error {
+				return m.client.SaveImage(ctx, imageRef, path)
+			})
+			return x.(Model), c
+		}
+		if backend.FileExists(path) {
+			return m.beginConfirm("Overwrite", path+" with "+imageRef, save), nil
+		}
+		return save(m)
+	case "load from":
+		path := msg.text
+		return m.runGlobal("load "+path, func(ctx context.Context) error {
+			return m.client.LoadImage(ctx, path)
 		})
 	case "custom":
 		return m.runCustom(msg.text)
@@ -1457,6 +1559,23 @@ func (m Model) openActions() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// imageActionRef resolves the highlighted row to a reference safe to act on.
+// Tag, Save and Push all reach outside the process, so a row that formats to an
+// ambiguous reference is refused rather than silently resolved to ":latest".
+func (m Model) imageActionRef() (Model, string, bool) {
+	sel := m.imgPanel.Selected()
+	if sel == nil {
+		m.status = "nothing selected"
+		return m, "", false
+	}
+	ref, ok := backend.ExactRef(*sel)
+	if !ok {
+		m.status = "digest-pinned image has no named reference — tag, save and push cannot address it"
+		return m, "", false
+	}
+	return m, ref, true
+}
+
 func (m Model) buildActions() []actionItem {
 	var items []actionItem
 	switch m.activeView {
@@ -1498,7 +1617,7 @@ func (m Model) buildActions() []actionItem {
 	case ViewImages:
 		items = append(items,
 			actionItem{"Pull…", func(m Model) (Model, tea.Cmd) {
-				x, c := m.beginPrompt("pull", "image")
+				x, c := m.beginPrompt("pull", "image to pull")
 				return x.(Model), c
 			}},
 			actionItem{"Run…", func(m Model) (Model, tea.Cmd) {
@@ -1509,6 +1628,42 @@ func (m Model) buildActions() []actionItem {
 				x, c := m.beginRunForm(ref)
 				return x.(Model), c
 			}},
+			actionItem{"Tag…", func(m Model) (Model, tea.Cmd) {
+				m, ref, ok := m.imageActionRef()
+				if !ok {
+					return m, nil
+				}
+				x, c := m.beginPromptForImage("tag", "tag "+ref+" as (new reference)", ref)
+				return x.(Model), c
+			}},
+			actionItem{"Save…", func(m Model) (Model, tea.Cmd) {
+				m, ref, ok := m.imageActionRef()
+				if !ok {
+					return m, nil
+				}
+				x, c := m.beginPromptForImage("save to", "save "+ref+" to (path)", ref)
+				return x.(Model), c
+			}},
+			actionItem{"Load…", func(m Model) (Model, tea.Cmd) {
+				x, c := m.beginPrompt("load from", "load from (tar archive path)")
+				return x.(Model), c
+			}},
+			actionItem{"Push", func(m Model) (Model, tea.Cmd) {
+				m, ref, ok := m.imageActionRef()
+				if !ok {
+					return m, nil
+				}
+				label := ref
+				if dest, ok := backend.PushTarget(ref); ok {
+					label = ref + " → " + dest
+				}
+				return m.beginConfirm("Push", label, func(m Model) (Model, tea.Cmd) {
+					x, c := m.runPush("push "+ref, ref, func(ctx context.Context) error {
+						return m.client.PushImage(ctx, ref)
+					})
+					return x.(Model), c
+				}), nil
+			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
 				x, c := m.beginPrune(pruneImages)
 				return x.(Model), c
@@ -1517,7 +1672,7 @@ func (m Model) buildActions() []actionItem {
 	case ViewVolumes:
 		items = append(items,
 			actionItem{"Create…", func(m Model) (Model, tea.Cmd) {
-				x, c := m.beginPrompt("volcreate", "name")
+				x, c := m.beginPrompt("volcreate", "volume name")
 				return x.(Model), c
 			}},
 			actionItem{"Prune unused", func(m Model) (Model, tea.Cmd) {
@@ -1790,12 +1945,20 @@ func (m Model) helpView() string {
 // confirmQuestion returns the concrete question for the pending confirm (delete,
 // prune, stop), rather than a generic "are you sure?".
 func (m Model) confirmQuestion() string {
-	if spec, ok := pruneSpecFor(m.pendingKind); ok {
-		return spec.question
-	}
 	label := m.pendingLbl
 	if label == "" {
 		label = strings.Join(m.pendingIDs, ", ")
+	}
+	// pendingVerb is set only by beginConfirm (the image actions' generic
+	// confirm path) and cleared by clearPending on every exit, so it is
+	// checked before pendingKind: pendingKind is never reset back to zero and
+	// would otherwise misreport this question using a stale prune/stop kind
+	// left over from an earlier, unrelated confirmation.
+	if m.pendingVerb != "" {
+		return fmt.Sprintf("%s %s?", m.pendingVerb, label)
+	}
+	if spec, ok := pruneSpecFor(m.pendingKind); ok {
+		return spec.question
 	}
 	if m.pendingKind == stopContainer {
 		return fmt.Sprintf("Stop %s?", label)
@@ -1813,29 +1976,63 @@ func (m Model) confirmModal() string {
 		Render(body)
 }
 
-func (m Model) actionsModal() string {
-	var rows []string
-	rows = append(rows, m.st.title.Render("actions"))
-	rows = append(rows, "")
-	for i, a := range m.actionItems {
-		line := "  " + a.label
-		if i == m.actionIdx {
-			line = m.st.navItemActive.Render("> " + a.label)
-		}
-		rows = append(rows, line)
+// actionsModalChrome is what the modal spends on border, padding, title, the
+// blank rows and the hint — everything that is not a menu item.
+const actionsModalChrome = 8
+
+func (m Model) actionsModalWidth() int { return min(40, m.width-4) }
+
+// actionsModalContent is the cells a row may occupy. lipgloss counts Width as
+// the outer box, so the rounded border takes one cell on each side and
+// Padding(1, 2) another two. Every row is truncated to what is left, so one item
+// is always exactly one row — which is what lets actionWindow size the window by
+// item count rather than by rendered rows.
+func (m Model) actionsModalContent() int { return max(1, m.actionsModalWidth()-6) }
+
+// actionWindow is the slice of the menu that fits the frame. lipgloss.Place pads
+// but never truncates, so a menu taller than the terminal would push the header
+// off the alt-screen; the window follows the selection instead.
+func (m Model) actionWindow() (start, end int) {
+	size := len(m.actionItems)
+	if m.height > 0 {
+		size = min(size, max(1, m.height-actionsModalChrome))
 	}
-	rows = append(rows, "")
-	rows = append(rows, m.st.dimText.Render("[enter] run  [esc] close"))
+	return uiutil.Window(len(m.actionItems), m.actionIdx, size)
+}
+
+func (m Model) actionsModal() string {
+	content := m.actionsModalContent()
+	fit := func(s string) string { return ansi.Truncate(s, content, "…") }
+	rows := []string{m.st.title.Render(fit("actions")), ""}
+	start, end := m.actionWindow()
+	for i := start; i < end; i++ {
+		label := m.actionItems[i].label
+		if i == m.actionIdx {
+			// navItemActive adds a cell of padding on each side.
+			rows = append(rows, m.st.navItemActive.Render(
+				ansi.Truncate("> "+label, max(1, content-2), "…")))
+			continue
+		}
+		rows = append(rows, fit("  "+label))
+	}
+	hint := "[enter] run  [esc] close"
+	if end-start < len(m.actionItems) {
+		hint = fmt.Sprintf("%d/%d  ", m.actionIdx+1, len(m.actionItems)) + hint
+	}
+	rows = append(rows, "", m.st.dimText.Render(fit(hint)))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPurple).
 		Padding(1, 2).
-		Width(min(40, m.width-4)).
+		Width(m.actionsModalWidth()).
 		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 
 func (m Model) promptModal() string {
-	title := m.promptKind
+	title := m.promptLabel
+	if title == "" {
+		title = m.promptKind
+	}
 	body := fmt.Sprintf("%s: %s_", title, m.promptBuf)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

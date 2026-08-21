@@ -26,6 +26,8 @@ type Model struct {
 	marked     map[string]bool
 	toggleMark string
 	pageRows   int
+	notice     string
+	noticeRef  string
 
 	// inspect holds the latest ImageInspect for inspectRef, if it matches the
 	// currently selected image. It is carried separately from the list so the
@@ -41,6 +43,20 @@ type Model struct {
 	// inspect is invalidated on the same terms as a successful one instead of
 	// outliving the row that produced it.
 	inspectID string
+}
+
+// SetNotice attaches a standing message to one image's detail pane. The pane
+// wraps, so unlike the footer it can carry an instruction too long to fit one
+// row. The notice belongs to ref, not to the panel: a refusal reported for one
+// image must not follow the cursor onto the next row, so DetailView renders it
+// only while ref is the image on show. An empty notice clears both.
+func (m Model) SetNotice(ref, notice string) Model {
+	if notice == "" {
+		m.notice, m.noticeRef = "", ""
+		return m
+	}
+	m.notice, m.noticeRef = notice, ref
+	return m
 }
 
 // New creates an empty images model.
@@ -103,6 +119,18 @@ func (m Model) SetItems(items []backend.Image) Model {
 		}
 	}
 	m.marked = marked
+	if m.noticeRef != "" {
+		present := false
+		for _, img := range items {
+			if backend.FormatRef(img) == m.noticeRef {
+				present = true
+				break
+			}
+		}
+		if !present {
+			m.notice, m.noticeRef = "", ""
+		}
+	}
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
@@ -334,19 +362,43 @@ func (m Model) ListView(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
 
-// DetailView renders image details.
+// DetailView renders image details. Height is a floor for lipgloss, never a
+// cap, so the pane is capped explicitly: anything longer would grow the body row
+// and push the header off the alt-screen. The notice leads the pane so that when
+// the cap bites — 18x4 at the smallest supported frame — it is the reference and
+// the static fields that get cut, not the instruction the user has to act on. It
+// shows only on the image it was recorded against, so moving the cursor hides it
+// and moving back brings it into view again.
 func (m Model) DetailView(width, height int) string {
+	pane := lipgloss.NewStyle().Width(width).Height(height).MaxHeight(max(1, height))
 	sel := m.Selected()
 	if sel == nil {
-		return lipgloss.NewStyle().Width(width).Height(height).
-			Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
+		return pane.Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
 	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
 	hints, reserved := uiutil.KeyBar("[p] pull  [c] run  [d] delete  [P] prune", width, height)
 	keybar := dim.Render(hints)
 
-	p := uiutil.NewPane(width, height-reserved)
+	// A standing notice must never be dropped by the pane's row budget: it is
+	// the instruction the user has to act on, so it leads the pane and its own
+	// row cost is added on top of the normal budget rather than charged
+	// against it. RenderPane's final ClampHeight still caps the whole pane at
+	// height, so when the notice is large it is the reference/static fields
+	// added after it that get cut, never the notice itself.
+	budget := height - reserved
+	var notice string
+	if m.notice != "" && m.noticeRef == backend.FormatRef(*sel) {
+		notice = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#fbbf24")).
+			Width(max(1, width-2)).
+			Render(m.notice)
+		budget += uiutil.RowsFor(notice, width) + 1
+	}
+	p := uiutil.NewPane(width, budget)
+	if notice != "" {
+		p.Add(notice, "")
+	}
 	p.Add(
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
 			Render(uiutil.Headline(backend.FormatRef(*sel), width, height)),
