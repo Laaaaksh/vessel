@@ -285,14 +285,24 @@ func PushTarget(ref string) (string, bool) {
 	return "", false
 }
 
+// Reference syntax pieces shared by splitRef and FormatRef. Keeping them named
+// is what lets both sides rebuild exactly what the other parsed.
+const (
+	refTagSep      = ":"
+	refDigestSep   = "@"
+	latestRef      = "latest"
+	untaggedMarker = "<none>"
+)
+
 func mapImages(raw []cliImage) []Image {
 	out := make([]Image, 0, len(raw))
 	for _, r := range raw {
-		repo, tag := splitRef(r.Configuration.Name)
+		repo, tag, digest := splitRef(r.Configuration.Name)
 		img := Image{
 			ID:         r.ID,
 			Repository: repo,
 			Tag:        tag,
+			Digest:     digest,
 			Size:       imageSize(r),
 		}
 		if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
@@ -308,7 +318,7 @@ func mapImages(raw []cliImage) []Image {
 // layer count) is taken from the variant this host would run, mirroring the
 // running-platform choice in imageSize.
 func mapImageInspect(r cliImage) *ImageInspect {
-	repo, tag := splitRef(r.Configuration.Name)
+	repo, tag, _ := splitRef(r.Configuration.Name)
 	ins := &ImageInspect{
 		ID:         r.ID,
 		Repository: repo,
@@ -376,43 +386,74 @@ func imageSize(r cliImage) int64 {
 	return r.Configuration.Descriptor.Size
 }
 
-func splitRef(name string) (repo, tag string) {
+// splitRef breaks a CLI image name into repository, tag and reference digest.
+// A digest-pinned name ("repo@sha256:…", or "repo:tag@sha256:…") keeps its
+// digest so FormatRef can rebuild the exact reference; dropping it made every
+// caller act on whatever artifact the bare repository resolves to instead of
+// the pinned one. A name-only reference defaults its tag to "latest", matching
+// what a registry resolves it as; a digest-pinned name keeps an empty tag
+// because the pin, not a tag, identifies the artifact.
+func splitRef(name string) (repo, tag, digest string) {
 	if name == "" {
-		return "", ""
+		return "", "", ""
 	}
-	// A digest-pinned ref has no tag; the digest is not one.
-	if i := strings.Index(name, "@"); i >= 0 {
-		return name[:i], ""
+	// Everything before "@" may still carry a tag; everything after is the pin.
+	if base, pin, ok := strings.Cut(name, refDigestSep); ok {
+		repo, tag = splitRepoTag(base)
+		return repo, tag, pin
 	}
-	// Take last ':' that looks like a tag (not a port in host:port/...)
-	i := strings.LastIndex(name, ":")
+	repo, tag = splitRepoTag(name)
+	if tag == "" {
+		tag = latestRef
+	}
+	return repo, tag, ""
+}
+
+// splitRepoTag splits "repo[:tag]" at the last ':' that looks like a tag — not
+// a port in "host:5000/repo", which contains '/' after the colon. The tag comes
+// back empty when absent; whether that means "latest" is the caller's policy.
+func splitRepoTag(name string) (repo, tag string) {
+	i := strings.LastIndex(name, refTagSep)
 	if i < 0 {
-		return name, "latest"
+		return name, ""
 	}
-	if strings.Contains(name[i+1:], "/") {
-		return name, "latest"
+	if strings.Contains(name[i+len(refTagSep):], "/") {
+		return name, ""
 	}
 	return name[:i], name[i+1:]
 }
 
 // ExactRef returns a reference that resolves to the selected image and reports
-// whether one exists. An untagged row formats to a bare repository, which a
-// registry resolves as ":latest" — a different artifact than the row shows — so
-// actions that publish or archive an image must refuse it rather than guess.
+// whether one exists. An untagged, unpinned row formats to a bare repository,
+// which a registry resolves as ":latest" — a different artifact than the row
+// shows — so actions that publish or archive an image must refuse it rather
+// than guess. Digest-pinned rows now format exactly too, but tag, save and
+// push still refuse them: the CLI's acceptance of digest-pinned sources for
+// those verbs is unverified, and the refusal is the conservative side of that.
 func ExactRef(img Image) (string, bool) {
 	if img.Repository == "" {
 		return "", false
 	}
-	if img.Tag == "" || img.Tag == "<none>" {
+	if img.Tag == "" || img.Tag == untaggedMarker {
 		return "", false
 	}
 	return FormatRef(img), true
 }
 
-// FormatRef returns the full image reference "repo:tag".
+// FormatRef returns the full image reference: "repo:tag", or the exact pinned
+// reference "repo[:tag]@digest" when the image carries one. Tag-only and
+// name-only references are formatted exactly as before the digest branch
+// existed — it fires only on a non-empty Digest.
 func FormatRef(img Image) string {
-	if img.Tag == "" || img.Tag == "<none>" {
+	if img.Digest != "" {
+		ref := img.Repository + refDigestSep + img.Digest
+		if img.Tag != "" && img.Tag != untaggedMarker {
+			ref = img.Repository + refTagSep + img.Tag + refDigestSep + img.Digest
+		}
+		return ref
+	}
+	if img.Tag == "" || img.Tag == untaggedMarker {
 		return img.Repository
 	}
-	return img.Repository + ":" + img.Tag
+	return img.Repository + refTagSep + img.Tag
 }
