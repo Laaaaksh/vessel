@@ -545,10 +545,10 @@ func TestConfirmPrune_actionMenuPath(t *testing.T) {
 	if m.mode != modeActions {
 		t.Fatalf("mode=%v want actions", m.mode)
 	}
-	// Containers menu: Start, Stop, Restart, Logs, Shell, Prune stopped (idx 0..5).
+	// Containers menu: Start, Stop, Restart, Logs, Shell, Exec…, Prune stopped (idx 0..6).
 	next, _ = m.handleKey(keyMsg("j"))
 	m = next.(Model)
-	for range 4 {
+	for range 5 {
 		next, _ = m.handleKey(keyMsg("j"))
 		m = next.(Model)
 	}
@@ -1635,6 +1635,51 @@ func assertMarked(t *testing.T, pane string, got []string, want ...string) {
 		if got[i] != want[i] {
 			t.Fatalf("%s MarkedIDs = %v, want %v", pane, got, want)
 		}
+	}
+}
+
+// A space bar press serialises as the literal string "space", never " "
+// (see AGENTS.md, UI key handling). A prompt that only accepted len==1 byte
+// strings silently dropped it, so "my images" typed into a prompt came out
+// as "myimages" with no error. This proves the fix round-trips it intact.
+func TestHandlePromptKey_spaceSurvivesRoundTrip(t *testing.T) {
+	m := New()
+	next, _ := m.beginPrompt("pull", "image to pull")
+	m = next.(Model)
+	for _, k := range []tea.KeyPressMsg{keyMsg("m"), keyMsg("y"), spaceKey(), keyMsg("i")} {
+		next, _ = m.handleKey(k)
+		m = next.(Model)
+	}
+	if m.promptBuf != "my i" {
+		t.Fatalf("promptBuf = %q, want %q", m.promptBuf, "my i")
+	}
+	next, _ = m.handleKey(enterKey())
+	m = next.(Model)
+	if m.status != "pull my i…" {
+		t.Fatalf("status = %q, want the space preserved in %q", m.status, "pull my i…")
+	}
+}
+
+// A multi-byte rune (accents, CJK, emoji) is still exactly one printable
+// character, but its Key.String() is more than one byte. A prompt keyed on
+// byte length silently dropped it the same way it dropped space.
+func TestHandlePromptKey_multibyteRuneSurvivesRoundTrip(t *testing.T) {
+	m := New()
+	next, _ := m.beginPrompt("pull", "image to pull")
+	m = next.(Model)
+	for _, r := range "café" {
+		next, _ = m.handleKey(keyMsg(string(r)))
+		m = next.(Model)
+	}
+	if m.promptBuf != "café" {
+		t.Fatalf("promptBuf = %q, want %q", m.promptBuf, "café")
+	}
+	// Backspace must remove the whole rune, not just its last byte, or a
+	// trailing multi-byte character would corrupt into invalid UTF-8.
+	next, _ = m.handleKey(keyMsg("backspace"))
+	m = next.(Model)
+	if m.promptBuf != "caf" {
+		t.Fatalf("promptBuf after backspace = %q, want %q", m.promptBuf, "caf")
 	}
 }
 
