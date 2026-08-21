@@ -1,6 +1,7 @@
 package volumes
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -266,6 +267,34 @@ func TestSetItems_dropsInspectWhenVolumeRecreated(t *testing.T) {
 
 	if got := m.InspectedName(); got != "" {
 		t.Errorf("inspect kept after the volume was recreated: %q", got)
+	}
+}
+
+// A failed inspect is keyed to the volume it was asked about just as a
+// successful one is. Deleting and recreating a volume under the same name
+// gives a fresh row, and the old error must not be shown against it.
+func TestSetItems_dropsInspectErrorWhenVolumeRecreated(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", nil, errors.New("boom"))
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Fatalf("error not shown for the volume it belongs to: %q", v)
+	}
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created.Add(time.Hour))})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "boom") {
+		t.Errorf("stale inspect error rendered against the recreated volume: %q", v)
+	}
+}
+
+func TestSetItems_keepsInspectErrorForUnchangedVolume(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", nil, errors.New("boom"))
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created)})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Errorf("error dropped for the volume it still describes: %q", v)
 	}
 }
 

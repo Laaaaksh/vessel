@@ -1,10 +1,38 @@
 package uiutil
 
 import (
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
+
+// indentWidth is how many columns an indented section row loses to its leading
+// indent and the pane's own padding. Callers must not recompute it: getting it
+// wrong costs the row an extra rendered row, exactly as for KVFit.
+const indentWidth = 6
+
+// IndentedRows renders values as the indented rows of a detail-pane section,
+// each shortened to a single rendered row in a pane of that width.
+func IndentedRows(values []string, style lipgloss.Style, width int) []string {
+	rows := make([]string, 0, len(values))
+	for _, v := range values {
+		rows = append(rows, style.Render("  "+Truncate(v, width-indentWidth)))
+	}
+	return rows
+}
+
+// PairRows renders a key/value map as "key=value" section rows sorted by their
+// rendered text, so a map's undefined iteration order cannot reshuffle the
+// pane between frames.
+func PairRows(pairs map[string]string, style lipgloss.Style, width int) []string {
+	values := make([]string, 0, len(pairs))
+	for k, v := range pairs {
+		values = append(values, k+"="+v)
+	}
+	sort.Strings(values)
+	return IndentedRows(values, style, width)
+}
 
 // paneStyle is the geometry every detail pane renders with. Budgeting and
 // rendering share it, so a row is charged exactly the number of rows it will

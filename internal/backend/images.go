@@ -66,7 +66,10 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 
 // ImageInspect returns the full inspection of a single image identified by its
 // reference (name or name:tag). The CLI reports unknown numeric IDs as not
-// found, so callers should pass the reference.
+// found, so callers should pass the reference. Like `volume inspect`, the
+// command prints JSON by default and --format json is not an accepted flag:
+// `container image inspect --format json` fails with "Unknown option --format"
+// on container 1.2.2, so the flag must not be added back.
 func (c *Client) ImageInspect(ctx context.Context, ref string) (*ImageInspect, error) {
 	var raw []cliImage
 	if err := c.runJSON(ctx, &raw, "image", "inspect", ref); err != nil {

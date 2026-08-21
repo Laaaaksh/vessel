@@ -3,6 +3,8 @@ package uiutil
 import (
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 func TestTruncate(t *testing.T) {
@@ -238,5 +240,69 @@ func TestHeadline_truncatesWhenItWouldCrowdThePane(t *testing.T) {
 func TestHeadline_leavesShortTitlesAlone(t *testing.T) {
 	if got := Headline("web", 40, 8); got != "web" {
 		t.Errorf("Headline(short) = %q, want it unchanged", got)
+	}
+}
+
+func TestIndentedRows_occupyOneRenderedRowEach(t *testing.T) {
+	values := []string{
+		"/Users/someone/Library/Application Support/com.apple.container/volumes/data/volume.img → /data",
+		"short → /x",
+	}
+	for _, width := range []int{18, 20, 40, 60} {
+		for i, row := range IndentedRows(values, lipgloss.NewStyle(), width) {
+			if got := RowsFor(row, width); got != 1 {
+				t.Errorf("row %d at width %d occupies %d rendered rows, want 1: %q", i, width, got, row)
+			}
+		}
+	}
+}
+
+func TestIndentedRows_indentsAndKeepsOrder(t *testing.T) {
+	rows := IndentedRows([]string{"b", "a"}, lipgloss.NewStyle(), 40)
+	want := []string{"  b", "  a"}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(want))
+	}
+	for i := range want {
+		if rows[i] != want[i] {
+			t.Errorf("row %d = %q, want %q: order must follow the caller's slice", i, rows[i], want[i])
+		}
+	}
+}
+
+// Go map iteration order is randomised, so an unsorted pane would reshuffle
+// its label rows between frames.
+func TestPairRows_areStablyOrderedByPair(t *testing.T) {
+	pairs := map[string]string{"zeta": "1", "alpha": "2", "mid": "3"}
+	want := []string{"  alpha=2", "  mid=3", "  zeta=1"}
+	for range 20 {
+		got := PairRows(pairs, lipgloss.NewStyle(), 40)
+		if len(got) != len(want) {
+			t.Fatalf("got %d rows, want %d", len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("row %d = %q, want %q", i, got[i], want[i])
+			}
+		}
+	}
+}
+
+func TestPairRows_occupyOneRenderedRowEach(t *testing.T) {
+	pairs := map[string]string{
+		"org.opencontainers.image.source": "https://github.com/example/a-fairly-long-repository-name",
+	}
+	for _, width := range []int{18, 40, 60} {
+		for _, row := range PairRows(pairs, lipgloss.NewStyle(), width) {
+			if got := RowsFor(row, width); got != 1 {
+				t.Errorf("pair row at width %d occupies %d rendered rows, want 1: %q", width, got, row)
+			}
+		}
+	}
+}
+
+func TestPairRows_emptyMapYieldsNoRows(t *testing.T) {
+	if got := PairRows(nil, lipgloss.NewStyle(), 40); len(got) != 0 {
+		t.Errorf("PairRows(nil) = %v, want no rows", got)
 	}
 }
