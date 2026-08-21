@@ -377,7 +377,11 @@ func (m Model) DetailView(width, height int) string {
 
 		platforms := make([]string, 0, len(m.inspect.Platforms))
 		for _, pf := range m.inspect.Platforms {
-			platforms = append(platforms, pf.OS+"/"+pf.Architecture+"  "+uiutil.HumanBytes(pf.Size))
+			name := pf.OS + "/" + pf.Architecture
+			if pf.Variant != "" {
+				name += "/" + pf.Variant
+			}
+			platforms = append(platforms, name+"  "+uiutil.HumanBytes(pf.Size))
 		}
 		p.Section(dim.Render("-- Platforms --"), uiutil.IndentedRows(platforms, dim, width))
 	} else if m.inspectErr != nil && m.inspectKey == markKey(*sel) {
