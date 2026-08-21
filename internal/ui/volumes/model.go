@@ -355,7 +355,7 @@ func (m Model) DetailView(width, height int) string {
 		p.Add(uiutil.KV("Format", format))
 	}
 	if sizeBytes > 0 {
-		p.Add(uiutil.KV("Size", uiutil.HumanBytes(int64(sizeBytes))))
+		p.Add(uiutil.KV("Quota", uiutil.HumanBytes(int64(sizeBytes))))
 	}
 	p.Section(dim.Render("-- Labels --"), uiutil.PairRows(labels, dim, width))
 	p.Section(dim.Render("-- Options --"), uiutil.PairRows(options, dim, width))
