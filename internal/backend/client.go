@@ -12,7 +12,24 @@ import (
 )
 
 const (
+	// defaultTimeout bounds a routine CLI invocation: lists, inspects,
+	// lifecycle verbs, single-target deletes. It stays short so a hung
+	// quick command still fails fast instead of wedging a poll or action.
 	defaultTimeout = 10 * time.Second
+
+	// globalTimeout bounds one invocation that is known to run long: an
+	// image transfer (tag/save/load/push) or a whole-store prune sweep. It
+	// matches the identically named outer bound internal/ui wraps these
+	// verbs in, so the per-call budget the client applies here is the same
+	// window the UI already promises; TestLongOperationBudgets pins the pair.
+	globalTimeout = 120 * time.Second
+
+	// confirmTimeout bounds one batched multi-target delete. The CLI call
+	// carries every id at once, so its budget must cover N deletions rather
+	// than one, and it likewise matches internal/ui's confirmTimeout for
+	// the confirmed removal that issued it.
+	confirmTimeout = 60 * time.Second
+
 	// cliName is the Apple Mac containers binary.
 	cliName = "container"
 	cmdLogN = 40
@@ -105,9 +122,23 @@ func (e *CLIError) Error() string {
 
 func (e *CLIError) Unwrap() error { return e.Err }
 
-// run executes a container CLI subcommand and returns its stdout.
+// run executes a container CLI subcommand under the client's default budget
+// and returns its stdout.
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	out, err := c.runRaw(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// runWithTimeout is run with an explicit per-call budget that replaces the
+// default cap instead of being clamped by it. Operations known to outlast
+// defaultTimeout — image transfers, prune sweeps, batched deletes — pass one
+// of the named budget constants; everything else keeps the short default so
+// a hung quick command still dies fast.
+func (c *Client) runWithTimeout(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	out, err := c.runRawWithTimeout(ctx, timeout, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -120,8 +151,20 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 // status" prints a real, parseable body even on a non-zero exit; callers
 // that need that body use this directly.
 func (c *Client) runRaw(ctx context.Context, args ...string) ([]byte, error) {
+	return c.runRawWithTimeout(ctx, c.timeout, args...)
+}
+
+// runRawWithTimeout is the shared execution core: every invocation funnels
+// through here, and the per-call timeout it wraps is whatever the entry point
+// above chose — the default for quick commands, an explicit named budget for
+// the known-long set. A non-positive timeout falls back to the default rather
+// than killing the process immediately.
+func (c *Client) runRawWithTimeout(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	c.recordCmd(args)
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	if timeout <= 0 {
+		timeout = c.timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, c.binary, args...)
