@@ -1887,6 +1887,32 @@ func TestFooterView_durableErrorAt60x12KeepsIdentityRows(t *testing.T) {
 	}
 }
 
+// TestNetworksLoadedMsg_loadErrorIsNotDurable checks that a networks load
+// failure behaves like every other load-originated error: it replaces a
+// durable action error rather than inheriting its durability, so a later
+// successful poll can still self-heal the footer.
+func TestNetworksLoadedMsg_loadErrorIsNotDurable(t *testing.T) {
+	m := beginLoadFailure(t, imagesModelWithItems(t, nil))
+	if !m.errDurable {
+		t.Fatal("precondition: the failed action must have set a durable error")
+	}
+
+	next, _ := m.Update(networksLoadedMsg{err: errors.New("networks unavailable")})
+	m = next.(Model)
+	if m.lastErr == nil || !strings.Contains(m.lastErr.Error(), "networks unavailable") {
+		t.Fatalf("networks load failure must take the footer, got: %v", m.lastErr)
+	}
+	if m.errDurable {
+		t.Fatal("a load-originated error must not stay durable")
+	}
+
+	after, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = after.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful poll must clear a load-originated error, got: %v", m.lastErr)
+	}
+}
+
 // beginPush selects Push from the images action menu and returns the model
 // sitting in the confirmation it must open before anything is published.
 func beginPush(t *testing.T, m Model) Model {
