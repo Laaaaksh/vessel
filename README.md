@@ -94,10 +94,10 @@ Known limits:
 - vessel never manages registry credentials. Push reuses whatever session
   `container registry login` has already established - running that login is yours to do.
 - Long-running verbs get real budgets: starting or stopping a container gets
-  thirty seconds, image tag/save/load/push, prunes and starting a container run
+  thirty seconds, image pull/tag/save/load/push, prunes and starting a container run
   up to two minutes, one batched delete of many targets gets one minute for the
   whole call, and a one-shot exec gets thirty seconds.
-  A huge `image pull` is still bounded by the short default cap. A run without
+  A run without
   `-d` holds the action status until that budget expires instead of streaming
   output; streaming or detached-launch support for long-running foreground
   sessions is future work.
