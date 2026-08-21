@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -167,6 +169,333 @@ func assertPending(t *testing.T, m Model, kind deleteKind, ids ...string) {
 		if m.pendingIDs[i] != ids[i] {
 			t.Fatalf("pendingIDs=%v want %v", m.pendingIDs, ids)
 		}
+	}
+}
+
+func imagesModel(t *testing.T) Model {
+	t.Helper()
+	m := New()
+	m.cfg.MouseEnabled = true
+	m.width, m.height = 120, 40
+	m.activeView = ViewImages
+	m.client = backend.NewClientWithBinary(filepath.Join(t.TempDir(), "no-such-container-cli"))
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+	})
+	return m
+}
+
+func volumesModel(t *testing.T) Model {
+	t.Helper()
+	m := New()
+	m.cfg.MouseEnabled = true
+	m.width, m.height = 120, 40
+	m.activeView = ViewVolumes
+	m.client = backend.NewClientWithBinary(filepath.Join(t.TempDir(), "no-such-container-cli"))
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{
+		{Name: "data"},
+		{Name: "cache"},
+	})
+	return m
+}
+
+// settle runs the debounce timer the selection change scheduled and delivers
+// the resulting message, returning whatever inspect command it triggers.
+func settle(t *testing.T, m Model, cmd tea.Cmd) (Model, tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected a debounced inspect to be scheduled, got nil")
+	}
+	msg, ok := cmd().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", cmd())
+	}
+	next, out := m.Update(msg)
+	return next.(Model), out
+}
+
+func inspectRefOf(t *testing.T, m Model, cmd tea.Cmd) string {
+	t.Helper()
+	_, load := settle(t, m, cmd)
+	if load == nil {
+		t.Fatal("expected an inspect command after the selection settled, got nil")
+	}
+	msg, ok := load().(imageInspectMsg)
+	if !ok {
+		t.Fatalf("expected imageInspectMsg, got %T", load())
+	}
+	return msg.ref
+}
+
+func TestMouseWheel_imagesInspectsNewSelection(t *testing.T) {
+	m := imagesModel(t)
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection after wheel = %q, want nginx:1.27", got)
+	}
+	if got := inspectRefOf(t, m, cmd); got != "nginx:1.27" {
+		t.Errorf("inspect ref = %q, want nginx:1.27", got)
+	}
+}
+
+func TestMouseClick_imagesInspectsNewSelection(t *testing.T) {
+	m := imagesModel(t)
+	next, cmd := m.handleMouseClick(tea.MouseClickMsg(tea.Mouse{Y: 3, Button: tea.MouseLeft}))
+	m = next.(Model)
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection after click = %q, want nginx:1.27", got)
+	}
+	if got := inspectRefOf(t, m, cmd); got != "nginx:1.27" {
+		t.Errorf("inspect ref = %q, want nginx:1.27", got)
+	}
+}
+
+func TestMouseWheel_imagesUnchangedSelectionIssuesNoInspect(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", &backend.ImageInspect{ID: "1"}, nil)
+	// Wheel up at the top row cannot move the cursor.
+	_, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+	if cmd != nil {
+		t.Fatalf("unchanged selection must not inspect, got %T", cmd())
+	}
+}
+
+func TestMouseWheel_volumesInspectsNewSelection(t *testing.T) {
+	m := volumesModel(t)
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if got := m.volPanel.Selected().Name; got != "cache" {
+		t.Fatalf("selection after wheel = %q, want cache", got)
+	}
+	_, load := settle(t, m, cmd)
+	if load == nil {
+		t.Fatal("expected an inspect command after the selection settled, got nil")
+	}
+	msg, ok := load().(volumeInspectMsg)
+	if !ok {
+		t.Fatalf("expected volumeInspectMsg, got %T", load())
+	}
+	if msg.name != "cache" {
+		t.Errorf("inspect name = %q, want cache", msg.name)
+	}
+}
+
+func TestInspect_rapidSelectionChangesCoalesceIntoOne(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+		{ID: "3", Repository: "redis", Tag: "7"},
+	})
+
+	// Two cursor steps in quick succession, as a held key produces.
+	var scheduled []tea.Cmd
+	for range 2 {
+		next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("selection change must schedule an inspect")
+		}
+		scheduled = append(scheduled, cmd)
+	}
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "redis:7" {
+		t.Fatalf("selection after two steps = %q, want redis:7", got)
+	}
+
+	// Every superseded timer must be a no-op...
+	for i, cmd := range scheduled[:len(scheduled)-1] {
+		if _, load := settle(t, m, cmd); load != nil {
+			t.Errorf("superseded timer %d inspected anyway: %T", i, load())
+		}
+	}
+	// ...and only the last one inspects, for the settled selection.
+	if got := inspectRefOf(t, m, scheduled[len(scheduled)-1]); got != "redis:7" {
+		t.Errorf("settled inspect ref = %q, want redis:7", got)
+	}
+}
+
+func TestInspect_repeatedListLoadsDoNotStarveThePendingTimer(t *testing.T) {
+	items := []backend.Image{{ID: "1", Repository: "alpine", Tag: "latest"}}
+	m := imagesModel(t)
+
+	next, first := m.Update(imagesLoadedMsg{items: items})
+	m = next.(Model)
+	if first == nil {
+		t.Fatal("the first list load must schedule an inspect")
+	}
+
+	// Poll loads keep arriving faster than the debounce; the selection has not
+	// moved, so they must not supersede the timer already in flight.
+	for range 3 {
+		next, again := m.Update(imagesLoadedMsg{items: items})
+		m = next.(Model)
+		if again != nil {
+			t.Fatalf("an unchanged selection re-armed the debounce: %T", again())
+		}
+	}
+
+	settled, ok := first().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", first())
+	}
+	next, load := m.Update(settled)
+	m = next.(Model)
+	if load == nil {
+		t.Fatal("the pending inspect was starved by the intervening list loads")
+	}
+	if msg, ok := load().(imageInspectMsg); !ok || msg.ref != "alpine:latest" {
+		t.Errorf("expected an inspect of alpine:latest, got %T %+v", load(), msg)
+	}
+
+	// The resolved timer and the completed inspect must not leave the selection
+	// marked, or a later request for the same image would never be scheduled.
+	next, _ = m.Update(imageInspectMsg{ref: "alpine:latest", err: errors.New("boom")})
+	m = next.(Model)
+	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
+		t.Error("a settled selection can no longer schedule a new inspect")
+	}
+}
+
+func TestInspect_doesNotReissueWhileOneIsInFlight(t *testing.T) {
+	items := []backend.Image{{ID: "1", Repository: "alpine", Tag: "latest"}}
+	m := imagesModel(t)
+
+	next, cmd := m.Update(imagesLoadedMsg{items: items})
+	m = next.(Model)
+	settled, ok := cmd().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", cmd())
+	}
+	next, load := m.Update(settled)
+	m = next.(Model)
+	if load == nil {
+		t.Fatal("the settled selection must be inspected")
+	}
+
+	// The inspect is now out at the CLI. Poll loads arriving before it returns
+	// must not launch a second subprocess for the same selection.
+	for range 3 {
+		next, again := m.Update(imagesLoadedMsg{items: items})
+		m = next.(Model)
+		if again != nil {
+			t.Fatalf("a second inspect was scheduled while one was in flight: %T", again())
+		}
+	}
+
+	// A different selection is still inspected while the first is in flight.
+	nginx := []backend.Image{{ID: "2", Repository: "nginx", Tag: "1.27"}}
+	if _, other := m.Update(imagesLoadedMsg{items: nginx}); other == nil {
+		t.Error("a new selection must be inspected even while another inspect is in flight")
+	}
+
+	// The result releases the selection, so a failed inspect can be retried.
+	next, _ = m.Update(imageInspectMsg{ref: "alpine:latest", err: errors.New("boom")})
+	m = next.(Model)
+	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
+		t.Error("a completed inspect must be retryable")
+	}
+}
+
+func TestInspect_selectionJitterDoesNotDoubleUpTheSameInspect(t *testing.T) {
+	// Cursor jitter A->B->A->B inside the debounce window arms one timer per
+	// change; when they land in order, only the first may reach the CLI.
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+	})
+
+	var timers []tea.Cmd
+	for _, delta := range []int{1, -1, 1} {
+		next, cmd := m.handleMouseWheel(wheel(delta))
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("each selection change must schedule an inspect")
+		}
+		timers = append(timers, cmd)
+	}
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection settled on %q, want nginx:1.27", got)
+	}
+
+	launched := 0
+	for i, timer := range timers {
+		msg, ok := timer().(inspectSettledMsg)
+		if !ok {
+			t.Fatalf("timer %d: expected inspectSettledMsg, got %T", i, timer())
+		}
+		next, load := m.Update(msg)
+		m = next.(Model)
+		if load != nil {
+			launched++
+		}
+	}
+	if launched != 1 {
+		t.Errorf("jitter launched %d inspects for one settled selection, want 1", launched)
+	}
+}
+
+func wheel(delta int) tea.MouseWheelMsg {
+	button := tea.MouseWheelDown
+	if delta < 0 {
+		button = tea.MouseWheelUp
+	}
+	return tea.MouseWheelMsg(tea.Mouse{Button: button})
+}
+
+func TestLoadImageInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
+	m := imagesModel(t)
+	if cmd := m.loadImageInspectCmd(); cmd == nil {
+		t.Fatal("first inspect of a selection must be issued")
+	}
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", &backend.ImageInspect{ID: "1"}, nil)
+	if cmd := m.loadImageInspectCmd(); cmd != nil {
+		t.Error("inspect must be skipped while the same image is already inspected")
+	}
+	// A failed inspect is not cached, so the next poll retries.
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", nil, errors.New("boom"))
+	if cmd := m.loadImageInspectCmd(); cmd == nil {
+		t.Error("failed inspect must be retried")
+	}
+}
+
+func TestLoadVolumeInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
+	m := volumesModel(t)
+	if cmd := m.loadVolumeInspectCmd(); cmd == nil {
+		t.Fatal("first inspect of a selection must be issued")
+	}
+	m.volPanel = m.volPanel.SetInspect("data", &backend.VolumeInspect{Name: "data"}, nil)
+	if cmd := m.loadVolumeInspectCmd(); cmd != nil {
+		t.Error("inspect must be skipped while the same volume is already inspected")
+	}
+	m.volPanel = m.volPanel.SetInspect("data", nil, errors.New("boom"))
+	if cmd := m.loadVolumeInspectCmd(); cmd == nil {
+		t.Error("failed inspect must be retried")
+	}
+}
+
+func TestSelectionChanged_nilHandling(t *testing.T) {
+	img := &backend.Image{Repository: "alpine", Tag: "latest"}
+	if selectionRefChanged(nil, nil) {
+		t.Error("nil to nil image selection did not change")
+	}
+	if !selectionRefChanged(nil, img) {
+		t.Error("nil to non-nil image selection changed")
+	}
+	if !selectionRefChanged(img, nil) {
+		t.Error("non-nil to nil image selection changed")
+	}
+	vol := &backend.Volume{Name: "data"}
+	if selectionNameChanged(nil, nil) {
+		t.Error("nil to nil volume selection did not change")
+	}
+	if !selectionNameChanged(nil, vol) {
+		t.Error("nil to non-nil volume selection changed")
+	}
+	if !selectionNameChanged(vol, nil) {
+		t.Error("non-nil to nil volume selection changed")
 	}
 }
 
@@ -527,5 +856,27 @@ func assertMarked(t *testing.T, pane string, got []string, want ...string) {
 		if got[i] != want[i] {
 			t.Fatalf("%s MarkedIDs = %v, want %v", pane, got, want)
 		}
+	}
+}
+
+// A dangling image has no reference, and the reference is the only thing the
+// CLI accepts, so settling on one must not run `container image inspect ""`.
+func TestScheduleInspect_danglingImageRunsNoSubprocess(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "sha256:dangling"},
+	})
+
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if backend.FormatRef(*m.imgPanel.Selected()) != "" {
+		t.Fatalf("expected the dangling row to be selected, got %+v", m.imgPanel.Selected())
+	}
+	if cmd != nil {
+		t.Errorf("a dangling selection scheduled an inspect: %T", cmd())
+	}
+	if load := m.loadImageInspectCmd(); load != nil {
+		t.Errorf("a dangling selection produced an inspect command: %T", load())
 	}
 }
