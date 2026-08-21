@@ -2354,7 +2354,16 @@ func TestImagesDetail_forbiddenPushDoesNotBlameCredentials(t *testing.T) {
 	if !strings.Contains(detail, squash("lack write access")) {
 		t.Fatalf("a 403 must be explained as a possible permission problem, got: %q", detail)
 	}
-	if !strings.Contains(detail, squash("log in")) {
+	if !strings.Contains(detail, squash("login")) {
+		t.Fatalf("a 403 must offer logging in as a possibility, got: %q", detail)
+	}
+	// squash() drops whitespace, so the mention above is satisfied by the
+	// dismissive wording this fix removed ("login won't help" squashes to a
+	// string containing "login"). These carry the actual guarantee.
+	if strings.Contains(detail, squash("won't help")) {
+		t.Fatalf("a 403 must not rule out that logging in would help, got: %q", detail)
+	}
+	if strings.Contains(detail, squash("will not help")) {
 		t.Fatalf("a 403 must not rule out that logging in would help, got: %q", detail)
 	}
 	if strings.Contains(detail, squash("push rejected — run")) {
