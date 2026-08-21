@@ -46,8 +46,31 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list|ls) cat "$DATA/images.json" ;;
+      inspect) cat "$DATA/image-inspect.json" ;;
       delete|rm) echo "ok image delete ${1:-}" >&2 ;;
       pull) echo "ok image pull ${1:-}" >&2 ;;
+      tag) echo "ok image tag $*" >&2 ;;
+      save) echo "ok image save $*" >&2 ;;
+      load) echo "ok image load $*" >&2 ;;
+      push)
+        case "${FAKE_CONTAINER_FAIL_PUSH:-}" in
+          auth)
+            echo "Error: HTTP request to https://registry-1.docker.io/v2/library/foo/blobs/sha256:abc failed with response: 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io" >&2
+            exit 1
+            ;;
+          forbidden)
+            echo "Error: HTTP request to https://registry-1.docker.io/v2/myorg/app/blobs/uploads/ failed with response: 403 Forbidden. Reason: requested access to the resource is denied" >&2
+            exit 1
+            ;;
+          generic)
+            # The real CLI echoes the reference back into stderr; keep that so
+            # tests exercise a reference whose own words look like an auth error.
+            echo "Error: image with reference $*: unexpected network failure" >&2
+            exit 1
+            ;;
+        esac
+        echo "ok image push $*" >&2
+        ;;
       *) echo "unknown image subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;
@@ -55,6 +78,7 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list|ls) cat "$DATA/volumes.json" ;;
+      inspect) cat "$DATA/volume-inspect.json" ;;
       delete|rm) echo "ok volume delete ${1:-}" >&2 ;;
       *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
     esac
@@ -70,8 +94,34 @@ case "$cmd" in
       *) echo "unknown network subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;
+  run)
+    # Echo each remaining argument on its own line (not word-split) so tests
+    # can verify exact argv boundaries even for values containing spaces.
+    printf '%s\n' "$@"
+    ;;
   exec)
-    echo "fake exec $*" >&2
+    printf '%s\n' "$@"
+    ;;
+  system)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      status)
+        if [[ "${FAKE_CONTAINER_SYSTEM_DOWN:-}" == "1" ]]; then
+          cat "$DATA/system-status-down.json"
+          exit 1
+        fi
+        cat "$DATA/system-status.json"
+        ;;
+      df)
+        if [[ "${FAKE_CONTAINER_SYSTEM_DOWN:-}" == "1" ]]; then
+          echo 'Error: interrupted: "XPC connection error: Connection invalid"' >&2
+          echo "Ensure container system service has been started with \`container system start\`." >&2
+          exit 1
+        fi
+        cat "$DATA/system-df.json"
+        ;;
+      *) echo "unknown system subcommand: $sub" >&2; exit 1 ;;
+    esac
     ;;
   *)
     echo "fake-container: unknown command: $cmd $*" >&2

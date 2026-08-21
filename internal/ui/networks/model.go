@@ -21,8 +21,8 @@ const (
 
 // Model is the networks panel.
 type Model struct {
-	items     []backend.Network
-	filtered  []backend.Network
+	items     []backend.NetworkInfo
+	filtered  []backend.NetworkInfo
 	cursor    int
 	filter    string
 	filtering bool
@@ -55,7 +55,7 @@ func (m Model) SetPageRows(n int) Model {
 }
 
 // SetItems replaces the network list.
-func (m Model) SetItems(items []backend.Network) Model {
+func (m Model) SetItems(items []backend.NetworkInfo) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
 	if m.cursor >= len(m.filtered) {
@@ -65,7 +65,7 @@ func (m Model) SetItems(items []backend.Network) Model {
 }
 
 // Selected returns the highlighted network.
-func (m Model) Selected() *backend.Network {
+func (m Model) Selected() *backend.NetworkInfo {
 	if len(m.filtered) == 0 {
 		return nil
 	}
@@ -139,12 +139,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func applyFilter(items []backend.Network, filter string) []backend.Network {
+func applyFilter(items []backend.NetworkInfo, filter string) []backend.NetworkInfo {
 	if filter == "" {
 		return items
 	}
 	f := strings.ToLower(filter)
-	var out []backend.Network
+	var out []backend.NetworkInfo
 	for _, n := range items {
 		if strings.Contains(strings.ToLower(n.Name), f) || strings.Contains(strings.ToLower(n.Mode), f) {
 			out = append(out, n)
