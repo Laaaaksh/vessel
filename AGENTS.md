@@ -79,6 +79,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   switching.
 - `version`/`commit`/`date` in `main.go` must stay package-level `var`s, not `const`s - the
   `-X main.version=...` linker flag goreleaser passes silently no-ops against a `const`.
+- `brews:` must set `directory: Formula` (confirmed against installed v2.17.1's own
+  `goreleaser jsonschema` output - `folder` isn't even a valid property on that version).
+  Without it, goreleaser writes the generated formula to the tap repo's root instead of
+  `Formula/`. Homebrew resolves a tap's formulae from `Formula/` first, so a hand-written or
+  older formula sitting in `Formula/` silently wins over a freshly published root-level one -
+  a release can succeed while `brew install` keeps serving stale code. `goreleaser release
+  --snapshot --clean` writes the formula to `dist/homebrew/Formula/vessel.rb` on this version;
+  verify against that path (not `dist/homebrew/vessel.rb`) after touching this block.
 
 ## Maintaining this file
 
