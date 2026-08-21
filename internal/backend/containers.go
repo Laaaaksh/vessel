@@ -187,6 +187,16 @@ func mapContainers(raw []cliContainer) []Container {
 				c.Hostname = n.Hostname
 			}
 		}
+		if len(c.Networks) == 0 {
+			// A stopped container reports no network status, but the network
+			// it is configured on is still known and worth showing; only the
+			// runtime address is genuinely absent.
+			for _, n := range r.Configuration.Networks {
+				if n.Network != "" {
+					c.Networks = append(c.Networks, Network{Name: n.Network})
+				}
+			}
+		}
 		for _, mt := range r.Configuration.Mounts {
 			// A named volume reports source as the backing disk image on the
 			// host (~95 chars of Application Support path), so the volume name
