@@ -38,6 +38,8 @@ condensed into user-facing terms. Format is based on
 - Community health files: Code of Conduct, bug-report and feature-request issue
   forms, pull-request template, and SECURITY.md with private vulnerability
   reporting.
+- Automated dependency updates via Dependabot (Go modules and GitHub Actions),
+  and the CI workflow now runs with read-only token permissions.
 
 ### Removed
 - An unreferenced personal development script left behind in `scripts/`.
