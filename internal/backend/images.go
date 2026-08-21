@@ -427,17 +427,27 @@ func splitRepoTag(name string) (repo, tag string) {
 // whether one exists. An untagged, unpinned row formats to a bare repository,
 // which a registry resolves as ":latest" — a different artifact than the row
 // shows — so actions that publish or archive an image must refuse it rather
-// than guess. Digest-pinned rows now format exactly too, but tag, save and
-// push still refuse them: the CLI's acceptance of digest-pinned sources for
-// those verbs is unverified, and the refusal is the conservative side of that.
+// than guess. A digest-pinned row is refused too, tag or no tag: it formats
+// exactly, but the CLI's acceptance of digest-pinned sources for tag, save and
+// push is unverified, and the refusal is the conservative side of that.
 func ExactRef(img Image) (string, bool) {
 	if img.Repository == "" {
 		return "", false
 	}
-	if img.Tag == "" || img.Tag == untaggedMarker {
+	if img.Digest != "" {
+		return "", false
+	}
+	if !hasNamedTag(img) {
 		return "", false
 	}
 	return FormatRef(img), true
+}
+
+// hasNamedTag reports whether the row carries a tag that names an artifact.
+// The CLI writes untaggedMarker for a row that lost its tag, which addresses
+// nothing, so it counts as absent alongside an empty tag.
+func hasNamedTag(img Image) bool {
+	return img.Tag != "" && img.Tag != untaggedMarker
 }
 
 // FormatRef returns the full image reference: "repo:tag", or the exact pinned
@@ -445,15 +455,12 @@ func ExactRef(img Image) (string, bool) {
 // name-only references are formatted exactly as before the digest branch
 // existed — it fires only on a non-empty Digest.
 func FormatRef(img Image) string {
+	ref := img.Repository
+	if hasNamedTag(img) {
+		ref += refTagSep + img.Tag
+	}
 	if img.Digest != "" {
-		ref := img.Repository + refDigestSep + img.Digest
-		if img.Tag != "" && img.Tag != untaggedMarker {
-			ref = img.Repository + refTagSep + img.Tag + refDigestSep + img.Digest
-		}
-		return ref
+		ref += refDigestSep + img.Digest
 	}
-	if img.Tag == "" || img.Tag == untaggedMarker {
-		return img.Repository
-	}
-	return img.Repository + refTagSep + img.Tag
+	return ref
 }

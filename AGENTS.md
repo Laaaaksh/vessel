@@ -85,8 +85,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `Image.Digest` is the reference digest, deliberately distinct from
   `ImageInspect.Digest` (the run-variant manifest digest). Tag/save/push still
   refuse digest-pinned rows (`ExactRef` + `imageActionRef`) because the CLI's
-  acceptance of pinned sources for those verbs is unverified; revisit only with
-  a probe, and note push needs registry credentials to test fully.
+  acceptance of pinned sources for those verbs is unverified; the refusal keys
+  off a non-empty `Image.Digest`, NOT off the tag, because `repo:tag@sha256:…`
+  is a real list name that parses to a non-empty tag AND digest. Revisit only
+  with a probe, and note push needs registry credentials to test fully.
 
 ## Release pipeline
 

@@ -2023,27 +2023,35 @@ func TestImagesActions_refuseDigestPinnedImage(t *testing.T) {
 	// The reference is exact once the digest survives formatting, but tag,
 	// save and push stay refused until the CLI's acceptance of digest-pinned
 	// sources for those verbs is verified — the conservative side of that.
-	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Digest: "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"}})
-	if ref := backend.FormatRef(*m.imgPanel.Selected()); !strings.Contains(ref, "@") {
-		t.Fatalf("precondition: pinned row must format with its digest, got %q", ref)
-	}
-	for _, label := range []string{"Tag…", "Save…", "Push"} {
-		run := findAction(m.buildActions(), label)
-		if run == nil {
-			t.Fatalf("missing action %q", label)
+	// A pin that also carries a tag ("repo:tag@sha256:…") is a real list name,
+	// so the refusal must not key off the tag alone.
+	const digest = "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
+	for _, img := range []backend.Image{
+		{ID: "sha256:abc", Repository: "alpine", Digest: digest},
+		{ID: "sha256:abc", Repository: "alpine", Tag: "v1", Digest: digest},
+	} {
+		m := imagesModelWithItems(t, []backend.Image{img})
+		if ref := backend.FormatRef(*m.imgPanel.Selected()); !strings.Contains(ref, "@") {
+			t.Fatalf("precondition: pinned row must format with its digest, got %q", ref)
 		}
-		next, cmd := run(m)
-		if cmd != nil {
-			t.Fatalf("%s must not act on a digest-pinned image", label)
-		}
-		if next.mode != modeBrowse {
-			t.Fatalf("%s on a digest-pinned image opened mode %v", label, next.mode)
-		}
-		if !strings.Contains(next.status, "no named reference") {
-			t.Fatalf("%s status must explain why the row is unaddressable, got %q", label, next.status)
-		}
-		if got := lastCLICommand(next); got != "" {
-			t.Fatalf("%s on a digest-pinned image shelled out: %q", label, got)
+		for _, label := range []string{"Tag…", "Save…", "Push"} {
+			run := findAction(m.buildActions(), label)
+			if run == nil {
+				t.Fatalf("missing action %q", label)
+			}
+			next, cmd := run(m)
+			if cmd != nil {
+				t.Fatalf("%s must not act on a digest-pinned image (tag %q)", label, img.Tag)
+			}
+			if next.mode != modeBrowse {
+				t.Fatalf("%s on a digest-pinned image opened mode %v", label, next.mode)
+			}
+			if !strings.Contains(next.status, "no named reference") {
+				t.Fatalf("%s status must explain why the row is unaddressable, got %q", label, next.status)
+			}
+			if got := lastCLICommand(next); got != "" {
+				t.Fatalf("%s on a digest-pinned image shelled out: %q", label, got)
+			}
 		}
 	}
 }
