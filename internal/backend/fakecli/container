@@ -83,6 +83,17 @@ case "$cmd" in
       *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;
+  network)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list|ls) cat "$DATA/networks.json" ;;
+      inspect)
+        # "ghost" simulates an inspect miss: the CLI exits 0 with an empty array.
+        if [[ "${1:-}" == "ghost" ]]; then echo "[]"; else cat "$DATA/networks_inspect.json"; fi
+        ;;
+      *) echo "unknown network subcommand: $sub" >&2; exit 1 ;;
+    esac
+    ;;
   run)
     # Echo each remaining argument on its own line (not word-split) so tests
     # can verify exact argv boundaries even for values containing spaces.
