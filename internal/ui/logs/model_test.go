@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func makeLines(n int) []string {
@@ -12,6 +15,52 @@ func makeLines(n int) []string {
 		out[i] = fmt.Sprintf("line %d", i)
 	}
 	return out
+}
+
+func keyMsg(s string) tea.KeyPressMsg {
+	r := rune(s[0])
+	return tea.KeyPressMsg(tea.Key{Code: r, Text: s})
+}
+
+// spaceKey mirrors a real space bar press: KeyPressMsg.String() returns
+// "space", never a literal space.
+func spaceKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "})
+}
+
+// enterKey mirrors a real enter press (KeyPressMsg.String() == "enter").
+func enterKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+}
+
+// The search prompt used to drop a space press (it arrives as "space") and
+// every multi-byte rune (Key.String() is byte-lengthed), so a phrase could
+// never be typed; backspace also trimmed single bytes, corrupting input.
+func TestSearchQueryAcceptsSpacesAndUnicode(t *testing.T) {
+	m := New().SetSize(100, 20).Open("web", []string{"alpha beta", "gamma", "alpha beta again"})
+	m, _ = m.Update(keyMsg("/"))
+	if !m.searching {
+		t.Fatal("/ did not open the search prompt")
+	}
+	m, _ = m.Update(spaceKey())
+	if m.query != " " {
+		t.Fatalf("query = %q after space, want a literal space", m.query)
+	}
+	for _, r := range "beta" {
+		m, _ = m.Update(keyMsg(string(r)))
+	}
+	m, _ = m.Update(keyMsg("é"))
+	if m.query != " betaé" {
+		t.Fatalf("query = %q, want the multi-byte rune preserved", m.query)
+	}
+	m, _ = m.Update(keyMsg("backspace"))
+	if m.query != " beta" || !utf8.ValidString(m.query) {
+		t.Fatalf("query = %q after backspace, want exactly the trailing rune removed", m.query)
+	}
+	m, _ = m.Update(enterKey())
+	if len(m.matches) != 2 || m.searching {
+		t.Fatalf("matches = %v searching = %v, want both beta lines found and the prompt closed", m.matches, m.searching)
+	}
 }
 
 // A stored offset only stays valid until the buffer or the viewport changes.

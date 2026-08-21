@@ -50,6 +50,29 @@ func vol(name string) backend.Volume {
 	return backend.Volume{Name: name, Driver: "local"}
 }
 
+// The filter used to drop a space press (it arrives as "space") and every
+// multi-byte rune (Key.String() is byte-lengthed), so a name containing a
+// space could never be typed; backspace also trimmed single bytes.
+func TestVolumeFilterAcceptsSpacesAndUnicode(t *testing.T) {
+	m := New().SetItems([]backend.Volume{vol("my data"), vol("scratch")})
+	m, _ = m.Update(keyMsg("/"))
+	m, _ = m.Update(spaceKey())
+	if m.filter != " " {
+		t.Fatalf("filter = %q after space, want a literal space", m.filter)
+	}
+	for _, r := range "data" {
+		m, _ = m.Update(keyMsg(string(r)))
+	}
+	if m.filter != " data" || m.Len() != 1 || m.Selected().Name != "my data" {
+		t.Fatalf("filter = %q len = %d, want the filter to reach \"my data\"", m.filter, m.Len())
+	}
+	m, _ = m.Update(keyMsg("é"))
+	m, _ = m.Update(keyMsg("backspace"))
+	if m.filter != " data" || !utf8.ValidString(m.filter) {
+		t.Fatalf("filter = %q after é+backspace round-trip, want the rune added and removed whole", m.filter)
+	}
+}
+
 func TestVolumeSpaceTogglesMarkOnSelected(t *testing.T) {
 	m := New().SetItems([]backend.Volume{vol("data"), vol("logs")})
 	m, _ = m.Update(spaceKey())

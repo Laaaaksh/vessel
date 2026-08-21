@@ -24,6 +24,12 @@ func enterKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 }
 
+// spaceKey mirrors a real space bar press: KeyPressMsg.String() returns
+// "space", never a literal space.
+func spaceKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "})
+}
+
 func net(name, mode string) backend.NetworkInfo {
 	return backend.NetworkInfo{Name: name, Mode: mode}
 }
@@ -147,4 +153,26 @@ func (s *modelSuite) TestRenderRowAlignsWithHeader() {
 	want := s.column(header, "MODE")
 	s.Equal(want, s.column(rows[0], "nat"))
 	s.Equal(want, s.column(rows[1], "bridge"))
+}
+
+// The filter used to drop a space press (it arrives as "space") and every
+// multi-byte rune (Key.String() is byte-lengthed), so a name containing a
+// space could never be typed; backspace also trimmed single bytes.
+func (s *modelSuite) TestFilterAcceptsSpacesAndUnicodeBackspaceTrimsWholeRunes() {
+	m := New().SetItems([]backend.NetworkInfo{net("my net", "nat"), net("bridge0", "bridge")})
+
+	m, _ = m.Update(keyMsg("/"))
+	m, _ = m.Update(spaceKey())
+	s.Require().Equal(" ", m.filter)
+
+	for _, r := range "net" {
+		m, _ = m.Update(keyMsg(string(r)))
+	}
+	s.Require().Equal(" net", m.filter)
+	s.Require().Len(m.filtered, 1)
+	s.Equal("my net", m.Selected().Name)
+
+	m, _ = m.Update(keyMsg("é"))
+	m, _ = m.Update(keyMsg("backspace"))
+	s.Equal(" net", m.filter, "the multi-byte rune must be added and removed whole")
 }
