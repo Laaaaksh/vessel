@@ -1449,6 +1449,15 @@ func (m Model) confirmModal() string {
 // blank rows and the hint — everything that is not a menu item.
 const actionsModalChrome = 8
 
+func (m Model) actionsModalWidth() int { return min(40, m.width-4) }
+
+// actionsModalContent is the cells a row may occupy. lipgloss counts Width as
+// the outer box, so the rounded border takes one cell on each side and
+// Padding(1, 2) another two. Every row is truncated to what is left, so one item
+// is always exactly one row — which is what lets actionWindow size the window by
+// item count rather than by rendered rows.
+func (m Model) actionsModalContent() int { return max(1, m.actionsModalWidth()-6) }
+
 // actionWindow is the slice of the menu that fits the frame. lipgloss.Place pads
 // but never truncates, so a menu taller than the terminal would push the header
 // off the alt-screen; the window follows the selection instead.
@@ -1461,25 +1470,30 @@ func (m Model) actionWindow() (start, end int) {
 }
 
 func (m Model) actionsModal() string {
-	rows := []string{m.st.title.Render("actions"), ""}
+	content := m.actionsModalContent()
+	fit := func(s string) string { return ansi.Truncate(s, content, "…") }
+	rows := []string{m.st.title.Render(fit("actions")), ""}
 	start, end := m.actionWindow()
 	for i := start; i < end; i++ {
-		line := "  " + m.actionItems[i].label
+		label := m.actionItems[i].label
 		if i == m.actionIdx {
-			line = m.st.navItemActive.Render("> " + m.actionItems[i].label)
+			// navItemActive adds a cell of padding on each side.
+			rows = append(rows, m.st.navItemActive.Render(
+				ansi.Truncate("> "+label, max(1, content-2), "…")))
+			continue
 		}
-		rows = append(rows, line)
+		rows = append(rows, fit("  "+label))
 	}
 	hint := "[enter] run  [esc] close"
 	if end-start < len(m.actionItems) {
 		hint = fmt.Sprintf("%d/%d  ", m.actionIdx+1, len(m.actionItems)) + hint
 	}
-	rows = append(rows, "", m.st.dimText.Render(hint))
+	rows = append(rows, "", m.st.dimText.Render(fit(hint)))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPurple).
 		Padding(1, 2).
-		Width(min(40, m.width-4)).
+		Width(m.actionsModalWidth()).
 		Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 }
 

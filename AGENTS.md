@@ -16,8 +16,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Container CLI sharp edges
 
-- Vessel deliberately does NOT own registry login: `image push` auth failures
-  tell the user to run `container registry login` (see `internal/backend/images.go`).
+- Vessel deliberately does NOT own registry login. A refused `image push` splits
+  two ways in `internal/backend/images.go`, and the advice is deliberately
+  opposite: `credentialStderrPhrases` (401 and friends) tells the user to run
+  `container registry login`; `permissionStderrPhrases` (403) tells them login
+  will NOT help, because the session is valid and the account simply lacks write
+  access. Do not fold 403 back into the credential list or name the login command
+  in its message — a 403 does not establish that the credentials were rejected.
 - Classify a CLI failure from `CLIError.Stderr` (`internal/backend/client.go`),
   never from `err.Error()` — but stderr echoes the image reference too, so match
   multi-word phrases only a registry emits ("401 unauthorized", "no credentials

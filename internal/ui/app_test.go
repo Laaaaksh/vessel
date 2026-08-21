@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 func TestView_shellModeEmpty(t *testing.T) {
@@ -952,19 +953,21 @@ func TestImagesDetail_noticeNeverGrowsThePaneBeyondItsBudget(t *testing.T) {
 }
 
 func TestImagesDetail_noticeSurvivesTheSmallestSupportedPane(t *testing.T) {
-	panel := New().imgPanel.
-		SetItems([]backend.Image{{
-			ID:         "sha256:abc",
-			Repository: "ghcr.io/a-deliberately-long-org/a-deliberately-long-image",
-			Tag:        "v1",
-		}}).
-		SetNotice(backend.PushAuthNotice)
-	// 18x4 is what mainPanels hands the detail pane at 60x12 — the smallest
-	// frame View() still renders — with the command log toggled on.
-	for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
-		detail := squash(ansi.Strip(panel.DetailView(size.w, size.h)))
-		if !strings.Contains(detail, squash("container registry login")) {
-			t.Errorf("detail pane %dx%d loses the login command: %q", size.w, size.h, detail)
+	items := []backend.Image{{
+		ID:         "sha256:abc",
+		Repository: "ghcr.io/a-deliberately-long-org/a-deliberately-long-image",
+		Tag:        "v1",
+	}}
+	// Both refusals are held to the same envelope: 18x4 is what mainPanels hands
+	// the detail pane at 60x12 — the smallest frame View() still renders — with
+	// the command log toggled on.
+	for _, notice := range []string{backend.PushAuthNotice, backend.PushPermissionNotice} {
+		panel := New().imgPanel.SetItems(items).SetNotice(notice)
+		for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
+			detail := squash(ansi.Strip(panel.DetailView(size.w, size.h)))
+			if !strings.Contains(detail, squash(notice)) {
+				t.Errorf("detail pane %dx%d truncates %q: %q", size.w, size.h, notice, detail)
+			}
 		}
 	}
 }
@@ -978,7 +981,7 @@ func TestImagesDetail_noticeNotShownForANonPushFailure(t *testing.T) {
 		Stderr: "Error: ... 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io\n",
 		Err:    errors.New("exit status 1"),
 	}
-	if !backend.IsPushAuthError(pullErr) {
+	if backend.PushDenialNotice(pullErr) == "" {
 		t.Fatal("precondition: this stderr should classify as auth-shaped")
 	}
 	out, _ := m.Update(actionDoneMsg{err: pullErr})
@@ -1045,6 +1048,34 @@ func TestActionsModal_fitsTheSmallestSupportedFrame(t *testing.T) {
 		if rows := len(strings.Split(strings.TrimRight(frame, "\n"), "\n")); rows > mm.height {
 			t.Errorf("%s actions menu renders %d rows into a %d-row frame", m.viewName(), rows, mm.height)
 		}
+	}
+}
+
+func TestActionsModal_longLabelCannotOutgrowTheFrame(t *testing.T) {
+	m := New()
+	m.width, m.height = 60, 12
+	m.cfg.CustomCommands = []config.CustomCommand{
+		{Name: "tail all container logs together", Command: "echo hi"},
+		{Name: "another deliberately long custom command name", Command: "echo hi"},
+	}
+	next, _ := m.handleKey(keyMsg("x"))
+	mm := next.(Model)
+
+	// Walk the whole menu so every label, selected and not, renders in the window.
+	for i := 0; i < len(mm.actionItems); i++ {
+		frame := ansi.Strip(viewString(mm.View()))
+		if rows := len(strings.Split(strings.TrimRight(frame, "\n"), "\n")); rows > mm.height {
+			t.Fatalf("item %d (%q) grows the frame to %d rows in a %d-row terminal",
+				i, mm.actionItems[i].label, rows, mm.height)
+		}
+		for _, row := range strings.Split(ansi.Strip(mm.actionsModal()), "\n") {
+			if w := lipgloss.Width(row); w > mm.actionsModalWidth() {
+				t.Fatalf("item %d: modal row is %d cells wide, modal is %d: %q",
+					i, w, mm.actionsModalWidth(), row)
+			}
+		}
+		n, _ := mm.handleKey(keyMsg("j"))
+		mm = n.(Model)
 	}
 }
 

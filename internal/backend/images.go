@@ -203,10 +203,6 @@ func pushDenialOf(err error) pushDenial {
 	return denialNone
 }
 
-// IsPushAuthError reports whether the registry refused the push, for either
-// reason.
-func IsPushAuthError(err error) bool { return pushDenialOf(err) != denialNone }
-
 // PushDenialNotice returns the images-panel notice matching how the registry
 // refused a push, or "" when the failure was not a refusal.
 func PushDenialNotice(err error) string {
