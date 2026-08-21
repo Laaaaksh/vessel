@@ -27,12 +27,20 @@ type Model struct {
 	toggleMark string
 	pageRows   int
 	notice     string
+	noticeRef  string
 }
 
-// SetNotice attaches a standing message to the detail pane. The pane wraps, so
-// unlike the footer it can carry an instruction too long to fit one row.
-func (m Model) SetNotice(notice string) Model {
-	m.notice = notice
+// SetNotice attaches a standing message to one image's detail pane. The pane
+// wraps, so unlike the footer it can carry an instruction too long to fit one
+// row. The notice belongs to ref, not to the panel: a refusal reported for one
+// image must not follow the cursor onto the next row, so DetailView renders it
+// only while ref is the image on show. An empty notice clears both.
+func (m Model) SetNotice(ref, notice string) Model {
+	if notice == "" {
+		m.notice, m.noticeRef = "", ""
+		return m
+	}
+	m.notice, m.noticeRef = notice, ref
 	return m
 }
 
@@ -92,6 +100,18 @@ func (m Model) SetItems(items []backend.Image) Model {
 		}
 	}
 	m.marked = marked
+	if m.noticeRef != "" {
+		present := false
+		for _, img := range items {
+			if backend.FormatRef(img) == m.noticeRef {
+				present = true
+				break
+			}
+		}
+		if !present {
+			m.notice, m.noticeRef = "", ""
+		}
+	}
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
@@ -276,7 +296,9 @@ func (m Model) ListView(width, height int) string {
 // cap, so the pane is capped explicitly: anything longer would grow the body row
 // and push the header off the alt-screen. The notice leads the pane so that when
 // the cap bites — 18x4 at the smallest supported frame — it is the reference and
-// the static fields that get cut, not the instruction the user has to act on.
+// the static fields that get cut, not the instruction the user has to act on. It
+// shows only on the image it was recorded against, so moving the cursor hides it
+// and moving back brings it into view again.
 func (m Model) DetailView(width, height int) string {
 	pane := lipgloss.NewStyle().Width(width).Height(height).MaxHeight(max(1, height))
 	sel := m.Selected()
@@ -284,7 +306,7 @@ func (m Model) DetailView(width, height int) string {
 		return pane.Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
 	var lines []string
-	if m.notice != "" {
+	if m.notice != "" && m.noticeRef == backend.FormatRef(*sel) {
 		lines = append(lines, lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#fbbf24")).
 			Width(max(1, width-2)).
