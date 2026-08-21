@@ -171,11 +171,12 @@ const (
 	// globalTimeout bounds whole-store verbs such as prune, which sweep every
 	// container/image/volume and take far longer than a single removal.
 	globalTimeout = 120 * time.Second
-	// All three are outer bounds: backend.Client now applies a per-call
-	// budget of its own to the known-long verbs — the transfer/sweep window
-	// matches globalTimeout, the batched-delete window matches confirmTimeout
-	// and the one-shot exec window matches execTimeout — while quick commands
-	// keep a short default of their own. Both halves of each pair are pinned
+	// All four are outer bounds: backend.Client applies a per-call budget
+	// of its own to the known-long verbs — the lifecycle window matches
+	// lifecycleTimeout, the transfer/sweep window matches globalTimeout,
+	// the batched-delete window matches confirmTimeout and the one-shot
+	// exec window matches execTimeout — while quick commands keep a short
+	// default of their own. Both halves of each pair are pinned
 	// (TestOuterBounds_matchBackendPerCallBudgets here,
 	// TestLongOperationBudgets_matchInternalUIOuterBounds in backend), so
 	// neither side can drift alone and quietly become the earlier deadline.

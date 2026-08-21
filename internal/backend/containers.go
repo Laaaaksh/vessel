@@ -103,15 +103,16 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*Container, e
 	return &cs[0], nil
 }
 
-// StartContainer starts a stopped container.
+// StartContainer starts a stopped container. A state transition can outlast
+// a quick list, so it holds the lifecycle budget rather than the default.
 func (c *Client) StartContainer(ctx context.Context, id string) error {
-	_, err := c.run(ctx, "start", id)
+	_, err := c.runWithTimeout(ctx, lifecycleTimeout, "start", id)
 	return err
 }
 
-// StopContainer stops a running container.
+// StopContainer stops a running container under the same lifecycle budget.
 func (c *Client) StopContainer(ctx context.Context, id string) error {
-	_, err := c.run(ctx, "stop", id)
+	_, err := c.runWithTimeout(ctx, lifecycleTimeout, "stop", id)
 	return err
 }
 

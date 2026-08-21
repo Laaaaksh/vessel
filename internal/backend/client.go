@@ -13,9 +13,17 @@ import (
 
 const (
 	// defaultTimeout bounds a routine CLI invocation: lists, inspects,
-	// lifecycle verbs, single-target deletes. It stays short so a hung
-	// quick command still fails fast instead of wedging a poll or action.
+	// single-target deletes, other inherently quick reads. It stays short
+	// so a hung quick command still fails fast instead of wedging a poll
+	// or action.
 	defaultTimeout = 10 * time.Second
+
+	// lifecycleTimeout bounds one container lifecycle verb: start, stop,
+	// and restart as their composition. A state transition can outlast a
+	// list (a stopping container drains its processes first), so it
+	// mirrors internal/ui's identically sized outer bound for the
+	// lifecycle action that issued the call.
+	lifecycleTimeout = 30 * time.Second
 
 	// globalTimeout bounds one invocation that is known to run long: an
 	// image transfer (tag/save/load/push) or a whole-store prune sweep. It
@@ -159,12 +167,13 @@ func (c *Client) runRaw(ctx context.Context, args ...string) ([]byte, error) {
 // runRawWithTimeout is the shared execution core: every invocation funnels
 // through here, and the per-call timeout it wraps is whatever the entry point
 // above chose — the default for quick commands, an explicit named budget for
-// the known-long set. A non-positive timeout falls back to the default rather
-// than killing the process immediately.
+// the known-long set. A non-positive timeout falls back to defaultTimeout
+// rather than to whatever the caller passed, so even a zero-value Client
+// cannot produce an already-expired context.
 func (c *Client) runRawWithTimeout(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	c.recordCmd(args)
 	if timeout <= 0 {
-		timeout = c.timeout
+		timeout = defaultTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

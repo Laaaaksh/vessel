@@ -12,12 +12,16 @@ import (
 // pairing needs an assertion on each side or a drift here would silently make
 // the UI context the earlier deadline again.
 const (
-	wantConfirmBound = 60 * time.Second
-	wantGlobalBound  = 120 * time.Second
-	wantExecBound    = 30 * time.Second
+	wantLifecycleBound = 30 * time.Second
+	wantConfirmBound   = 60 * time.Second
+	wantGlobalBound    = 120 * time.Second
+	wantExecBound      = 30 * time.Second
 )
 
 func TestOuterBounds_matchBackendPerCallBudgets(t *testing.T) {
+	if lifecycleTimeout != wantLifecycleBound {
+		t.Fatalf("lifecycle bound = %v, want %v (backend lifecycleTimeout)", lifecycleTimeout, wantLifecycleBound)
+	}
 	if confirmTimeout != wantConfirmBound {
 		t.Fatalf("confirmed-removal bound = %v, want %v (backend confirmTimeout)", confirmTimeout, wantConfirmBound)
 	}
