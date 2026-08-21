@@ -229,6 +229,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case actionDoneMsg:
+		// Known limitation: m.lastErr set here reaches the footer for one frame
+		// only. refreshCmd below always batches loadContainersCmd, and a
+		// successful containersLoadedMsg clears lastErr unconditionally in
+		// applyContainersLoaded, as does the next tick. Push is the one verb
+		// with a durable surface — the images detail-pane notice set below — so
+		// a tag/save/load failure is reported but not durably shown. Left as is
+		// by decision; the fix belongs in shared refresh plumbing.
 		m.imgPanel = m.imgPanel.SetNotice("", "")
 		if msg.err != nil {
 			m.lastErr = msg.err
@@ -996,6 +1003,15 @@ func (m Model) beginPromptForImage(kind, label, ref string) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
+// handlePromptKey drives the text prompt. Known limitation: the text branch
+// below accepts a key only when its serialised form is a single byte, so the
+// space bar (which serialises as the literal string "space", never " ") and any
+// multi-byte non-ASCII rune are silently dropped. Phase 3's Save… and Load…
+// prompts take filesystem paths, which makes that user-visible: a path with a
+// space is accepted with the space missing, so Save writes to a path the user
+// never typed and Load reports "no such file" for a file that exists. Left as
+// is by decision rather than patched narrowly here; tracked separately as
+// vessel-prompt-drops-space-nonascii.
 func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "esc":
