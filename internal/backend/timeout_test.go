@@ -75,7 +75,7 @@ func assertKilledByBudget(t *testing.T, err error) {
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("err = %v (%T), want an exec.ExitError from a killed process", err, err)
 	}
-	if code := exitErr.ProcessState.ExitCode(); code != signalExitCode {
+	if code := exitErr.ExitCode(); code != signalExitCode {
 		t.Fatalf("fake exited with status %d, want %d (terminated by signal) — the budget cap never fired: %v", code, signalExitCode, err)
 	}
 }
