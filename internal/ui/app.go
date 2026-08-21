@@ -830,7 +830,7 @@ func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cm
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 
-	if k == "ctrl+c" {
+	if k == keyForceQuit {
 		return m, tea.Quit
 	}
 	if m.mode == modeShell {
@@ -901,19 +901,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case Match(k, m.keys.Tab):
 		m.activeView = (m.activeView + 1) % viewCount
 		return m, m.activeViewLoadCmd()
-	case k == "1":
+	case k == keyViewContainers:
 		m.activeView = ViewContainers
 		return m, m.activeViewLoadCmd()
-	case k == "2":
+	case k == keyViewImages:
 		m.activeView = ViewImages
 		return m, m.activeViewLoadCmd()
-	case k == "3":
+	case k == keyViewVolumes:
 		m.activeView = ViewVolumes
 		return m, m.activeViewLoadCmd()
-	case k == "4":
+	case k == keyViewSystem:
 		m.activeView = ViewSystem
 		return m, m.activeViewLoadCmd()
-	case k == "5":
+	case k == keyViewNetworks:
 		m.activeView = ViewNetworks
 		return m, m.activeViewLoadCmd()
 	case Match(k, m.keys.LayoutNext):
@@ -924,7 +924,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.layout = (m.layout + 2) % 3
 		m.setStatus("layout " + m.layout.String())
 		return m, nil
-	case k == "`":
+	case k == keyToggleCmdLog:
 		m.showCmdLog = !m.showCmdLog
 		return m, nil
 	case Match(k, m.keys.FocusNext, m.keys.Right):
@@ -2154,12 +2154,21 @@ func (m Model) cmdLogView(height int) string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
-// helpVisibleRows is how many binding rows fit beside helpView's fixed chrome
-// (title, view/focus line, blank, blank, close hint). lipgloss pads a box to its
-// declared height but never truncates, so a help list longer than this would
-// render past the alt screen and lose its last rows.
+// helpHeaderRows counts the rows helpView renders above the binding list
+// (title, view/focus line, blank); helpChromeRows counts every non-binding row
+// including those below it (blank, close hint), which is also the height
+// budget helpVisibleRows reserves around the list.
+const (
+	helpHeaderRows = 3
+	helpChromeRows = 5
+)
+
+// helpVisibleRows is how many binding rows fit beside helpView's fixed chrome.
+// lipgloss pads a box to its declared height but never truncates, so a help
+// list longer than this would render past the alt screen and lose its last
+// rows.
 func helpVisibleRows(height int) int {
-	return max(1, height-5)
+	return max(1, height-helpChromeRows)
 }
 
 func (m Model) helpBindings() []helpRow {
