@@ -30,6 +30,10 @@ condensed into user-facing terms. Format is based on
 - Removed the parsed-but-never-applied `[theme]` block from
   `config.example.toml`.
 - Normalized developer home paths out of test fixtures and captured CLI output.
+- The release workflow pins GoReleaser to v2.17.1 (verified end-to-end with a
+  local snapshot build of this tree) instead of floating to `latest`, so a
+  future upstream release that drops the deprecated Homebrew tap support can
+  no longer break tagging.
 
 ### Added
 - Regression test pinning every README keybinding to a help-overlay row and vice

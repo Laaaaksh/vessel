@@ -103,6 +103,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   suffices) while `release.yml` keeps `contents: write` for goreleaser.
   `.github/dependabot.yml` opens weekly gomod + github-actions update PRs -
   expect them and treat them like any other PR (gate: make build/lint/test).
+- `release.yml` pins goreleaser to an exact version (`v2.17.1`), not `latest`:
+  goreleaser removes deprecated features at majors, so floating would silently
+  cross the `brews:` removal cliff and fail tagging with zero repo changes.
+  Dependabot cannot bump action *input* values, so version bumps are manual -
+  run `goreleaser release --snapshot --clean`, verify the formula still lands
+  at `dist/homebrew/Formula/vessel.rb`, then bump deliberately. ci.yml's
+  golangci-lint `version: latest` stays floating on purpose: every PR exercises
+  it, so breakage self-heals where pinning would silently rot.
 - `.goreleaser.yml` still uses `brews:`, not the newer `homebrew_casks:`, despite goreleaser's
   deprecation warning. Confirmed via `goreleaser check` (installed v2.17.1) and goreleaser's own
   deprecation notice: `homebrew_casks` installs via Homebrew Cask semantics, not a Formula - it
