@@ -312,6 +312,46 @@ func TestSetItems_keepsInspectErrorForUnchangedImage(t *testing.T) {
 	}
 }
 
+// Every dangling image renders as an empty reference, so a reference alone
+// cannot key the inspect cache: a failure against one dangling row would
+// otherwise be shown under every other dangling row for the rest of the
+// session, and survive the removal of the image that produced it.
+func TestDetailView_danglingInspectErrorStaysOnItsOwnRow(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		imageWithID("sameid"),
+		{ID: "sha256:one"},
+		{ID: "sha256:two"},
+	})
+	m = m.SetInspect(testRef, cachedInspect("sameid", "sha256:livedigest"), nil)
+
+	// Settle on the first dangling row and let its inspect fail.
+	m = m.SetCursor(1)
+	m = m.SetInspect("", nil, errors.New("boom"))
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Fatalf("error not shown for the dangling row it belongs to: %q", v)
+	}
+
+	if v := ansi.Strip(m.SetCursor(2).DetailView(60, 40)); strings.Contains(v, "boom") {
+		t.Errorf("another dangling image's inspect error rendered: %q", v)
+	}
+	if v := ansi.Strip(m.SetCursor(0).DetailView(60, 40)); strings.Contains(v, "boom") {
+		t.Errorf("the dangling error leaked onto a tagged image: %q", v)
+	}
+}
+
+// The same empty reference must not keep a dangling row's error alive once
+// that row is gone from the list.
+func TestSetItems_dropsDanglingInspectErrorWhenImageIsGone(t *testing.T) {
+	m := New().SetItems([]backend.Image{{ID: "sha256:one"}, {ID: "sha256:two"}})
+	m = m.SetInspect("", nil, errors.New("boom"))
+
+	m = m.SetItems([]backend.Image{{ID: "sha256:two"}})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "boom") {
+		t.Errorf("error outlived the dangling image that produced it: %q", v)
+	}
+}
+
 func TestSetItems_keepsInspectForUnchangedImage(t *testing.T) {
 	m := New().SetItems([]backend.Image{imageWithID("sameid")})
 	m = m.SetInspect(testRef, cachedInspect("sameid", "sha256:livedigest"), nil)

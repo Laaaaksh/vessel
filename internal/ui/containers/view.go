@@ -141,6 +141,9 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 			Render(uiutil.Headline(sel.Name, width, height)),
 		"",
 		uiutil.KVFit("Image", sel.Image, width),
+		// Deliberately not KVFit: the id is the identity content the pane must
+		// still show at minimum geometry, so binding it to the pane width would
+		// defeat the rule that binding its siblings serves.
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)),
 	)
 	if !sel.Created.IsZero() {

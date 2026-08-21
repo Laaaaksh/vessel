@@ -858,3 +858,25 @@ func assertMarked(t *testing.T, pane string, got []string, want ...string) {
 		}
 	}
 }
+
+// A dangling image has no reference, and the reference is the only thing the
+// CLI accepts, so settling on one must not run `container image inspect ""`.
+func TestScheduleInspect_danglingImageRunsNoSubprocess(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "sha256:dangling"},
+	})
+
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if backend.FormatRef(*m.imgPanel.Selected()) != "" {
+		t.Fatalf("expected the dangling row to be selected, got %+v", m.imgPanel.Selected())
+	}
+	if cmd != nil {
+		t.Errorf("a dangling selection scheduled an inspect: %T", cmd())
+	}
+	if load := m.loadImageInspectCmd(); load != nil {
+		t.Errorf("a dangling selection produced an inspect command: %T", load())
+	}
+}

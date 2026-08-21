@@ -506,8 +506,12 @@ const inspectDebounce = 120 * time.Millisecond
 func (m Model) selectionKey() string {
 	switch m.activeView {
 	case ViewImages:
+		// A dangling image has no reference, and the reference is the only
+		// thing the CLI can be asked to inspect, so there is nothing to run.
 		if sel := m.imgPanel.Selected(); sel != nil {
-			return imageKey(backend.FormatRef(*sel))
+			if ref := backend.FormatRef(*sel); ref != "" {
+				return imageKey(ref)
+			}
 		}
 	case ViewVolumes:
 		if sel := m.volPanel.Selected(); sel != nil {
@@ -548,6 +552,9 @@ func (m Model) loadImageInspectCmd() tea.Cmd {
 		return nil
 	}
 	ref := backend.FormatRef(*sel)
+	if ref == "" {
+		return nil
+	}
 	// The panel already holds a successful inspect for this exact image, so
 	// re-running the subprocess on every poll tick would only reproduce it.
 	if m.imgPanel.InspectedRef() == ref {
