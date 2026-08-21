@@ -112,6 +112,24 @@ func (m Model) MarkedIDs() []string {
 	return out
 }
 
+// SingleMarked returns the one marked container when exactly one visible row
+// carries a mark, and nil otherwise. A lone mark states its target more
+// precisely than the cursor does, so the delete path prefers it; with zero or
+// several marks the cursor keeps deciding.
+func (m Model) SingleMarked() *backend.Container {
+	var found *backend.Container
+	for i := range m.filtered {
+		if !m.marked[m.filtered[i].ID] {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = &m.filtered[i]
+	}
+	return found
+}
+
 // RunningCount returns how many containers are running.
 func (m Model) RunningCount() int {
 	n := 0

@@ -150,7 +150,7 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 		base = append([]helpRow{
 			{"p", "pull image (prompt)"},
 			{"P", "prune unused images (confirm)"},
-			{"d", "delete marked (confirm)"},
+			{"d", "delete marked, else cursor row (confirm)"},
 			{"c", "run container from image (form)"},
 			{"x → image mobility", "tag, save, load, push (push confirms)"},
 		}, base...)
@@ -158,7 +158,7 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 		base = append([]helpRow{
 			{"c", "create volume (prompt)"},
 			{"P", "prune unused volumes (confirm)"},
-			{"d", "delete marked (confirm)"},
+			{"d", "delete marked, else cursor row (confirm)"},
 		}, base...)
 	case ViewNetworks:
 		// Read-only: list and inspect only, no view-specific bindings to add.
@@ -169,7 +169,7 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 			{"s", "stop container"},
 			{"u", "start container"},
 			{"r", "restart container"},
-			{"d", "delete marked (confirm)"},
+			{"d", "delete marked, else cursor row (confirm)"},
 			{"P", "prune stopped containers (confirm)"},
 			{"c", "run new container (form)"},
 			{"e", "one-shot exec in running container"},
