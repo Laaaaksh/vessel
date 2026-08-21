@@ -1693,8 +1693,9 @@ func (m Model) openActions() (tea.Model, tea.Cmd) {
 }
 
 // imageActionRef resolves the highlighted row to a reference safe to act on.
-// Tag, Save and Push all reach outside the process, so a row that formats to an
-// ambiguous reference is refused rather than silently resolved to ":latest".
+// Tag, Save and Push all reach outside the process, and ExactRef refuses two
+// separate shapes for separate reasons, so the status names the actual one:
+// a pin the CLI is unproven against, or a row that would resolve to ":latest".
 func (m Model) imageActionRef() (Model, string, bool) {
 	sel := m.imgPanel.Selected()
 	if sel == nil {
@@ -1703,10 +1704,17 @@ func (m Model) imageActionRef() (Model, string, bool) {
 	}
 	ref, ok := backend.ExactRef(*sel)
 	if !ok {
-		m.status = "digest-pinned image has no named reference — tag, save and push cannot address it"
+		m.status = imageRefRefusal(*sel)
 		return m, "", false
 	}
 	return m, ref, true
+}
+
+func imageRefRefusal(img backend.Image) string {
+	if img.Digest != "" {
+		return "digest-pinned image — tag, save and push refuse a pin until a probe verifies it"
+	}
+	return "no named reference — the bare repository would resolve to a moving :latest"
 }
 
 func (m Model) buildActions() []actionItem {

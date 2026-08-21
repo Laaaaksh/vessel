@@ -2010,6 +2010,9 @@ func TestImagesActions_refuseUntaggedImage(t *testing.T) {
 		if !strings.Contains(next.status, "no named reference") {
 			t.Fatalf("%s status must explain why the row is unaddressable, got %q", label, next.status)
 		}
+		if strings.Contains(next.status, "digest-pinned") {
+			t.Fatalf("%s must not blame a pin the row does not carry, got %q", label, next.status)
+		}
 		if strings.Contains(next.status, "tag it first") {
 			t.Fatalf("%s must not prescribe an action it also refuses, got %q", label, next.status)
 		}
@@ -2046,8 +2049,11 @@ func TestImagesActions_refuseDigestPinnedImage(t *testing.T) {
 			if next.mode != modeBrowse {
 				t.Fatalf("%s on a digest-pinned image opened mode %v", label, next.mode)
 			}
-			if !strings.Contains(next.status, "no named reference") {
-				t.Fatalf("%s status must explain why the row is unaddressable, got %q", label, next.status)
+			if !strings.Contains(next.status, "digest-pinned") {
+				t.Fatalf("%s status must name the pin as the reason, got %q", label, next.status)
+			}
+			if strings.Contains(next.status, "no named reference") {
+				t.Fatalf("%s must not claim a pinned row is unnamed, got %q", label, next.status)
 			}
 			if got := lastCLICommand(next); got != "" {
 				t.Fatalf("%s on a digest-pinned image shelled out: %q", label, got)
