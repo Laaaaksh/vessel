@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -116,7 +117,7 @@ func (k KeyMap) Reserved(s string) bool {
 		k.Quit, k.Help, k.LayoutNext, k.LayoutPrev, k.Actions) {
 		return true
 	}
-	return Match(s, "1", "2", "3", "`", "ctrl+c")
+	return Match(s, "1", "2", "3", "4", "5", "`", "ctrl+c")
 }
 
 // helpRow is one line of the in-app help: the key column and what it does.
@@ -284,11 +285,145 @@ func producibleKey(k string) bool {
 // no command to run. Dispatch and help both resolve through this, so they can
 // never disagree about which keys a custom command has taken over.
 func customKey(cc config.CustomCommand, keys KeyMap) string {
-	k := normalizeKey(cc.Key)
-	if k == "" || cc.Command == "" || !producibleKey(k) || keys.Reserved(k) {
+	k, _ := classifyCustomKey(cc, keys)
+	return k
+}
+
+// unusableReason classifies why a configured custom command can never fire on
+// its configured key. Dispatch drops such bindings silently through customKey;
+// the startup notice reuses the same classification to say which rule the
+// config broke, so reporting and dispatch answer from one set of predicates
+// and cannot drift apart.
+type unusableReason string
+
+const (
+	// unusableNone marks a binding dispatch will honor; nothing to report.
+	unusableNone unusableReason = ""
+	// unusableNoCommand: the entry names no command, so there is nothing to run.
+	unusableNoCommand unusableReason = "no command"
+	// unusableUnproducible: the spelling matches no keypress ("shift+z").
+	unusableUnproducible unusableReason = "unproducible"
+	// unusableReserved: the key is one dispatch answers before custom commands.
+	unusableReserved unusableReason = "reserved"
+	// unusableDuplicate: an earlier entry already claimed the same usable key,
+	// and dispatch and help both keep only that first one.
+	unusableDuplicate unusableReason = "duplicate"
+)
+
+// Copy for the startup notice. The action-menu tail rides on the individual
+// reason, not on the message as a whole: a binding that only lost its key does
+// still run from the action menu, but one carrying no command has nothing to
+// run there either, so promising it a menu entry would be a lie.
+const (
+	noticeIgnoredOneFmt  = "1 custom command is ignored: %s"
+	noticeIgnoredManyFmt = "%d custom commands are ignored: %s"
+	noticeDetailSep      = "; "
+	noticeUnnamedName    = "(unnamed)"
+	noticeReservedFmt    = `key %q is reserved`
+	noticeUnproducibleFm = `key %q matches no keypress`
+	noticeDuplicateFmt   = `key %q is already taken by an earlier custom command`
+	noticeNoCommandText  = "has no command to run"
+	noticeActionMenuTail = " (still in the action menu, x)"
+)
+
+// detail renders the reason as the fragment the notice quotes back at the
+// user, naming the key where the key itself is the problem and promising the
+// action menu only where the command really still runs from it.
+func (r unusableReason) detail(key string) string {
+	switch r {
+	case unusableReserved:
+		return fmt.Sprintf(noticeReservedFmt, key) + noticeActionMenuTail
+	case unusableUnproducible:
+		return fmt.Sprintf(noticeUnproducibleFm, key) + noticeActionMenuTail
+	case unusableDuplicate:
+		return fmt.Sprintf(noticeDuplicateFmt, key) + noticeActionMenuTail
+	case unusableNoCommand:
+		return noticeNoCommandText
+	case unusableNone:
 		return ""
 	}
-	return k
+	return ""
+}
+
+// unusableBinding is one configured custom command whose key will never fire.
+type unusableBinding struct {
+	name   string
+	key    string // exactly as configured, so the user can find the line
+	reason unusableReason
+}
+
+// describe renders one offending binding as "name: what is wrong with it".
+func (b unusableBinding) describe() string {
+	name := b.name
+	if name == "" {
+		name = noticeUnnamedName
+	}
+	return name + ": " + b.reason.detail(b.key)
+}
+
+// classifyCustomKey resolves the exact predicate chain customKey dispatches on
+// and additionally names the rule that failed, so the startup notice reports
+// from what dispatch actually obeys rather than a parallel copy that could
+// drift. An empty command wins over key problems: an entry with nothing to run
+// is broken whatever its key does. A missing key with a command present is not
+// a failure — the example config documents it as the deliberate action-menu-only
+// form.
+func classifyCustomKey(cc config.CustomCommand, keys KeyMap) (string, unusableReason) {
+	k := normalizeKey(cc.Key)
+	if cc.Command == "" {
+		return "", unusableNoCommand
+	}
+	if k == "" {
+		return "", unusableNone
+	}
+	if !producibleKey(k) {
+		return "", unusableUnproducible
+	}
+	if keys.Reserved(k) {
+		return "", unusableReserved
+	}
+	return k, unusableNone
+}
+
+// unusableBindings keeps every configured custom command whose key will never
+// fire, classified by cause. Duplication is the one cause classifyCustomKey
+// cannot see on its own: it is a property of the list, not of the entry, so it
+// is resolved here in the same first-wins order customCommandFor and
+// withCustomBindings already resolve it in.
+func unusableBindings(custom []config.CustomCommand, keys KeyMap) []unusableBinding {
+	var out []unusableBinding
+	taken := map[string]bool{}
+	for _, cc := range custom {
+		k, reason := classifyCustomKey(cc, keys)
+		if reason == unusableNone && taken[k] {
+			reason = unusableDuplicate
+		}
+		if reason != unusableNone {
+			out = append(out, unusableBinding{name: cc.Name, key: cc.Key, reason: reason})
+			continue
+		}
+		if k != "" {
+			taken[k] = true
+		}
+	}
+	return out
+}
+
+// ignoredKeysNotice summarizes every configured custom command whose key can
+// never fire, or "" when none do, so New can surface it once at startup.
+func ignoredKeysNotice(custom []config.CustomCommand, keys KeyMap) string {
+	bad := unusableBindings(custom, keys)
+	if len(bad) == 0 {
+		return ""
+	}
+	details := make([]string, 0, len(bad))
+	for _, b := range bad {
+		details = append(details, b.describe())
+	}
+	if len(bad) == 1 {
+		return fmt.Sprintf(noticeIgnoredOneFmt, details[0])
+	}
+	return fmt.Sprintf(noticeIgnoredManyFmt, len(bad), strings.Join(details, noticeDetailSep))
 }
 
 // customCommandFor returns the command that fires when key k is pressed, or ""

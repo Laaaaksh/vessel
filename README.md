@@ -70,7 +70,7 @@ vessel doctor   # check CLI, system status, config
 | `c` | Create / run (prompt) |
 | `+` / `_` | Cycle layout |
 | `` ` `` | Toggle command log |
-| `tab` / `1` `2` `3` | Containers / Images / Volumes |
+| `tab` / `1`-`5` | Containers / Images / Volumes / System / Networks |
 | `esc` | Close logs, help, modal, or clear filter |
 | `?` | Toggle help |
 | `q` / `ctrl+c` | Quit |

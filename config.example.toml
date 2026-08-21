@@ -20,11 +20,12 @@ confirm_stop = false
 # character it types ("Z", not "shift+z"); shift only pairs with a named key
 # ("shift+tab"). A configured key replaces the built-in action on that key;
 # reserved keys cannot be taken over: navigation (h/j/k/l, arrows, g/G, pgup,
-# pgdown, ctrl+u, ctrl+d), filtering (/), esc, tab and 1/2/3, layout (+/_),
+# pgdown, ctrl+u, ctrl+d), filtering (/), esc, tab and 1-5, layout (+/_),
 # help (?), the action menu (x), the command log (`) and quit (q, ctrl+c).
-# A key that is reserved, or that no keypress can produce, is ignored and the
-# command stays in the action menu. Leave it empty to run from the action menu
-# only.
+# A key that is reserved, that no keypress can produce, or that an earlier
+# custom command already claimed is ignored and the command stays in the action
+# menu; vessel says so once in the footer at startup. Leave it empty to run
+# from the action menu only.
 # [[custom_commands]]
 # name = "inspect"
 # key = "z"

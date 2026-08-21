@@ -271,6 +271,15 @@ func (m *Model) setActionErr(err error) {
 // New creates the root model. Backend connection happens in Init.
 func New() Model {
 	cfg, _ := config.Load()
+	return newModel(cfg)
+}
+
+// newModel builds the root model around an already-loaded config, so tests can
+// drive startup without depending on the host's ~/.config/vessel/config.toml.
+// Configured bindings that can never fire are reported once here, through
+// setStatus, so they ride the ordinary footer lifecycle: visible until real
+// activity replaces them, never blocking anything.
+func newModel(cfg config.Config) Model {
 	m := Model{
 		cfg:        cfg,
 		st:         newStyles(),
@@ -285,7 +294,11 @@ func New() Model {
 		sysPanel:   system.New(),
 		logPanel:   logs.New(),
 	}
-	return m.withKeys(DefaultKeyMap())
+	m = m.withKeys(DefaultKeyMap())
+	if notice := ignoredKeysNotice(cfg.CustomCommands, m.keys); notice != "" {
+		m.setStatus(notice)
+	}
+	return m
 }
 
 // withKeys installs k and hands the panels the bindings they match themselves,
