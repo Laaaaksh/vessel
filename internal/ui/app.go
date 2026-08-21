@@ -1497,6 +1497,15 @@ func (m Model) footerView() string {
 }
 
 func (m Model) footerLine() (lipgloss.Style, string) {
+	// A fresh status (e.g. "copied ...", "layout ...") always takes the footer,
+	// even while lastErr is a sticky services-down hint: that hint deliberately
+	// survives an unrelated success (see applyContainersLoaded), so without this
+	// check it would permanently mask every later status message. lastErr itself
+	// is untouched here - it renders again as soon as status is cleared or
+	// overwritten.
+	if m.status != "" {
+		return m.st.footerHelp, strings.Join(strings.Fields(m.status), " ")
+	}
 	if m.lastErr != nil {
 		const prefix = "error: "
 		hint := ""
@@ -1508,9 +1517,6 @@ func (m Model) footerLine() (lipgloss.Style, string) {
 		msg := strings.Join(strings.Fields(m.lastErr.Error()), " ")
 		msg = uiutil.TruncateCells(msg, max(0, m.width-lipgloss.Width(prefix)-lipgloss.Width(hint)))
 		return m.st.errorText, prefix + msg + hint
-	}
-	if m.status != "" {
-		return m.st.footerHelp, strings.Join(strings.Fields(m.status), " ")
 	}
 	cur, n := m.cursorInfo()
 	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)

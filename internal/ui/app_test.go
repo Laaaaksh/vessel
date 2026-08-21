@@ -677,6 +677,44 @@ func TestApplyContainersLoaded_keepsServicesDownHint(t *testing.T) {
 	}
 }
 
+func TestFooterView_freshStatusNotMaskedBySickyServicesDownError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+	m.status = "copied container id"
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied container id") {
+		t.Fatalf("a fresh status must not be masked by a sticky services-down error, footer=%q", out)
+	}
+	if strings.Contains(out, "system start") {
+		t.Fatalf("the sticky error must not render while a fresher status is set, footer=%q", out)
+	}
+	// The error itself must not have been discarded: once status is cleared,
+	// the hint is still there to show.
+	m.status = ""
+	out = ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("clearing status must reveal the still-sticky services-down hint, footer=%q", out)
+	}
+}
+
+func TestActionDoneMsg_successClearsServicesDownHint(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+	// A plugin-gated verb (image prune, volume create/prune) actually succeeding
+	// is real evidence the services came back - unlike an unrelated container
+	// list poll, which TestApplyContainersLoaded_keepsServicesDownHint asserts
+	// must NOT clear it.
+	next, _ := m.Update(actionDoneMsg{msg: "pruned images"})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful action must clear a services-down hint, got %v", m.lastErr)
+	}
+}
+
 func TestApplyContainersLoaded_clearsOtherErrors(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
