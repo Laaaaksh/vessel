@@ -1883,7 +1883,13 @@ func TestFooterView_durableErrorAt60x12KeepsIdentityRows(t *testing.T) {
 		t.Fatalf("footer must render the durable error at 60x12, got: %q", out)
 	}
 	if !strings.Contains(out, "alpine") {
-		t.Fatalf("detail pane must keep the selected image's identity row at 60x12, got: %q", out)
+		t.Fatalf("the selected image's reference must still render at 60x12, got: %q", out)
+	}
+	// The id is rendered only by the detail pane - the list has no ID column -
+	// so it is the token that actually distinguishes a surviving identity row
+	// from a pane whose rows uiutil.Pane.Add dropped for want of budget.
+	if !strings.Contains(out, "sha256:abc") {
+		t.Fatalf("detail pane must keep the selected image's ID row at 60x12, got: %q", out)
 	}
 }
 
