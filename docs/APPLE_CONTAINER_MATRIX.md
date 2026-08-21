@@ -8,6 +8,7 @@ Probed live on this machine. Used to drive honest UI demotion vs Docker parity.
 | prune stopped containers | supported | `container prune` |
 | create / run | supported | `container create`, `container run` |
 | image list/pull/delete/prune/inspect | supported | `container image …` |
+| image tag/save/load/push | supported, verified live on 1.2.2 | `container image tag\|save\|load\|push` |
 | volume list/create/delete/prune/inspect | supported | `container volume …` |
 | network list/create/delete/prune | supported | `container network …` (UI later) |
 | system status / df | supported | `container system status\|df` |

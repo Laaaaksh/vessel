@@ -26,6 +26,40 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Destroy nothing shared: a probe machine's containers, images and volumes may belong to someone else. Exercise prune and other destructive verbs through the confirm modal's cancel path, or against throwaway resources cleaned up immediately.
 - To reproduce the "services down" string-matched hint while services are up, shadow PATH with a wrapper returning the CLI's documented error for one verb and delegating the rest, then run the real binary in a PTY.
 
+## Container CLI sharp edges
+
+- Vessel deliberately does NOT own registry login. A refused `image push` splits
+  two ways in `internal/backend/images.go`, and the advice is deliberately
+  opposite: `credentialStderrPhrases` (401 and friends) tells the user to run
+  `container registry login`; `permissionStderrPhrases` (403) tells them login
+  will NOT help, because the session is valid and the account simply lacks write
+  access. Do not fold 403 back into the credential list or name the login command
+  in its message — a 403 does not establish that the credentials were rejected.
+- Classify a CLI failure from `CLIError.Stderr` (`internal/backend/client.go`),
+  never from `err.Error()` — but stderr echoes the image reference too, so match
+  multi-word phrases only a registry emits ("401 unauthorized", "no credentials
+  found"). A bare "unauthorized" misreads `myorg/unauthorized-proxy:v1`.
+- The footer flattens and truncates the error/status lines it renders (`footerLine`
+  in `internal/ui/app.go`, via `uiutil.TruncateCells`): CLI errors carry raw
+  multi-line stderr and must be flattened to one row. The key-hint branch is
+  deliberately exempt — its grouping is authored to be read as-is. So never
+  route unbounded text through the footer expecting it to be readable; the
+  images detail pane is the surface for anything longer (see its notice, which
+  is charged against the pane's row budget on top of, not instead of, the
+  normal content so it is never itself the thing that gets dropped).
+- On the installed 1.2.2 build (services running) `image save/load/tag/push` are
+  core subcommands and `image pull` works live; honour the plugin gate only when
+  a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
+- `image tag <source> <target>` and `image save --output <path> <ref>` argument
+  order is asserted in tests via `Client.CommandLog`; don't swap the order.
+- `Client.run` caps EVERY invocation at `defaultTimeout` (10s, see
+  `internal/backend/client.go`), which silently overrides the longer budget the
+  UI passes in. So `image save`/`load`/`push`/`pull` of a large image is killed
+  mid-transfer and reports a context deadline, not a real failure. This ships
+  known-broken for large images. The shared-timeout fix is a known limitation,
+  not yet filed, and is deliberately out of the image-mobility scope. The images
+  help view states the same caveat to the user.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

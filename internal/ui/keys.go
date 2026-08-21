@@ -151,6 +151,8 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 			{"P", "prune unused images (confirm)"},
 			{"d", "delete marked (confirm)"},
 			{"c", "run container from image (form)"},
+			{"x → image mobility", "tag, save, load, push (push confirms)"},
+			{"", "large save/load/push may be cut off by a 10s CLI cap"},
 		}, base...)
 	case ViewVolumes:
 		base = append([]helpRow{
