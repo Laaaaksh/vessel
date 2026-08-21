@@ -50,7 +50,10 @@ type RunOptions struct {
 }
 
 // Run starts a container from image with the given options and returns the
-// CLI's stdout, trimmed (the container ID for a detached run).
+// CLI's stdout, trimmed (the container ID for a detached run). It holds the
+// transfer/sweep budget rather than the quick default: `container run` pulls a
+// missing image and boots a VM before it returns, so it belongs to the
+// known-long set alongside the image transfers.
 func (c *Client) Run(ctx context.Context, image string, opts RunOptions) (string, error) {
 	if image == "" {
 		return "", errEmptyRunImage
@@ -87,19 +90,21 @@ func (c *Client) Run(ctx context.Context, image string, opts RunOptions) (string
 		args = append(args, runFlagVolume, v)
 	}
 	args = append(args, image)
-	out, err := c.run(ctx, args...)
+	out, err := c.runWithTimeout(ctx, globalTimeout, args...)
 	return strings.TrimSpace(string(out)), err
 }
 
 // Exec runs a one-shot command inside a running container via the container's
 // shell and returns its combined output, trimmed. Unlike ShellCmd (an
 // interactive TTY attach driven by tea.ExecProcess), Exec blocks until the
-// command exits, so it is for a single command rather than a session.
+// command exits, so it is for a single command rather than a session. The
+// command is user-authored and so gets execTimeout rather than the quick
+// default, which would kill an ordinary package install mid-run.
 func (c *Client) Exec(ctx context.Context, id, shell, command string) (string, error) {
 	if command == "" {
 		return "", errEmptyExecCommand
 	}
-	out, err := c.run(ctx, "exec", id, resolveShell(shell), "-c", command)
+	out, err := c.runWithTimeout(ctx, execTimeout, "exec", id, resolveShell(shell), "-c", command)
 	return strings.TrimSpace(string(out)), err
 }
 
