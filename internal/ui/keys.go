@@ -132,7 +132,7 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 		{"j / k / up / down", "move up / down (in list)"},
 		{"g / G", "top / bottom"},
 		{"pgup / pgdown / ctrl+u / ctrl+d", "page / half-page scroll"},
-		{"tab / 1 2 3", "switch Containers / Images / Volumes"},
+		{"tab / 1 2 3 4 5", "switch Containers / Images / Volumes / System / Networks"},
 		{"+ / _", "cycle layout"},
 		{"space", "toggle multi-select mark"},
 		{"y", "yank id/name to clipboard"},
@@ -160,6 +160,8 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 			{"P", "prune unused volumes (confirm)"},
 			{"d", "delete marked (confirm)"},
 		}, base...)
+	case ViewNetworks:
+		// Read-only: list and inspect only, no view-specific bindings to add.
 	default:
 		base = append([]helpRow{
 			{"enter", "open shell in running container"},

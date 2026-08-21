@@ -18,6 +18,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/networks"
 	"github.com/Laaaaksh/vessel/internal/ui/system"
 	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
@@ -49,6 +50,11 @@ type imagesLoadedMsg struct {
 
 type volumesLoadedMsg struct {
 	items []backend.Volume
+	err   error
+}
+
+type networksLoadedMsg struct {
+	items []backend.NetworkInfo
 	err   error
 }
 
@@ -191,6 +197,7 @@ type Model struct {
 	cntPanel containers.Model
 	imgPanel images.Model
 	volPanel volumes.Model
+	netPanel networks.Model
 	sysPanel system.Model
 	logPanel logs.Model
 
@@ -255,6 +262,7 @@ func New() Model {
 		cntPanel:   containers.New(),
 		imgPanel:   images.New(),
 		volPanel:   volumes.New(),
+		netPanel:   networks.New(),
 		sysPanel:   system.New(),
 		logPanel:   logs.New(),
 	}
@@ -299,6 +307,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cntPanel = m.cntPanel.SetPageRows(rows)
 		m.imgPanel = m.imgPanel.SetPageRows(rows)
 		m.volPanel = m.volPanel.SetPageRows(rows)
+		m.netPanel = m.netPanel.SetPageRows(rows)
 		m.sysPanel = m.sysPanel.SetPageRows(rows)
 		m.logPanel = m.logPanel.SetSize(msg.Width, msg.Height)
 		return m, nil
@@ -358,6 +367,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inspectRun = ""
 		}
 		m.volPanel = m.volPanel.SetInspect(msg.name, msg.ins, msg.err)
+		return m, nil
+	case networksLoadedMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err
+		} else {
+			m.netPanel = m.netPanel.SetItems(msg.items)
+		}
 		return m, nil
 	case actionDoneMsg:
 		// Known limitation: m.lastErr set here reaches the footer for one frame
@@ -515,6 +531,9 @@ func (m Model) mainPanels(listW, detailW, height int) (string, string) {
 	case ViewVolumes:
 		list = m.volPanel.ListView(listW-2, height-2)
 		detail = m.volPanel.DetailView(detailW-2, height-2)
+	case ViewNetworks:
+		list = m.netPanel.ListView(listW-2, height-2)
+		detail = m.netPanel.DetailView(detailW-2, height-2)
 	case ViewSystem:
 		list = m.sysPanel.ListView(listW-2, height-2)
 		detail = m.sysPanel.DetailView(detailW-2, height-2)
@@ -568,6 +587,8 @@ func (m Model) activeViewLoadCmd() tea.Cmd {
 		return m.loadImagesCmd()
 	case ViewVolumes:
 		return m.loadVolumesCmd()
+	case ViewNetworks:
+		return m.loadNetworksCmd()
 	case ViewSystem:
 		return m.loadSystemCmd()
 	default:
@@ -602,6 +623,16 @@ func (m Model) loadVolumesCmd() tea.Cmd {
 		defer cancel()
 		items, err := client.ListVolumes(ctx)
 		return volumesLoadedMsg{items: items, err: err}
+	}
+}
+
+func (m Model) loadNetworksCmd() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		items, err := client.ListNetworks(ctx)
+		return networksLoadedMsg{items: items, err: err}
 	}
 }
 
@@ -818,6 +849,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case k == "4":
 		m.activeView = ViewSystem
 		return m, m.activeViewLoadCmd()
+	case k == "5":
+		m.activeView = ViewNetworks
+		return m, m.activeViewLoadCmd()
 	case Match(k, m.keys.LayoutNext):
 		m.layout = (m.layout + 1) % 3
 		m.setStatus("layout " + m.layout.String())
@@ -949,6 +983,8 @@ func (m Model) panelFiltering() bool {
 		return m.imgPanel.Filtering()
 	case ViewVolumes:
 		return m.volPanel.Filtering()
+	case ViewNetworks:
+		return m.netPanel.Filtering()
 	case ViewSystem:
 		return false
 	default:
@@ -973,6 +1009,8 @@ func (m Model) routeToPanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			next, icmd := m.scheduleInspect()
 			return next, tea.Batch(cmd, icmd)
 		}
+	case ViewNetworks:
+		m.netPanel, cmd = m.netPanel.Update(msg)
 	case ViewSystem:
 		m.sysPanel, cmd = m.sysPanel.Update(msg)
 	default:
@@ -1022,6 +1060,8 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		if selectionNameChanged(before, m.volPanel.Selected()) {
 			return m.scheduleInspect()
 		}
+	case ViewNetworks:
+		m.netPanel = m.netPanel.SetCursor(row)
 	case ViewSystem:
 		m.sysPanel = m.sysPanel.SetCursor(row)
 	default:
@@ -1052,6 +1092,8 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		if selectionNameChanged(before, m.volPanel.Selected()) {
 			return m.scheduleInspect()
 		}
+	case ViewNetworks:
+		m.netPanel = m.netPanel.MoveBy(delta)
 	case ViewSystem:
 		m.sysPanel = m.sysPanel.MoveBy(delta)
 	default:
@@ -1377,6 +1419,10 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 			if text == "" {
 				text = sel.Name
 			}
+		}
+	case ViewNetworks:
+		if sel := m.netPanel.Selected(); sel != nil {
+			text = sel.Name
 		}
 	case ViewSystem:
 		text = m.sysPanel.YankText()
@@ -1790,6 +1836,10 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		if sel := m.volPanel.Selected(); sel != nil {
 			id, name = sel.Name, sel.Name
 		}
+	case ViewNetworks:
+		if sel := m.netPanel.Selected(); sel != nil {
+			id, name = sel.Name, sel.Name
+		}
 	case ViewSystem:
 		// No selection this view reports on maps to {{.ID}}/{{.Name}}/{{.Image}};
 		// a custom command run here gets none of them rather than borrowing
@@ -1837,6 +1887,8 @@ func (m Model) viewName() string {
 		return "images"
 	case ViewVolumes:
 		return "volumes"
+	case ViewNetworks:
+		return "networks"
 	case ViewSystem:
 		return "system"
 	default:
@@ -1891,6 +1943,8 @@ func (m Model) footerLine() (lipgloss.Style, string) {
 		keys = "[p] pull  [c] run  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
 	case ViewVolumes:
 		keys = "[c] create  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
+	case ViewNetworks:
+		keys = "[/] filter  [y] yank"
 	case ViewSystem:
 		keys = "[j/k] navigate  [y] yank  (read-only)"
 	default:
@@ -1905,6 +1959,8 @@ func (m Model) cursorInfo() (int, int) {
 		return m.imgPanel.Cursor(), m.imgPanel.Len()
 	case ViewVolumes:
 		return m.volPanel.Cursor(), m.volPanel.Len()
+	case ViewNetworks:
+		return m.netPanel.Cursor(), m.netPanel.Len()
 	case ViewSystem:
 		return m.sysPanel.Cursor(), m.sysPanel.Len()
 	default:
@@ -1921,6 +1977,7 @@ func (m Model) sidebarView(width, height int) string {
 		{"Images", ViewImages},
 		{"Volumes", ViewVolumes},
 		{"System", ViewSystem},
+		{"Networks", ViewNetworks},
 	}
 
 	focused := m.focus == FocusSidebar

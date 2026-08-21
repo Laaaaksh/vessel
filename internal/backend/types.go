@@ -126,6 +126,16 @@ type VolumeInspect struct {
 	Options    map[string]string
 }
 
+// NetworkInfo represents a container network resource (as opposed to
+// Network, a container's attachment to one).
+type NetworkInfo struct {
+	Name    string
+	Mode    string
+	Gateway string
+	Subnet  string
+	Created time.Time
+}
+
 // IsRunning reports whether the container is in the running state.
 func (c Container) IsRunning() bool {
 	return c.Status == "running"
