@@ -36,10 +36,11 @@ func TestHelpCompletenessSuite(t *testing.T) {
 }
 
 // dispatchedLiteralKeys lists every user-reachable key handleKey matches as a
-// bare literal rather than a KeyMap field. It repeats the keys.go constants on
-// purpose: adding a literal to dispatch without teaching this list about it
-// must fail here, because the whole point of these tests is that nothing
-// user-reachable escapes the walk.
+// bare literal rather than a KeyMap field, spelling them with the same
+// keys.go constants dispatch reads. The inventory itself is hand-synced: no
+// test observes handleKey's switch literals, so adding one there without
+// extending this list fails nothing today — review is what keeps the walk's
+// input complete.
 var dispatchedLiteralKeys = []string{
 	keyForceQuit,
 	keyViewContainers,
@@ -66,8 +67,10 @@ var helpHiddenBindings = map[string]string{
 // view's switch branch, mapped to the views whose help must document them.
 // Everything else in KeyMap works in every view (or in a sub-state every view
 // can reach, like the sidebar or the action menu), so those fields need no
-// entry here. A renamed or added field fails TestClassifiesEveryKeyMapField
-// until it lands here consciously.
+// entry here. A newly added field therefore classifies as global on its own,
+// so landing it here consciously is review work; a renamed one severs its
+// lookup and surfaces as an unwanted global the per-view walk flags, while a
+// removed field strands a stale entry here that fails nothing today.
 var viewOnlyKeys = map[string][]View{
 	"Logs":    {ViewContainers},
 	"Stop":    {ViewContainers},
@@ -80,10 +83,15 @@ var viewOnlyKeys = map[string][]View{
 	"Create":  {ViewContainers, ViewImages, ViewVolumes},
 }
 
-// allViews enumerates the sidebar order so the walk covers every view; the
-// classification guard keeps this list honest against View enum growth.
+// allViews walks the View enum up to viewCount — the same constant Tab cycling
+// mods against — so a view added to the enum joins this walk on its own
+// instead of slipping past a hand-copied list unexamined.
 func allViews() []View {
-	return []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem, ViewNetworks}
+	views := make([]View, 0, viewCount)
+	for i := 0; i < viewCount; i++ {
+		views = append(views, View(i))
+	}
+	return views
 }
 
 // requiredKeysFor returns the keys whose bindings must appear in the given
@@ -171,12 +179,12 @@ func rowTokens(rows []renderedRow) []string {
 	return tokens
 }
 
-// TestClassifiesEveryKeyMapField pins down the mechanical link between the
-// keymap and this walk: a new KeyMap field (or a renamed one) must either land
-// in viewOnlyKeys or work globally, so nothing can join the keymap without a
-// conscious decision about where its help belongs. Exclusions must not overlap
-// classified keys either, or an exclusion would silently un-require a real
-// binding.
+// TestClassifiesEveryKeyMapField keeps the classification inventory coherent:
+// walking every view must account for each non-empty KeyMap binding, and an
+// exclusion must never overlap a classified key, or it would silently
+// un-require a real one. Classification defaults new fields to global, so this
+// test verifies the inventory's shape rather than forcing a decision per new
+// field.
 func (s *helpCompletenessSuite) TestClassifiesEveryKeyMapField() {
 	keys := DefaultKeyMap()
 	classified := map[string]bool{}
@@ -333,12 +341,18 @@ func (s *helpCompletenessSuite) TestHelpAt60x12KeepsIdentityRowsWhileScrolling()
 		"close hint must survive the whole scroll range")
 }
 
+// descPrefixLen bounds the description fragment scroll assertions match on.
+// It must stay below the description width guaranteed visible at 60 columns —
+// helpView caps the key column at width/2, leaving at least 29 description
+// columns there — or truncated prose would break substring matching.
+const descPrefixLen = 10
+
 // descPrefix shortens a description to a fragment narrow enough to survive the
 // 60-column description truncation, so scroll-position assertions match prose
 // that may be clipped on screen.
 func descPrefix(desc string) string {
 	desc = strings.TrimSpace(desc)
-	return desc[:min(10, len(desc))]
+	return desc[:min(descPrefixLen, len(desc))]
 }
 
 // flattenFrames joins every collected frame so substring assertions can look
