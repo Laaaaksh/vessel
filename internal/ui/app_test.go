@@ -1094,10 +1094,13 @@ func TestStopTimeoutMatchesUnconfirmedStop(t *testing.T) {
 }
 
 // newTestModel is New() with the developer's ~/.config/vessel/config.toml
-// dropped, so assertions never depend on the host's dotfiles.
+// dropped, so assertions never depend on the host's dotfiles. That includes a
+// startup ignored-binding notice: a broken binding in the host config would
+// otherwise leak its footer status into every test below.
 func newTestModel() Model {
 	m := New()
 	m.cfg = config.Config{}
+	m.status = ""
 	return m
 }
 
@@ -2116,7 +2119,9 @@ func assertOneRow(t *testing.T, m Model, what string) {
 }
 
 func TestFooterView_keyHintsKeepTheirGrouping(t *testing.T) {
-	m := New()
+	// newTestModel, not New(): a host config with an ignored custom binding
+	// would put its startup notice in the footer and defeat the precondition.
+	m := newTestModel()
 	m.width, m.height = 120, 24
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
 	if m.status != "" || m.lastErr != nil {
