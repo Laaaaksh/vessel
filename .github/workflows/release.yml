@@ -26,7 +26,10 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          # Pinned so tagged releases cannot be broken by a future upstream
+          # release that removes the deprecated `brews` support; bump this
+          # deliberately after a snapshot drill, not by floating.
+          version: v2.17.1
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
