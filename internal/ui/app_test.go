@@ -2351,11 +2351,14 @@ func TestImagesDetail_forbiddenPushDoesNotBlameCredentials(t *testing.T) {
 	om := out.(Model)
 
 	detail := squash(ansi.Strip(om.imgPanel.DetailView(40, 20)))
-	if !strings.Contains(detail, squash("no write access")) {
-		t.Fatalf("a 403 must be explained as a permission problem, got: %q", detail)
+	if !strings.Contains(detail, squash("lack write access")) {
+		t.Fatalf("a 403 must be explained as a possible permission problem, got: %q", detail)
+	}
+	if !strings.Contains(detail, squash("log in")) {
+		t.Fatalf("a 403 must not rule out that logging in would help, got: %q", detail)
 	}
 	if strings.Contains(detail, squash("push rejected — run")) {
-		t.Fatalf("a 403 must not tell the user to re-run a login they already hold, got: %q", detail)
+		t.Fatalf("a 403 must not be shown the 401 notice, got: %q", detail)
 	}
 }
 

@@ -376,11 +376,14 @@ func TestClient_PushImage_forbiddenIsNotACredentialsFailure(t *testing.T) {
 	if strings.Contains(msg, "rejected these credentials") {
 		t.Errorf("a 403 does not establish that the credentials were rejected, got: %v", err)
 	}
-	if !strings.Contains(msg, "no write access") {
-		t.Errorf("a 403 should be explained as a permission problem, got: %v", err)
+	if strings.Contains(msg, "will not help") {
+		t.Errorf("a 403 must not claim that logging in again is useless, got: %v", err)
 	}
-	if !strings.Contains(msg, "will not help") {
-		t.Errorf("a 403 should say that logging in again does not help, got: %v", err)
+	if !strings.Contains(msg, "lack write access") {
+		t.Errorf("a 403 should mention the account may lack write access, got: %v", err)
+	}
+	if !strings.Contains(msg, "log in") {
+		t.Errorf("a 403 should mention that logging in may be needed, got: %v", err)
 	}
 	if got := strings.Count(msg, "\n"); got != strings.Count(pushErrText(t, "generic"), "\n") {
 		t.Errorf("the permission hint must stay on one footer row, got %d line breaks", got)
