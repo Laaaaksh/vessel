@@ -60,7 +60,7 @@ vessel doctor   # check CLI, system status, config
 | `L` | View logs |
 | `f` | Freeze / follow logs |
 | `s` / `u` / `r` | Stop / start / restart (stop asks to confirm when `confirm_stop` is set) |
-| `d` | Remove the selected row, or every marked row when 2+ are marked (confirm with `y`) |
+| `d` | Remove the marked row when one is marked, every marked row when 2+, else the selected row (confirm with `y`) |
 | `space` | Toggle multi-select mark (containers, images, volumes) |
 | `/` | Filter current list |
 | `y` | Yank id / name / path |
