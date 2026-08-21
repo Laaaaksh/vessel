@@ -89,8 +89,9 @@ Known limits:
 
 - vessel never manages registry credentials. Push reuses whatever session
   `container registry login` has already established - running that login is yours to do.
-- Long-running verbs get real budgets: image tag/save/load/push and prunes run up to two
-  minutes, and one batched delete of many targets gets one minute for the whole call.
+- Long-running verbs get real budgets: image tag/save/load/push, prunes and starting a
+  container run up to two minutes, one batched delete of many targets gets one minute for
+  the whole call, and a one-shot exec gets thirty seconds.
   A huge `image pull` is still bounded by the short default cap.
 - The prompt drops the space bar and non-ASCII characters, so a path containing either
   cannot be typed yet - save would write somewhere you did not name, and load reports a
