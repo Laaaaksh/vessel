@@ -62,8 +62,13 @@ type Image struct {
 	ID         string
 	Repository string
 	Tag        string
-	Size       int64
-	Created    time.Time
+	// Digest is the reference digest of a digest-pinned name
+	// ("repo@sha256:…"), kept so FormatRef rebuilds the exact pinned
+	// reference. It is not the per-variant manifest digest that ImageInspect
+	// reports; empty for tag-only and name-only references.
+	Digest  string
+	Size    int64
+	Created time.Time
 }
 
 // Volume represents a named volume.
