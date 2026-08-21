@@ -1010,8 +1010,8 @@ func (m Model) beginPromptForImage(kind, label, ref string) (tea.Model, tea.Cmd)
 // prompts take filesystem paths, which makes that user-visible: a path with a
 // space is accepted with the space missing, so Save writes to a path the user
 // never typed and Load reports "no such file" for a file that exists. Left as
-// is by decision rather than patched narrowly here; tracked separately as
-// vessel-prompt-drops-space-nonascii.
+// is by decision rather than patched narrowly here, and is not yet filed as
+// follow-up.
 func (m Model) handlePromptKey(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "esc":

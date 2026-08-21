@@ -41,9 +41,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `internal/backend/client.go`), which silently overrides the longer budget the
   UI passes in. So `image save`/`load`/`push`/`pull` of a large image is killed
   mid-transfer and reports a context deadline, not a real failure. This ships
-  known-broken for large images; the shared-timeout fix is tracked as issue
-  `vessel-shared-run-timeout` and is deliberately out of the image-mobility
-  scope. The images help view states the same caveat to the user.
+  known-broken for large images. The shared-timeout fix is a known limitation,
+  not yet filed, and is deliberately out of the image-mobility scope. The images
+  help view states the same caveat to the user.
 
 ## Maintaining this file
 
