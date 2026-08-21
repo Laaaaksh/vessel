@@ -56,7 +56,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   route unbounded text through the footer expecting it to be readable; the
   images detail pane is the surface for anything longer (see its notice, which
   is charged against the pane's row budget on top of, not instead of, the
-  normal content so it is never itself the thing that gets dropped).
+  normal content, so the budget never drops it — but the pane's own height
+  still clips it, and `PushPermissionNotice` already fills that height exactly
+  at the smallest supported frame; the constant comments in
+  `internal/backend/images.go` own that measurement, so check them before
+  rewording a notice).
 - On the installed 1.2.2 build (services running) `image save/load/tag/push` are
   core subcommands and `image pull` works live; honour the plugin gate only when
   a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
