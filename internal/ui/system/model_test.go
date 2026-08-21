@@ -121,7 +121,7 @@ func TestDetailViewServiceRowShowsIdentity(t *testing.T) {
 	m := New().SetStatus(&backend.SystemStatus{
 		Status:      "running",
 		Version:     "container-apiserver version 1.2.0",
-		AppRoot:     "/Users/laksh/Library/Application Support/com.apple.container/",
+		AppRoot:     "/Users/dev/Library/Application Support/com.apple.container/",
 		InstallRoot: "/opt/homebrew/Cellar/container/1.2.0/",
 	}, nil)
 	v := ansi.Strip(m.DetailView(60, 40))
