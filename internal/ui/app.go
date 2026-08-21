@@ -383,7 +383,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case networksLoadedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		} else {
 			m.netPanel = m.netPanel.SetItems(msg.items)
 		}
