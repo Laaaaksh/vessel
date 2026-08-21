@@ -117,7 +117,7 @@ func (k KeyMap) Reserved(s string) bool {
 		k.Quit, k.Help, k.LayoutNext, k.LayoutPrev, k.Actions) {
 		return true
 	}
-	return Match(s, "1", "2", "3", "`", "ctrl+c")
+	return Match(s, "1", "2", "3", "4", "5", "`", "ctrl+c")
 }
 
 // helpRow is one line of the in-app help: the key column and what it does.
@@ -306,28 +306,38 @@ const (
 	unusableUnproducible unusableReason = "unproducible"
 	// unusableReserved: the key is one dispatch answers before custom commands.
 	unusableReserved unusableReason = "reserved"
+	// unusableDuplicate: an earlier entry already claimed the same usable key,
+	// and dispatch and help both keep only that first one.
+	unusableDuplicate unusableReason = "duplicate"
 )
 
-// Copy for the startup notice. The action-menu tail is the point of the whole
-// message: these commands are not gone, they only lost their key.
+// Copy for the startup notice. The action-menu tail rides on the individual
+// reason, not on the message as a whole: a binding that only lost its key does
+// still run from the action menu, but one carrying no command has nothing to
+// run there either, so promising it a menu entry would be a lie.
 const (
-	noticeIgnoredOneFmt  = "1 custom command ignores its key and stays in the action menu (x): %s"
-	noticeIgnoredManyFmt = "%d custom commands ignore their keys and stay in the action menu (x): %s"
-	noticeDetailSep      = ", "
+	noticeIgnoredOneFmt  = "1 custom command is ignored: %s"
+	noticeIgnoredManyFmt = "%d custom commands are ignored: %s"
+	noticeDetailSep      = "; "
 	noticeUnnamedName    = "(unnamed)"
 	noticeReservedFmt    = `key %q is reserved`
 	noticeUnproducibleFm = `key %q matches no keypress`
-	noticeNoCommandText  = "has no command"
+	noticeDuplicateFmt   = `key %q is already taken by an earlier custom command`
+	noticeNoCommandText  = "has no command to run"
+	noticeActionMenuTail = " (still in the action menu, x)"
 )
 
 // detail renders the reason as the fragment the notice quotes back at the
-// user, naming the key where the key itself is the problem.
+// user, naming the key where the key itself is the problem and promising the
+// action menu only where the command really still runs from it.
 func (r unusableReason) detail(key string) string {
 	switch r {
 	case unusableReserved:
-		return fmt.Sprintf(noticeReservedFmt, key)
+		return fmt.Sprintf(noticeReservedFmt, key) + noticeActionMenuTail
 	case unusableUnproducible:
-		return fmt.Sprintf(noticeUnproducibleFm, key)
+		return fmt.Sprintf(noticeUnproducibleFm, key) + noticeActionMenuTail
+	case unusableDuplicate:
+		return fmt.Sprintf(noticeDuplicateFmt, key) + noticeActionMenuTail
 	case unusableNoCommand:
 		return noticeNoCommandText
 	case unusableNone:
@@ -377,12 +387,24 @@ func classifyCustomKey(cc config.CustomCommand, keys KeyMap) (string, unusableRe
 }
 
 // unusableBindings keeps every configured custom command whose key will never
-// fire, classified by cause.
+// fire, classified by cause. Duplication is the one cause classifyCustomKey
+// cannot see on its own: it is a property of the list, not of the entry, so it
+// is resolved here in the same first-wins order customCommandFor and
+// withCustomBindings already resolve it in.
 func unusableBindings(custom []config.CustomCommand, keys KeyMap) []unusableBinding {
 	var out []unusableBinding
+	taken := map[string]bool{}
 	for _, cc := range custom {
-		if _, reason := classifyCustomKey(cc, keys); reason != unusableNone {
+		k, reason := classifyCustomKey(cc, keys)
+		if reason == unusableNone && taken[k] {
+			reason = unusableDuplicate
+		}
+		if reason != unusableNone {
 			out = append(out, unusableBinding{name: cc.Name, key: cc.Key, reason: reason})
+			continue
+		}
+		if k != "" {
+			taken[k] = true
 		}
 	}
 	return out
