@@ -20,9 +20,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `main` is lint-clean; keep it that way and fix any issue a diff introduces.
 
 ## Live CLI probes
-- The Apple `container` CLI (v1.2.2) and its system services are running on this machine (`container system status` → running), so live TUI/backend probes work. `container list --all --format json` for live state.
-- Destroy nothing shared: other crewmates run live probes concurrently (e.g. named containers/volumes like `*probe*`). Verify prune etc. only through the confirm modal's cancel path, or with throwaway resources cleaned up immediately.
-- To reproduce the "services down" path string-based hint while services are up, shadow PATH with a wrapper returning the CLI's documented error for one verb and delegating the rest, then run the real binary in a PTY.
+- Live TUI/backend probes need the Apple `container` CLI installed with its system services running (`container system status`); `container list --all --format json` reads live state.
+- Destroy nothing shared: a probe machine's containers, images and volumes may belong to someone else. Exercise prune and other destructive verbs through the confirm modal's cancel path, or against throwaway resources cleaned up immediately.
+- To reproduce the "services down" string-matched hint while services are up, shadow PATH with a wrapper returning the CLI's documented error for one verb and delegating the rest, then run the real binary in a PTY.
 
 ## Maintaining this file
 
