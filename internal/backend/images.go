@@ -152,8 +152,7 @@ const (
 	// rather than 401, and the distribution wording is identical either way, so
 	// a logged-out user pushing there is told login will not help when it is
 	// exactly what they need. The blunter wording is a deliberate simplification
-	// held for the smallest pane; tracked separately as
-	// vessel-403-unauthenticated-push.
+	// held for the smallest pane, and is not yet filed as follow-up.
 	PushPermissionNotice = "push forbidden — no write access; login won't help"
 )
 
