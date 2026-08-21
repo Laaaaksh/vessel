@@ -1594,7 +1594,7 @@ func helpVisibleRows(height int) int {
 	return max(1, height-5)
 }
 
-func (m Model) helpBindings() []struct{ key, desc string } {
+func (m Model) helpBindings() []helpRow {
 	return helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands)
 }
 

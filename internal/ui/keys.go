@@ -115,10 +115,15 @@ func (k KeyMap) Reserved(s string) bool {
 	return Match(s, "1", "2", "3", "`", "ctrl+c")
 }
 
+// helpRow is one line of the in-app help: the key column and what it does.
+type helpRow struct {
+	key, desc string
+}
+
 // helpBindings returns contextual (key, description) pairs, including the
 // custom commands reachable by their configured key.
-func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []config.CustomCommand) []struct{ key, desc string } {
-	base := []struct{ key, desc string }{
+func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []config.CustomCommand) []helpRow {
+	base := []helpRow{
 		{"h / l / left / right", "move focus (sidebar / list / detail)"},
 		{"j / k / up / down", "move up / down (in list)"},
 		{"g / G", "top / bottom"},
@@ -137,20 +142,20 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 	}
 	switch view {
 	case ViewImages:
-		base = append([]struct{ key, desc string }{
+		base = append([]helpRow{
 			{"p", "pull image (prompt)"},
 			{"P", "prune unused images (confirm)"},
 			{"d", "delete marked (confirm)"},
 			{"c", "run container from image"},
 		}, base...)
 	case ViewVolumes:
-		base = append([]struct{ key, desc string }{
+		base = append([]helpRow{
 			{"c", "create volume (prompt)"},
 			{"P", "prune unused volumes (confirm)"},
 			{"d", "delete marked (confirm)"},
 		}, base...)
 	default:
-		base = append([]struct{ key, desc string }{
+		base = append([]helpRow{
 			{"enter", "open shell in running container"},
 			{"L", "view logs"},
 			{"s", "stop container"},
@@ -308,7 +313,7 @@ func logViewKeys(k KeyMap) map[string]string {
 // key no longer has. A row is dropped whole: its description is prose about the
 // keys it lists and cannot be split when only some of them are shadowed. A row
 // for a key the log view still answers keeps its line, restated for that view.
-func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom []config.CustomCommand) []struct{ key, desc string } {
+func withCustomBindings(base []helpRow, keys KeyMap, custom []config.CustomCommand) []helpRow {
 	names := map[string]string{}
 	var order []string
 	for _, cc := range custom {
@@ -326,7 +331,7 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 		return base
 	}
 	live := logViewKeys(keys)
-	out := make([]struct{ key, desc string }, 0, len(base)+len(order))
+	out := make([]helpRow, 0, len(base)+len(order))
 	for _, b := range base {
 		tokens := helpKeyTokens(b.key)
 		shadowed := ""
@@ -340,7 +345,7 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 		case shadowed == "":
 			out = append(out, b)
 		case len(tokens) == 1 && live[shadowed] != "":
-			out = append(out, struct{ key, desc string }{b.key, live[shadowed]})
+			out = append(out, helpRow{b.key, live[shadowed]})
 		}
 	}
 	for _, k := range order {
@@ -348,7 +353,7 @@ func withCustomBindings(base []struct{ key, desc string }, keys KeyMap, custom [
 		if names[k] != "" {
 			desc = "custom: " + names[k]
 		}
-		out = append(out, struct{ key, desc string }{k, desc})
+		out = append(out, helpRow{k, desc})
 	}
 	return out
 }

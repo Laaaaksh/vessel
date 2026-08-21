@@ -706,11 +706,6 @@ func TestHelpBindingsCoverAllKeys(t *testing.T) {
 		if val == "" {
 			continue
 		}
-		if field.Name == "ToggleMark" {
-			// A space keypress reports "space", so this binding never fires;
-			// multi-select and its help entry belong to a later phase.
-			continue
-		}
 		if !tokens[val] {
 			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
 		}
@@ -760,7 +755,7 @@ func TestHelpBindings_shadowedRowNeverMislabelsSiblingKeys(t *testing.T) {
 			t.Fatalf("r documents restart, help says %q", b.desc)
 		}
 	}
-	for _, want := range []struct{ key, desc string }{{"s", "stop"}, {"r", "restart"}} {
+	for _, want := range []helpRow{{"s", "stop"}, {"r", "restart"}} {
 		found := false
 		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
 			if b.key == want.key && strings.Contains(b.desc, want.desc) {
