@@ -363,6 +363,14 @@ func TestClient_LoadImage_expandsHomePath(t *testing.T) {
 	}
 }
 
+// Both spellings of the dismissal the 403 path must never make. A guard on only
+// one of them lets the claim return under the other, so every 403 surface is
+// held to both.
+const (
+	loginDismissalContracted = "won't help"
+	loginDismissalSpelledOut = "will not help"
+)
+
 func TestClient_PushImage_forbiddenIsNotACredentialsFailure(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "forbidden")
 	c := NewClientWithBinary(fakeBinary(t))
@@ -376,11 +384,17 @@ func TestClient_PushImage_forbiddenIsNotACredentialsFailure(t *testing.T) {
 	if strings.Contains(msg, "rejected these credentials") {
 		t.Errorf("a 403 does not establish that the credentials were rejected, got: %v", err)
 	}
-	if !strings.Contains(msg, "no write access") {
-		t.Errorf("a 403 should be explained as a permission problem, got: %v", err)
+	if strings.Contains(msg, loginDismissalSpelledOut) {
+		t.Errorf("a 403 must not claim that logging in again is useless, got: %v", err)
 	}
-	if !strings.Contains(msg, "will not help") {
-		t.Errorf("a 403 should say that logging in again does not help, got: %v", err)
+	if strings.Contains(msg, loginDismissalContracted) {
+		t.Errorf("a 403 must not claim that logging in again is useless, got: %v", err)
+	}
+	if !strings.Contains(msg, "lack write access") {
+		t.Errorf("a 403 should mention the account may lack write access, got: %v", err)
+	}
+	if !strings.Contains(msg, "log in") {
+		t.Errorf("a 403 should mention that logging in may be needed, got: %v", err)
 	}
 	if got := strings.Count(msg, "\n"); got != strings.Count(pushErrText(t, "generic"), "\n") {
 		t.Errorf("the permission hint must stay on one footer row, got %d line breaks", got)
@@ -401,6 +415,15 @@ func TestPushDenialNotice_distinguishesTheTwoRefusals(t *testing.T) {
 	}
 	if got := PushDenialNotice(permission); got != PushPermissionNotice {
 		t.Errorf("403 notice = %q, want %q", got, PushPermissionNotice)
+	}
+	// The hint the footer renders is guarded elsewhere; the notice is the other
+	// 403 surface, and it must not dismiss logging in either.
+	notice := PushDenialNotice(permission)
+	if strings.Contains(notice, loginDismissalSpelledOut) {
+		t.Errorf("the 403 notice must not claim logging in is useless, got %q", notice)
+	}
+	if strings.Contains(notice, loginDismissalContracted) {
+		t.Errorf("the 403 notice must not claim logging in is useless, got %q", notice)
 	}
 	if got := PushDenialNotice(&CLIError{Stderr: "Error: unexpected network failure\n", Err: errors.New("exit status 1")}); got != "" {
 		t.Errorf("a non-refusal should offer no notice, got %q", got)

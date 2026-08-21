@@ -180,25 +180,27 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 // after a refused push. Container registry login is intentionally out of
 // vessel's scope: the user owns their registry session. Both lead with the
 // verdict and carry no more prose than that, because the smallest supported pane
-// (18x4 at 60x12 with the command log open) holds roughly three wrapped rows.
+// (18x4 at 60x12 with the command log open) holds roughly four wrapped rows.
+// PushPermissionNotice already wraps to exactly four rows there, saturating that
+// budget with no slack: it leads the pane, so it renders in full today, but any
+// reword that makes it longer is clipped rather than merely crowding the fields
+// below it. Measure a reword against that geometry, not against the terminal.
 const (
 	PushAuthNotice = "push rejected — run `container registry login`"
-	// A 403 usually means the session is valid but the account cannot write
-	// here, so repeating the login it already holds would send the user in a
-	// circle. Known limitation: that premise is not universal — Google Artifact
-	// Registry and Docker Hub both answer an *unauthenticated* push with 403
-	// rather than 401, and the distribution wording is identical either way, so
-	// a logged-out user pushing there is told login will not help when it is
-	// exactly what they need. The blunter wording is a deliberate simplification
-	// held for the smallest pane, and is not yet filed as follow-up.
-	PushPermissionNotice = "push forbidden — no write access; login won't help"
+	// A 403 does not on its own establish that the session holds valid,
+	// insufficiently-privileged credentials: Google Artifact Registry and
+	// Docker Hub both answer an *unauthenticated* push with 403 rather than
+	// 401, and the distribution wording is identical either way. So the notice
+	// names both possibilities instead of telling a logged-out user that the
+	// one thing they haven't tried is the one thing that will not help.
+	PushPermissionNotice = "push forbidden — may lack write access or need login"
 )
 
 // The fuller instructions appended to the error itself, which the footer
 // renders. Each stays on one line because the footer budgets exactly one row.
 const (
 	pushAuthHint       = " — registry rejected these credentials; run `container registry login`, then retry"
-	pushPermissionHint = " — registry refused the push: this account has no write access to that repository, so `container registry login` again will not help"
+	pushPermissionHint = " — registry refused the push: this account may lack write access, or you may need to log in with `container registry login`"
 )
 
 // Multi-word phrases only a registry emits. Matching bare words would misread
