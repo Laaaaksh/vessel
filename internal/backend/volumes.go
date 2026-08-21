@@ -9,10 +9,14 @@ import (
 // Apple container volume list/inspect JSON (container 1.2.x).
 type cliVolume struct {
 	Configuration struct {
-		CreationDate string `json:"creationDate"`
-		Driver       string `json:"driver"`
-		Name         string `json:"name"`
-		Source       string `json:"source"`
+		CreationDate string            `json:"creationDate"`
+		Driver       string            `json:"driver"`
+		Format       string            `json:"format"`
+		Labels       map[string]string `json:"labels"`
+		Name         string            `json:"name"`
+		Options      map[string]string `json:"options"`
+		SizeInBytes  uint64            `json:"sizeInBytes"`
+		Source       string            `json:"source"`
 	} `json:"configuration"`
 	ID string `json:"id"`
 }
@@ -24,6 +28,19 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		return nil, fmt.Errorf("list volumes: %w", err)
 	}
 	return mapVolumes(raw), nil
+}
+
+// VolumeInspect returns the full inspection of a single volume by name. The
+// command prints JSON by default; --format json is not an accepted flag.
+func (c *Client) VolumeInspect(ctx context.Context, name string) (*VolumeInspect, error) {
+	var raw []cliVolume
+	if err := c.runJSON(ctx, &raw, "volume", "inspect", name); err != nil {
+		return nil, fmt.Errorf("inspect volume %s: %w", name, err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("volume not found: %s", name)
+	}
+	return mapVolumeInspect(raw[0]), nil
 }
 
 // RemoveVolume deletes one or more volumes by name in a single call.
@@ -58,6 +75,10 @@ func mapVolumes(raw []cliVolume) []Volume {
 			Name:       name,
 			Driver:     r.Configuration.Driver,
 			Mountpoint: r.Configuration.Source,
+			SizeBytes:  r.Configuration.SizeInBytes,
+			Format:     r.Configuration.Format,
+			Labels:     r.Configuration.Labels,
+			Options:    r.Configuration.Options,
 		}
 		if t, err := time.Parse(time.RFC3339, r.Configuration.CreationDate); err == nil {
 			v.Created = t
@@ -65,4 +86,19 @@ func mapVolumes(raw []cliVolume) []Volume {
 		out = append(out, v)
 	}
 	return out
+}
+
+// mapVolumeInspect maps one inspected volume to the enriched domain type.
+func mapVolumeInspect(r cliVolume) *VolumeInspect {
+	v := mapVolumes([]cliVolume{r})[0]
+	return &VolumeInspect{
+		Name:       v.Name,
+		Driver:     v.Driver,
+		Mountpoint: v.Mountpoint,
+		Created:    v.Created,
+		SizeBytes:  v.SizeBytes,
+		Format:     v.Format,
+		Labels:     v.Labels,
+		Options:    v.Options,
+	}
 }

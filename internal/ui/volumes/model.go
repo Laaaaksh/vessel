@@ -3,6 +3,7 @@ package volumes
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -26,6 +27,25 @@ type Model struct {
 	marked     map[string]bool
 	toggleMark string
 	pageRows   int
+
+	// inspect holds the latest VolumeInspect for inspectName, if it matches the
+	// currently selected volume. Carried separately so list info shows while
+	// inspection is in flight and a slow response never labels a wrong volume.
+	inspect     *backend.VolumeInspect
+	inspectName string
+	inspectErr  error
+	// inspectRow fingerprints the list row inspectName was resolved against,
+	// so a failed inspect is invalidated on the same terms as a successful
+	// one instead of outliving the row that produced it.
+	inspectRow volumeFingerprint
+}
+
+// volumeFingerprint is the identity of a list row for inspect-cache
+// invalidation: a volume recreated or resized under the same name is a
+// different row.
+type volumeFingerprint struct {
+	sizeBytes uint64
+	created   time.Time
 }
 
 // New creates an empty volumes model.
@@ -53,8 +73,11 @@ func (m Model) SetPageRows(n int) Model {
 	return m
 }
 
-// SetItems replaces the volume list and drops marks for volumes it no longer
-// contains, so a mark can never outlive the row it points at.
+// SetItems replaces the volume list. Marks for volumes the list no longer
+// contains are dropped, so a mark can never outlive the row it points at. So
+// is a cached inspect whose volume is gone from the list, or whose list row no
+// longer agrees with it (the volume was resized or recreated under the same
+// name), so the detail pane cannot pair a fresh list row with a stale inspect.
 func (m Model) SetItems(items []backend.Volume) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
@@ -68,7 +91,22 @@ func (m Model) SetItems(items []backend.Volume) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+	if m.inspectName != "" && !inspectMatchesList(items, m.inspectName, m.inspectRow) {
+		m.inspect = nil
+		m.inspectName = ""
+		m.inspectErr = nil
+		m.inspectRow = volumeFingerprint{}
+	}
 	return m
+}
+
+func inspectMatchesList(items []backend.Volume, name string, row volumeFingerprint) bool {
+	for _, it := range items {
+		if it.Name == name {
+			return it.SizeBytes == row.sizeBytes && it.Created.Equal(row.created)
+		}
+	}
+	return false
 }
 
 // Selected returns the highlighted volume.
@@ -102,6 +140,38 @@ func (m Model) MarkedIDs() []string {
 		}
 	}
 	return out
+}
+
+// SetInspect stores the inspected detail for the given volume name, keyed by
+// name so a slow response never labels the wrong volume. A result for a volume
+// that is no longer selected is discarded rather than replacing the cache, so
+// it cannot evict a valid inspect for the current selection.
+func (m Model) SetInspect(name string, ins *backend.VolumeInspect, err error) Model {
+	sel := m.Selected()
+	if sel == nil || sel.Name != name {
+		return m
+	}
+	m.inspect = ins
+	m.inspectName = name
+	m.inspectErr = err
+	// A successful inspect reports the volume's own size and age; a failure
+	// leaves only the list row it was asked for. Either way the fingerprint is
+	// what a later list must still agree with.
+	m.inspectRow = volumeFingerprint{sizeBytes: sel.SizeBytes, created: sel.Created}
+	if ins != nil {
+		m.inspectRow = volumeFingerprint{sizeBytes: ins.SizeBytes, created: ins.Created}
+	}
+	return m
+}
+
+// InspectedName returns the volume name the panel already holds a successful
+// inspect for, or "" when the last inspect failed or none has arrived. The app
+// uses it to avoid re-inspecting an unchanged selection on every poll tick.
+func (m Model) InspectedName() string {
+	if m.inspect == nil || m.inspectErr != nil {
+		return ""
+	}
+	return m.inspectName
 }
 
 // MoveBy moves the cursor by delta rows.
@@ -256,15 +326,44 @@ func (m Model) DetailView(width, height int) string {
 		return lipgloss.NewStyle().Width(width).Height(height).
 			Foreground(lipgloss.Color("#6b7280")).Render("  no volume selected")
 	}
-	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name),
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
+	hints, reserved := uiutil.KeyBar("[c] create  [d] delete  [P] prune  [y] yank path", width, height)
+	keybar := dim.Render(hints)
+
+	p := uiutil.NewPane(width, height-reserved)
+	p.Add(
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
+			Render(uiutil.Headline(sel.Name, width, height)),
 		"",
 		uiutil.KV("Driver", sel.Driver),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
-		uiutil.KV("Path", uiutil.Truncate(sel.Mountpoint, width-12)),
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[c] create  [d] delete  [P] prune  [y] yank path"),
+		uiutil.KVFit("Path", sel.Mountpoint, width),
+	)
+
+	// The list already carries size, format, labels and options, so the pane
+	// shows them from the moment it paints and keeps them when the inspect
+	// fails. A successful inspect is the more authoritative source and wins.
+	same := sel.Name == m.inspectName && m.inspect != nil
+	format, sizeBytes := sel.Format, sel.SizeBytes
+	labels, options := sel.Labels, sel.Options
+	if same {
+		format, sizeBytes = m.inspect.Format, m.inspect.SizeBytes
+		labels, options = m.inspect.Labels, m.inspect.Options
 	}
-	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	if format != "" {
+		p.Add(uiutil.KV("Format", format))
+	}
+	if sizeBytes > 0 {
+		p.Add(uiutil.KV("Quota", uiutil.HumanBytes(int64(sizeBytes))))
+	}
+	p.Section(dim.Render("-- Labels --"), uiutil.PairRows(labels, dim, width))
+	p.Section(dim.Render("-- Options --"), uiutil.PairRows(options, dim, width))
+	if !same && m.inspectErr != nil && sel.Name == m.inspectName {
+		p.Add("")
+		p.Add(uiutil.IndentedRows([]string{m.inspectErr.Error()}, errStyle, width)...)
+	}
+
+	p.AddReserved(reserved, "", keybar)
+	return uiutil.RenderPane(width, height, p.Lines())
 }
