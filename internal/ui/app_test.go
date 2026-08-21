@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -19,7 +20,7 @@ import (
 )
 
 func TestView_shellModeEmpty(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width = 80
 	m.height = 24
 	m.mode = modeShell
@@ -33,7 +34,7 @@ func TestView_shellModeEmpty(t *testing.T) {
 }
 
 func TestSelection_listContainsRows(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width = 120
 	m.height = 40
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
@@ -48,7 +49,7 @@ func TestSelection_listContainsRows(t *testing.T) {
 }
 
 func TestFocusKeys(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.focus = FocusList
 	next, _ := m.handleKey(keyMsg("l"))
@@ -64,7 +65,7 @@ func TestFocusKeys(t *testing.T) {
 }
 
 func TestConfirmModalMode(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
 	next, _ := m.handleKey(keyMsg("d"))
@@ -84,7 +85,7 @@ func TestConfirmModalMode(t *testing.T) {
 }
 
 func TestImageBulkDeleteConfirm(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -122,7 +123,7 @@ func TestImageBulkDeleteConfirm(t *testing.T) {
 }
 
 func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{{ID: "a", Repository: "alpine", Tag: "latest"}})
 	next, _ := m.handleKey(spaceKey())
@@ -136,7 +137,7 @@ func TestImageSingleMarkStillUsesSinglePath(t *testing.T) {
 }
 
 func TestVolumeBulkDeleteConfirm(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	m.volPanel = m.volPanel.SetItems([]backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}})
@@ -178,6 +179,1079 @@ func assertPending(t *testing.T, m Model, kind deleteKind, ids ...string) {
 	}
 }
 
+func imagesModel(t *testing.T) Model {
+	t.Helper()
+	m := New()
+	m.cfg.MouseEnabled = true
+	m.width, m.height = 120, 40
+	m.activeView = ViewImages
+	m.client = backend.NewClientWithBinary(filepath.Join(t.TempDir(), "no-such-container-cli"))
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+	})
+	return m
+}
+
+func volumesModel(t *testing.T) Model {
+	t.Helper()
+	m := New()
+	m.cfg.MouseEnabled = true
+	m.width, m.height = 120, 40
+	m.activeView = ViewVolumes
+	m.client = backend.NewClientWithBinary(filepath.Join(t.TempDir(), "no-such-container-cli"))
+	m.volPanel = m.volPanel.SetItems([]backend.Volume{
+		{Name: "data"},
+		{Name: "cache"},
+	})
+	return m
+}
+
+// settle runs the debounce timer the selection change scheduled and delivers
+// the resulting message, returning whatever inspect command it triggers.
+func settle(t *testing.T, m Model, cmd tea.Cmd) (Model, tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected a debounced inspect to be scheduled, got nil")
+	}
+	msg, ok := cmd().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", cmd())
+	}
+	next, out := m.Update(msg)
+	return next.(Model), out
+}
+
+func inspectRefOf(t *testing.T, m Model, cmd tea.Cmd) string {
+	t.Helper()
+	_, load := settle(t, m, cmd)
+	if load == nil {
+		t.Fatal("expected an inspect command after the selection settled, got nil")
+	}
+	msg, ok := load().(imageInspectMsg)
+	if !ok {
+		t.Fatalf("expected imageInspectMsg, got %T", load())
+	}
+	return msg.ref
+}
+
+func TestMouseWheel_imagesInspectsNewSelection(t *testing.T) {
+	m := imagesModel(t)
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection after wheel = %q, want nginx:1.27", got)
+	}
+	if got := inspectRefOf(t, m, cmd); got != "nginx:1.27" {
+		t.Errorf("inspect ref = %q, want nginx:1.27", got)
+	}
+}
+
+func TestMouseClick_imagesInspectsNewSelection(t *testing.T) {
+	m := imagesModel(t)
+	next, cmd := m.handleMouseClick(tea.MouseClickMsg(tea.Mouse{Y: 3, Button: tea.MouseLeft}))
+	m = next.(Model)
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection after click = %q, want nginx:1.27", got)
+	}
+	if got := inspectRefOf(t, m, cmd); got != "nginx:1.27" {
+		t.Errorf("inspect ref = %q, want nginx:1.27", got)
+	}
+}
+
+func TestMouseWheel_imagesUnchangedSelectionIssuesNoInspect(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", &backend.ImageInspect{ID: "1"}, nil)
+	// Wheel up at the top row cannot move the cursor.
+	_, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+	if cmd != nil {
+		t.Fatalf("unchanged selection must not inspect, got %T", cmd())
+	}
+}
+
+func TestMouseWheel_volumesInspectsNewSelection(t *testing.T) {
+	m := volumesModel(t)
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if got := m.volPanel.Selected().Name; got != "cache" {
+		t.Fatalf("selection after wheel = %q, want cache", got)
+	}
+	_, load := settle(t, m, cmd)
+	if load == nil {
+		t.Fatal("expected an inspect command after the selection settled, got nil")
+	}
+	msg, ok := load().(volumeInspectMsg)
+	if !ok {
+		t.Fatalf("expected volumeInspectMsg, got %T", load())
+	}
+	if msg.name != "cache" {
+		t.Errorf("inspect name = %q, want cache", msg.name)
+	}
+}
+
+func TestInspect_rapidSelectionChangesCoalesceIntoOne(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+		{ID: "3", Repository: "redis", Tag: "7"},
+	})
+
+	// Two cursor steps in quick succession, as a held key produces.
+	var scheduled []tea.Cmd
+	for range 2 {
+		next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("selection change must schedule an inspect")
+		}
+		scheduled = append(scheduled, cmd)
+	}
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "redis:7" {
+		t.Fatalf("selection after two steps = %q, want redis:7", got)
+	}
+
+	// Every superseded timer must be a no-op...
+	for i, cmd := range scheduled[:len(scheduled)-1] {
+		if _, load := settle(t, m, cmd); load != nil {
+			t.Errorf("superseded timer %d inspected anyway: %T", i, load())
+		}
+	}
+	// ...and only the last one inspects, for the settled selection.
+	if got := inspectRefOf(t, m, scheduled[len(scheduled)-1]); got != "redis:7" {
+		t.Errorf("settled inspect ref = %q, want redis:7", got)
+	}
+}
+
+func TestInspect_repeatedListLoadsDoNotStarveThePendingTimer(t *testing.T) {
+	items := []backend.Image{{ID: "1", Repository: "alpine", Tag: "latest"}}
+	m := imagesModel(t)
+
+	next, first := m.Update(imagesLoadedMsg{items: items})
+	m = next.(Model)
+	if first == nil {
+		t.Fatal("the first list load must schedule an inspect")
+	}
+
+	// Poll loads keep arriving faster than the debounce; the selection has not
+	// moved, so they must not supersede the timer already in flight.
+	for range 3 {
+		next, again := m.Update(imagesLoadedMsg{items: items})
+		m = next.(Model)
+		if again != nil {
+			t.Fatalf("an unchanged selection re-armed the debounce: %T", again())
+		}
+	}
+
+	settled, ok := first().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", first())
+	}
+	next, load := m.Update(settled)
+	m = next.(Model)
+	if load == nil {
+		t.Fatal("the pending inspect was starved by the intervening list loads")
+	}
+	if msg, ok := load().(imageInspectMsg); !ok || msg.ref != "alpine:latest" {
+		t.Errorf("expected an inspect of alpine:latest, got %T %+v", load(), msg)
+	}
+
+	// The resolved timer and the completed inspect must not leave the selection
+	// marked, or a later request for the same image would never be scheduled.
+	next, _ = m.Update(imageInspectMsg{ref: "alpine:latest", err: errors.New("boom")})
+	m = next.(Model)
+	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
+		t.Error("a settled selection can no longer schedule a new inspect")
+	}
+}
+
+func TestInspect_doesNotReissueWhileOneIsInFlight(t *testing.T) {
+	items := []backend.Image{{ID: "1", Repository: "alpine", Tag: "latest"}}
+	m := imagesModel(t)
+
+	next, cmd := m.Update(imagesLoadedMsg{items: items})
+	m = next.(Model)
+	settled, ok := cmd().(inspectSettledMsg)
+	if !ok {
+		t.Fatalf("expected inspectSettledMsg, got %T", cmd())
+	}
+	next, load := m.Update(settled)
+	m = next.(Model)
+	if load == nil {
+		t.Fatal("the settled selection must be inspected")
+	}
+
+	// The inspect is now out at the CLI. Poll loads arriving before it returns
+	// must not launch a second subprocess for the same selection.
+	for range 3 {
+		next, again := m.Update(imagesLoadedMsg{items: items})
+		m = next.(Model)
+		if again != nil {
+			t.Fatalf("a second inspect was scheduled while one was in flight: %T", again())
+		}
+	}
+
+	// A different selection is still inspected while the first is in flight.
+	nginx := []backend.Image{{ID: "2", Repository: "nginx", Tag: "1.27"}}
+	if _, other := m.Update(imagesLoadedMsg{items: nginx}); other == nil {
+		t.Error("a new selection must be inspected even while another inspect is in flight")
+	}
+
+	// The result releases the selection, so a failed inspect can be retried.
+	next, _ = m.Update(imageInspectMsg{ref: "alpine:latest", err: errors.New("boom")})
+	m = next.(Model)
+	if _, again := m.Update(imagesLoadedMsg{items: items}); again == nil {
+		t.Error("a completed inspect must be retryable")
+	}
+}
+
+func TestInspect_selectionJitterDoesNotDoubleUpTheSameInspect(t *testing.T) {
+	// Cursor jitter A->B->A->B inside the debounce window arms one timer per
+	// change; when they land in order, only the first may reach the CLI.
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "2", Repository: "nginx", Tag: "1.27"},
+	})
+
+	var timers []tea.Cmd
+	for _, delta := range []int{1, -1, 1} {
+		next, cmd := m.handleMouseWheel(wheel(delta))
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("each selection change must schedule an inspect")
+		}
+		timers = append(timers, cmd)
+	}
+	if got := backend.FormatRef(*m.imgPanel.Selected()); got != "nginx:1.27" {
+		t.Fatalf("selection settled on %q, want nginx:1.27", got)
+	}
+
+	launched := 0
+	for i, timer := range timers {
+		msg, ok := timer().(inspectSettledMsg)
+		if !ok {
+			t.Fatalf("timer %d: expected inspectSettledMsg, got %T", i, timer())
+		}
+		next, load := m.Update(msg)
+		m = next.(Model)
+		if load != nil {
+			launched++
+		}
+	}
+	if launched != 1 {
+		t.Errorf("jitter launched %d inspects for one settled selection, want 1", launched)
+	}
+}
+
+func wheel(delta int) tea.MouseWheelMsg {
+	button := tea.MouseWheelDown
+	if delta < 0 {
+		button = tea.MouseWheelUp
+	}
+	return tea.MouseWheelMsg(tea.Mouse{Button: button})
+}
+
+func TestLoadImageInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
+	m := imagesModel(t)
+	if cmd := m.loadImageInspectCmd(); cmd == nil {
+		t.Fatal("first inspect of a selection must be issued")
+	}
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", &backend.ImageInspect{ID: "1"}, nil)
+	if cmd := m.loadImageInspectCmd(); cmd != nil {
+		t.Error("inspect must be skipped while the same image is already inspected")
+	}
+	// A failed inspect is not cached, so the next poll retries.
+	m.imgPanel = m.imgPanel.SetInspect("alpine:latest", nil, errors.New("boom"))
+	if cmd := m.loadImageInspectCmd(); cmd == nil {
+		t.Error("failed inspect must be retried")
+	}
+}
+
+func TestLoadVolumeInspectCmd_skipsWhenAlreadyInspected(t *testing.T) {
+	m := volumesModel(t)
+	if cmd := m.loadVolumeInspectCmd(); cmd == nil {
+		t.Fatal("first inspect of a selection must be issued")
+	}
+	m.volPanel = m.volPanel.SetInspect("data", &backend.VolumeInspect{Name: "data"}, nil)
+	if cmd := m.loadVolumeInspectCmd(); cmd != nil {
+		t.Error("inspect must be skipped while the same volume is already inspected")
+	}
+	m.volPanel = m.volPanel.SetInspect("data", nil, errors.New("boom"))
+	if cmd := m.loadVolumeInspectCmd(); cmd == nil {
+		t.Error("failed inspect must be retried")
+	}
+}
+
+func TestSelectionChanged_nilHandling(t *testing.T) {
+	img := &backend.Image{Repository: "alpine", Tag: "latest"}
+	if selectionRefChanged(nil, nil) {
+		t.Error("nil to nil image selection did not change")
+	}
+	if !selectionRefChanged(nil, img) {
+		t.Error("nil to non-nil image selection changed")
+	}
+	if !selectionRefChanged(img, nil) {
+		t.Error("non-nil to nil image selection changed")
+	}
+	vol := &backend.Volume{Name: "data"}
+	if selectionNameChanged(nil, nil) {
+		t.Error("nil to nil volume selection did not change")
+	}
+	if !selectionNameChanged(nil, vol) {
+		t.Error("nil to non-nil volume selection changed")
+	}
+	if !selectionNameChanged(vol, nil) {
+		t.Error("non-nil to nil volume selection changed")
+	}
+}
+
+func TestConfirmPruneModalMode(t *testing.T) {
+	cases := []struct {
+		name string
+		view View
+		want string
+	}{
+		{"containers", ViewContainers, "Prune stopped containers?"},
+		{"images", ViewImages, "Prune unused images?"},
+		{"volumes", ViewVolumes, "Prune unused volumes?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel()
+			m.width, m.height = 100, 30
+			m.activeView = tc.view
+			m.focus = FocusList
+			next, _ := m.handleKey(keyMsg("P"))
+			m = next.(Model)
+			if m.mode != modeConfirmDelete {
+				t.Fatalf("mode=%v want confirm before prune", m.mode)
+			}
+			got := ansi.Strip(viewString(m.View()))
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("confirm modal must ask %q, got %q", tc.want, got)
+			}
+			next, _ = m.handleKey(keyMsg("n"))
+			m = next.(Model)
+			if m.mode != modeBrowse {
+				t.Fatalf("cancel should return to browse, got %v", m.mode)
+			}
+		})
+	}
+}
+
+func TestConfirmPrune_actionMenuPath(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	next, _ := m.handleKey(keyMsg("x"))
+	m = next.(Model)
+	if m.mode != modeActions {
+		t.Fatalf("mode=%v want actions", m.mode)
+	}
+	// Containers menu: Start, Stop, Restart, Logs, Shell, Exec…, Prune stopped (idx 0..6).
+	next, _ = m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	for range 5 {
+		next, _ = m.handleKey(keyMsg("j"))
+		m = next.(Model)
+	}
+	next, _ = m.handleKey(keyMsg("enter"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("prune from action menu must confirm, mode=%v", m.mode)
+	}
+	got := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(got, "Prune stopped containers?") {
+		t.Fatalf("confirm modal must ask prune question, got %q", got)
+	}
+}
+
+func TestConfirmStop_configOff(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cfg.ConfirmStop = false
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("s"))
+	m = next.(Model)
+	if m.mode == modeConfirmDelete {
+		t.Fatalf("confirm_stop off must stop immediately, mode=%v", m.mode)
+	}
+	if m.status == "nothing selected" {
+		t.Fatal("stop should have selected the container")
+	}
+}
+
+func TestConfirmStop_configOn(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cfg.ConfirmStop = true
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("s"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("confirm_stop on must open confirm, mode=%v", m.mode)
+	}
+	got := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(got, "Stop web?") {
+		t.Fatalf("confirm modal must ask Stop web?, got %q", got)
+	}
+	next, _ = m.handleKey(keyMsg("n"))
+	if next.(Model).mode != modeBrowse {
+		t.Fatalf("cancel should return to browse, mode=%v", next.(Model).mode)
+	}
+}
+
+func TestCustomCommandKeyDispatch(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "inspect", Key: "z", Command: "container inspect {{.ID}}"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "vessel-probe", Name: "web", Status: "running"}})
+
+	next, cmd := m.handleKey(keyMsg("z"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("custom key must run in browse, mode=%v", m.mode)
+	}
+	if !strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("custom command should have dispatched, status=%q", m.status)
+	}
+	if cmd == nil {
+		t.Fatal("custom key should return a command")
+	}
+}
+
+func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// User binds 'y' (normally yank) to a custom command; the configured key wins.
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "redefine", Key: "y", Command: "echo redefined"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+	next, _ := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if !strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("configured custom key must shadow builtin, status=%q", m.status)
+	}
+}
+
+func TestFooterView_servicesDownHint(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. Start the container system services and retry:" +
+		"\n\n    container system start\n)")
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("services-down error must surface the hint, footer=%q", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("raw error must be truncated before the hint rather than the hint pushed off, footer=%q", out)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out), "to start services") {
+		t.Fatalf("hint must be the last visible text in the footer, footer=%q", out)
+	}
+}
+
+func TestFooterView_noHintForOtherErrors(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	out := ansi.Strip(viewString(m.View()))
+	if strings.Contains(out, "system start") {
+		t.Fatalf("unrelated error must not get the service hint, footer=%q", out)
+	}
+}
+
+func TestApplyContainersLoaded_keepsServicesDownHint(t *testing.T) {
+	servicesDown := servicesDownErr()
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = servicesDown
+	// A successful `container list` poll is a top-level verb that works while
+	// services are down; it must not wipe the services-down hint.
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr == nil {
+		t.Fatal("a successful top-level list must not clear a services-down hint")
+	}
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("services-down hint must survive the next successful poll, footer=%q", out)
+	}
+}
+
+func servicesDownErr() error {
+	return errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+}
+
+func TestFooterView_freshStatusNotMaskedBySickyServicesDownError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setLastErr(servicesDownErr())
+	m.setStatus("copied container id")
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied container id") {
+		t.Fatalf("a fresh status must not be masked by a sticky services-down error, footer=%q", out)
+	}
+	if strings.Contains(out, "system start") {
+		t.Fatalf("the sticky error must not render while a fresher status is set, footer=%q", out)
+	}
+	// The error itself must not have been discarded: once status is cleared,
+	// the hint is still there to show.
+	m.setStatus("")
+	out = ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("clearing status must reveal the still-sticky services-down hint, footer=%q", out)
+	}
+}
+
+func TestFooterView_staleStatusDoesNotMaskLaterError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// A layout keypress leaves a status behind that nothing ever clears; the
+	// poll failure that follows it must still reach the footer.
+	m.setStatus("layout wide")
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{err: servicesDownErr()})
+	m = next.(Model)
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "container system start") {
+		t.Fatalf("a failure after a status must surface its hint, footer=%q", out)
+	}
+	if strings.Contains(out, "layout wide") {
+		t.Fatalf("the stale status must not hold the footer over a newer error, footer=%q", out)
+	}
+	// And a status set after that error takes the line back.
+	m.setStatus("copied container id")
+	out = ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "copied container id") {
+		t.Fatalf("a status newer than the error must render, footer=%q", out)
+	}
+}
+
+func TestFooterView_untouchedGenerationsPreferError(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	// Neither field has been stamped (both generations zero): an error present
+	// alongside a status still wins, as it did before recency was introduced.
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	m.status = "copied container id"
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "boom") {
+		t.Fatalf("an unstamped error must still render, footer=%q", out)
+	}
+	if strings.Contains(out, "copied container id") {
+		t.Fatalf("an unstamped status must not win the tie, footer=%q", out)
+	}
+}
+
+func TestYankSelected_clipboardErrorNotMaskedByEarlierStatus(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setStatus("copied abc")
+	m.setLastErr(errors.New("clipboard unavailable"))
+	out := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(out, "clipboard unavailable") {
+		t.Fatalf("a clipboard failure must not stay hidden behind the previous copy status, footer=%q", out)
+	}
+}
+
+func TestActionDoneMsg_successClearsServicesDownHint(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.setLastErr(servicesDownErr())
+	// A plugin-gated verb (image prune, volume create/prune) actually succeeding
+	// is real evidence the services came back - unlike an unrelated container
+	// list poll, which TestApplyContainersLoaded_keepsServicesDownHint asserts
+	// must NOT clear it.
+	next, _ := m.Update(actionDoneMsg{msg: "pruned images"})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful action must clear a services-down hint, got %v", m.lastErr)
+	}
+}
+
+func TestApplyContainersLoaded_clearsOtherErrors(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.lastErr = errors.New("container [list]: exit status 1 (stderr: boom)")
+	next, _ := m.applyContainersLoaded(containersLoadedMsg{items: nil, err: nil})
+	m = next.(Model)
+	if m.lastErr != nil {
+		t.Fatalf("a successful poll must clear a non-services-down error, got %v", m.lastErr)
+	}
+}
+
+func TestHelpBindingsCoverAllKeys(t *testing.T) {
+	tokens := map[string]bool{}
+	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
+			for _, tok := range helpKeyTokens(b.key) {
+				tokens[tok] = true
+			}
+		}
+	}
+	km := DefaultKeyMap()
+	rt := reflect.TypeOf(km)
+	rv := reflect.ValueOf(km)
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		val := rv.Field(i).String()
+		if val == "" {
+			continue
+		}
+		if !tokens[val] {
+			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
+		}
+	}
+}
+
+func TestHelpKeyTokens_separatorIsNotAKey(t *testing.T) {
+	got := helpKeyTokens("g / G")
+	want := []string{"g", "G"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the / between keys is a separator, not a key: got %q want %q", got, want)
+	}
+	if got := helpKeyTokens("/"); !reflect.DeepEqual(got, []string{"/"}) {
+		t.Fatalf("the filter row documents the / key itself, got %q", got)
+	}
+	if got := helpKeyTokens("space"); !reflect.DeepEqual(got, []string{"space"}) {
+		t.Fatalf("the space key is spelled %q by a keypress, got %q", "space", got)
+	}
+}
+
+func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
+	var sb strings.Builder
+	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
+			sb.WriteString(b.key + " ")
+			sb.WriteString(b.desc + "\n")
+		}
+	}
+	all := sb.String()
+	for _, k := range []string{"`", "ctrl+c", "esc", "enter", "1 2 3"} {
+		if !strings.Contains(all, k) {
+			t.Fatalf("reachable key %q missing from help", k)
+		}
+	}
+}
+
+func TestHelpBindings_shadowedRowNeverMislabelsSiblingKeys(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "up", Key: "u", Command: "echo up"}}
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		keys := helpKeyTokens(b.key)
+		for _, k := range keys {
+			if k == "u" && !strings.HasPrefix(b.desc, "custom:") {
+				t.Fatalf("shadowed key u still documented as %q", b.desc)
+			}
+		}
+		if len(keys) == 1 && keys[0] == "r" && !strings.Contains(b.desc, "restart") {
+			t.Fatalf("r documents restart, help says %q", b.desc)
+		}
+	}
+	for _, want := range []helpRow{{"s", "stop"}, {"r", "restart"}} {
+		found := false
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			if b.key == want.key && strings.Contains(b.desc, want.desc) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("key %q must keep its own %q entry when a sibling key is shadowed", want.key, want.desc)
+		}
+	}
+}
+
+func TestCustomCommandWithoutCommandKeepsBuiltin(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "empty", Key: "y", Command: ""}}
+
+	var listed []string
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		listed = append(listed, b.key+"\t"+b.desc)
+	}
+	all := strings.Join(listed, "\n")
+	if strings.Contains(all, "custom: empty") {
+		t.Fatalf("a custom command with no command never fires, so help must omit it:\n%s", all)
+	}
+	if !strings.Contains(all, "yank id/name to clipboard") {
+		t.Fatalf("the built-in y must keep its help entry:\n%s", all)
+	}
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = custom
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web"}})
+	next, _ := m.handleKey(keyMsg("y"))
+	if status := next.(Model).status; strings.HasPrefix(status, "custom:") {
+		t.Fatalf("empty custom command must fall through to the built-in, status=%q", status)
+	}
+}
+
+func TestActionsKeyIsReservedFromCustomCommands(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "steal", Key: "x", Command: "echo nope"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "abc", Name: "web", Status: "running"}})
+
+	if cmd := m.customCommandForKey("x"); cmd != "" {
+		t.Fatalf("the action-menu key must not dispatch a custom command, got %q", cmd)
+	}
+	next, _ := m.handleKey(keyMsg("x"))
+	m = next.(Model)
+	if m.mode != modeActions {
+		t.Fatalf("x must still open the action menu, mode=%v", m.mode)
+	}
+	if strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("a custom command bound to x must not have run, status=%q", m.status)
+	}
+	for _, row := range helpBindings(m.activeView, m.focus, m.mode, m.keys, m.cfg.CustomCommands) {
+		if strings.Contains(row.desc, "steal") {
+			t.Fatalf("help must not advertise a custom command that can never fire: %+v", row)
+		}
+	}
+}
+
+func TestCustomCommandKeyDoesNotShadowNavigation(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.focus = FocusList
+	m.cfg.CustomCommands = []config.CustomCommand{{Name: "nav", Key: "j", Command: "echo nope"}}
+	m.cntPanel = m.cntPanel.SetItems([]backend.Container{
+		{ID: "a", Name: "one"}, {ID: "b", Name: "two"}, {ID: "c", Name: "three"},
+	})
+	next, _ := m.handleKey(keyMsg("j"))
+	m = next.(Model)
+	if strings.HasPrefix(m.status, "custom:") {
+		t.Fatalf("navigation key must not be shadowed by a custom command, status=%q", m.status)
+	}
+	if m.cntPanel.Cursor() != 1 {
+		t.Fatalf("list must still scroll with j, cursor=%d", m.cntPanel.Cursor())
+	}
+}
+
+func TestHelpBindings_customCommands(t *testing.T) {
+	custom := []config.CustomCommand{
+		{Name: "redefine", Key: "y", Command: "echo redefined"},
+		{Name: "nav", Key: "j", Command: "echo nope"},
+	}
+	var rows []string
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		rows = append(rows, b.key+"\t"+b.desc)
+	}
+	all := strings.Join(rows, "\n")
+	if !strings.Contains(all, "custom: redefine") {
+		t.Fatalf("configured custom key must appear in help, got:\n%s", all)
+	}
+	if strings.Contains(all, "yank id/name to clipboard") {
+		t.Fatalf("shadowed builtin must not keep its old help entry, got:\n%s", all)
+	}
+	if strings.Contains(all, "custom: nav") {
+		t.Fatalf("custom command on a reserved key never fires, so help must omit it, got:\n%s", all)
+	}
+	if !strings.Contains(all, "move up / down (in list)") {
+		t.Fatalf("navigation help entry must survive a custom command bound to j, got:\n%s", all)
+	}
+}
+
+func TestFooterView_servicesDownStaysOneLine(t *testing.T) {
+	for _, w := range []int{60, 100, 183, 200} {
+		m := newTestModel()
+		m.width, m.height = w, 30
+		m.lastErr = errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+			"Start the container system services and retry:\n\n    container system start\n)")
+		footer := m.footerView()
+		if got := strings.Count(footer, "\n") + 1; got != 1 {
+			t.Fatalf("width=%d: footer must render on one line, got %d lines: %q", w, got, footer)
+		}
+		if w >= 100 && !strings.Contains(ansi.Strip(footer), "container system start") {
+			t.Fatalf("width=%d: hint must survive truncation, footer=%q", w, footer)
+		}
+	}
+}
+
+func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
+	if _, _, timeout := pendingAction(pruneImages); timeout != globalTimeout {
+		t.Fatalf("prune must keep the global budget, got %v want %v", timeout, globalTimeout)
+	}
+	if _, _, timeout := pendingAction(deleteContainers); timeout != confirmTimeout {
+		t.Fatalf("single-resource delete budget = %v, want %v", timeout, confirmTimeout)
+	}
+
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	m.focus = FocusList
+	next, _ := m.handleKey(keyMsg("P"))
+	m = next.(Model)
+	next, cmd := m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirming a prune should return a command")
+	}
+	if !strings.Contains(m.status, "prune") {
+		t.Fatalf("running prune must show progress in the footer, status=%q", m.status)
+	}
+}
+
+func TestHelpView_fitsTerminalHeight(t *testing.T) {
+	custom := []config.CustomCommand{
+		{Name: "one", Key: "z", Command: "echo 1"},
+		{Name: "two", Key: "Z", Command: "echo 2"},
+	}
+	for _, size := range []struct{ w, h int }{{80, 24}, {80, 12}, {120, 40}, {200, 60}} {
+		for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+			m := newTestModel()
+			m.width, m.height = size.w, size.h
+			m.activeView = v
+			m.cfg.CustomCommands = custom
+			m.showHelp = true
+			got := lipgloss.Height(viewString(m.View()))
+			if got > size.h {
+				t.Fatalf("%dx%d view=%d: help renders %d lines, alt screen only shows %d",
+					size.w, size.h, v, got, size.h)
+			}
+		}
+	}
+}
+
+func TestHelpView_scrollsToTheLastBinding(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.showHelp = true
+	bindings := m.helpBindings()
+	last := bindings[len(bindings)-1]
+
+	first := ansi.Strip(viewString(m.View()))
+	if strings.Contains(first, last.desc) {
+		t.Skip("help already fits, nothing to scroll")
+	}
+	if !strings.Contains(first, bindings[0].desc) {
+		t.Fatalf("help must start at the first binding, got %q", first)
+	}
+
+	next, _ := m.handleKey(keyMsg("G"))
+	m = next.(Model)
+	bottom := ansi.Strip(viewString(m.View()))
+	if !strings.Contains(bottom, last.desc) {
+		t.Fatalf("every binding must be reachable in help, %q missing after scrolling:\n%s", last.desc, bottom)
+	}
+	if lines := lipgloss.Height(viewString(m.View())); lines > m.height {
+		t.Fatalf("scrolled help renders %d lines for a %d-row screen", lines, m.height)
+	}
+
+	next, _ = m.handleKey(keyMsg("?"))
+	next, _ = next.(Model).handleKey(keyMsg("?"))
+	if got := next.(Model).helpScroll; got != 0 {
+		t.Fatalf("reopening help must start at the top, scroll=%d", got)
+	}
+}
+
+func TestCustomCommandKeySpellings(t *testing.T) {
+	cases := []struct {
+		name      string
+		configKey string
+		press     string
+	}{
+		{"literal space", " ", "space"},
+		{"named space", "space", "space"},
+		{"dash modifier", "ctrl-z", "ctrl+z"},
+		{"uppercase name", "Enter", "enter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			custom := []config.CustomCommand{{Name: "probe", Key: tc.configKey, Command: "echo probe"}}
+			if got := customCommandFor(custom, DefaultKeyMap(), tc.press); got != "echo probe" {
+				t.Fatalf("config key %q must fire on %q, got %q", tc.configKey, tc.press, got)
+			}
+			rows := map[string]int{}
+			for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+				for _, k := range helpKeyTokens(b.key) {
+					rows[k]++
+				}
+			}
+			if rows[tc.press] != 1 {
+				t.Fatalf("key %q must have exactly one help row, got %d", tc.press, rows[tc.press])
+			}
+		})
+	}
+}
+
+func TestCustomCommandUnusableKeyIsNotAdvertised(t *testing.T) {
+	custom := []config.CustomCommand{{Name: "phantom", Key: "not-a-key", Command: "echo nope"}}
+	for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+		if strings.Contains(b.desc, "phantom") {
+			t.Fatalf("a key no keypress produces must not appear in help: %q -> %q", b.key, b.desc)
+		}
+	}
+}
+
+func TestStopTimeoutMatchesUnconfirmedStop(t *testing.T) {
+	if _, _, timeout := pendingAction(stopContainer); timeout != lifecycleTimeout {
+		t.Fatalf("confirming a stop must not change its budget: got %v want %v", timeout, lifecycleTimeout)
+	}
+}
+
+// newTestModel is New() with the developer's ~/.config/vessel/config.toml
+// dropped, so assertions never depend on the host's dotfiles.
+func newTestModel() Model {
+	m := New()
+	m.cfg = config.Config{}
+	return m
+}
+
+func TestFooterView_alwaysOneLine(t *testing.T) {
+	servicesDown := errors.New("container [image prune]: exit status 1 (stderr: Error: Plugins are unavailable. " +
+		"Start the container system services and retry:\n\n    container system start\n)")
+	states := []struct {
+		name  string
+		apply func(Model) Model
+	}{
+		{"resting key hints", func(m Model) Model { return m }},
+		{"status", func(m Model) Model {
+			m.status = "custom: " + strings.Repeat("echo hello ", 30)
+			return m
+		}},
+		{"multi-line status", func(m Model) Model {
+			m.status = "custom ok\nsecond line\tthird"
+			return m
+		}},
+		{"services down", func(m Model) Model {
+			m.lastErr = servicesDown
+			return m
+		}},
+		{"plain error", func(m Model) Model {
+			m.lastErr = errors.New("container [list]: exit status 1 (stderr: " + strings.Repeat("boom ", 40) + ")")
+			return m
+		}},
+		{"wide-rune status", func(m Model) Model {
+			m.status = "custom: " + strings.Repeat("世界", 60)
+			return m
+		}},
+		{"wide-rune error", func(m Model) Model {
+			m.lastErr = errors.New("container [volume create " + strings.Repeat("世界", 60) + "]: exit status 1")
+			return m
+		}},
+		{"wide-rune services-down error", func(m Model) Model {
+			m.lastErr = errors.New("container [volume create " + strings.Repeat("世界", 60) +
+				"]: exit status 1 (stderr: Error: Plugins are unavailable.\n\n    container system start\n)")
+			return m
+		}},
+	}
+	for _, st := range states {
+		for _, w := range []int{60, 72, 80, 100, 183, 200} {
+			for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
+				m := newTestModel()
+				m.width, m.height = w, 24
+				m.activeView = v
+				m = st.apply(m)
+				footer := m.footerView()
+				if lines := lipgloss.Height(footer); lines != 1 {
+					t.Fatalf("%s at width %d view %d: footer must be one row, got %d: %q",
+						st.name, w, v, lines, footer)
+				}
+			}
+		}
+	}
+}
+
+func TestHelpView_fitsWithWideRuneCustomCommands(t *testing.T) {
+	custom := []config.CustomCommand{{Name: strings.Repeat("世界", 40), Key: "z", Command: "echo wide"}}
+	for _, size := range []struct{ w, h int }{{60, 24}, {80, 24}, {120, 24}} {
+		m := newTestModel()
+		m.width, m.height = size.w, size.h
+		m.cfg.CustomCommands = custom
+		m.showHelp = true
+		// The custom command is the last row, so scroll to it.
+		next, _ := m.handleKey(keyMsg("G"))
+		m = next.(Model)
+		out := ansi.Strip(viewString(m.View()))
+		if !strings.Contains(out, "custom:") {
+			t.Fatalf("%dx%d: the custom command row must be on screen, got:\n%s", size.w, size.h, out)
+		}
+		if got := lipgloss.Height(viewString(m.View())); got > size.h {
+			t.Fatalf("%dx%d: help renders %d lines for a %d-row screen", size.w, size.h, got, size.h)
+		}
+	}
+}
+
+func TestHelpBindings_keyStillLiveInLogViewKeepsARow(t *testing.T) {
+	km := DefaultKeyMap()
+	for _, key := range []string{km.Follow, km.Yank} {
+		custom := []config.CustomCommand{{Name: "taken", Key: key, Command: "echo taken"}}
+		var got []string
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, km, custom) {
+			for _, t := range helpKeyTokens(b.key) {
+				if t == key {
+					got = append(got, b.desc)
+				}
+			}
+		}
+		if len(got) != 2 {
+			t.Fatalf("key %q: want a custom row plus its surviving log-view row, got %q", key, got)
+		}
+		var custRow, logRow bool
+		for _, d := range got {
+			if strings.HasPrefix(d, "custom:") {
+				custRow = true
+			}
+			if strings.Contains(d, "log view") {
+				logRow = true
+			}
+		}
+		if !custRow || !logRow {
+			t.Fatalf("key %q: help must show both the custom command and what it still does in the log view, got %q", key, got)
+		}
+	}
+}
+
+func TestCustomCommandKeyModifierSpellings(t *testing.T) {
+	t.Run("modifier order is canonical", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "shift-ctrl-a", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "ctrl+shift+a"); got != "echo probe" {
+			t.Fatalf("a keypress spells modifiers ctrl+shift+…, so that config key must fire on it, got %q", got)
+		}
+	})
+	t.Run("shifted character is unmatchable", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "phantom", Key: "shift+z", Command: "echo nope"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "Z"); got != "" {
+			t.Fatalf("shift+z is not what a keypress reports; it must not claim to fire, got %q", got)
+		}
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			if strings.Contains(b.desc, "phantom") {
+				t.Fatalf("a binding that can never fire must not appear in help: %q -> %q", b.key, b.desc)
+			}
+		}
+	})
+	t.Run("modified character is lowercased", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "ctrl+Z", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "ctrl+z"); got != "echo probe" {
+			t.Fatalf("a modifier suppresses the typed text, so ctrl+Z must fire on ctrl+z, got %q", got)
+		}
+		rows := 0
+		for _, b := range helpBindings(ViewContainers, FocusList, modeBrowse, DefaultKeyMap(), custom) {
+			for _, k := range helpKeyTokens(b.key) {
+				if k == "ctrl+Z" {
+					t.Fatalf("help must advertise the key a keypress reports, not %q", k)
+				}
+				if k == "ctrl+z" {
+					rows++
+				}
+			}
+		}
+		if rows != 1 {
+			t.Fatalf("want one ctrl+z help row, got %d", rows)
+		}
+	})
+	t.Run("shift plus a named key stays usable", func(t *testing.T) {
+		custom := []config.CustomCommand{{Name: "probe", Key: "shift+tab", Command: "echo probe"}}
+		if got := customCommandFor(custom, DefaultKeyMap(), "shift+tab"); got != "echo probe" {
+			t.Fatalf("shift+tab is a real keypress spelling, got %q", got)
+		}
+	})
+}
+
 func viewString(v tea.View) string {
 	return v.Content
 }
@@ -209,7 +1283,7 @@ func enterKey() tea.KeyPressMsg {
 // the same image or volume cannot resurface a mark and re-arm a bulk delete
 // nobody asked for.
 func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -242,7 +1316,7 @@ func TestImageDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 }
 
 func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
@@ -264,7 +1338,7 @@ func TestVolumeDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 }
 
 func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	items := []backend.Container{
 		{ID: "1", Name: "web", Status: "running"},
@@ -290,7 +1364,7 @@ func TestContainerDeleteDropsMarksOnceRefreshLands(t *testing.T) {
 // Prune removes the same objects without passing through the confirmation, so
 // the mark drop has to hold there too.
 func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
 	m.volPanel = m.volPanel.SetItems(items)
@@ -313,7 +1387,7 @@ func TestVolumePruneThenRecreateDoesNotResurfaceMarks(t *testing.T) {
 // A delete that fails leaves its objects in place, so the marks must still be
 // there afterwards and the action must stay retryable without re-marking.
 func TestFailedDeleteKeepsMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -337,7 +1411,7 @@ func TestFailedDeleteKeepsMarks(t *testing.T) {
 // The cursor row wins over a single mark, so this delete never touches "b" -
 // and a mark on an object the delete left alone must survive it.
 func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	items := []backend.Image{
@@ -366,7 +1440,7 @@ func TestDeleteKeepsMarksItDidNotTouch(t *testing.T) {
 // A mark hidden behind an active filter is not a delete target: it survives a
 // delete of something else, and disappears only when its own volume does.
 func TestVolumeMarkHiddenByFilterTracksItsOwnVolume(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewVolumes
 	items := []backend.Volume{{Name: "data", Driver: "local"}, {Name: "logs", Driver: "local"}}
@@ -415,7 +1489,7 @@ func markRows(t *testing.T, m Model, n int) Model {
 }
 
 func TestCancelledDeleteKeepsMarks(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -440,7 +1514,7 @@ func TestCancelledDeleteKeepsMarks(t *testing.T) {
 // The mark key is a KeyMap binding, not a literal in each panel: rebinding it
 // has to reach every pane and the bulk delete that acts on the marks.
 func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
-	m := New().withKeys(rebound("m"))
+	m := newTestModel().withKeys(rebound("m"))
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -481,7 +1555,7 @@ func TestToggleMarkBindingReachesEveryPanel(t *testing.T) {
 // The default binding is what a real space bar press produces, so marking and
 // bulk-deleting work end to end out of the box.
 func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.width, m.height = 100, 30
 	m.activeView = ViewImages
 	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
@@ -501,7 +1575,7 @@ func TestDefaultToggleMarkBindingMarksAndBulkDeletes(t *testing.T) {
 // The delete command is the one path that destroys user state, so an unhandled
 // kind must fail loudly instead of falling through to a container delete.
 func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
-	m := New()
+	m := newTestModel()
 	m.cntPanel = m.cntPanel.SetItems([]backend.Container{{ID: "1", Name: "web", Status: "running"}})
 	m.mode = modeConfirmDelete
 	m.pendingKind = deleteKind(99)
@@ -517,6 +1591,36 @@ func TestUnhandledDeleteKindFailsInsteadOfDeletingContainers(t *testing.T) {
 	}
 	if done.err == nil {
 		t.Fatal("an unhandled delete kind must report an error, not delete containers")
+	}
+}
+
+// A prune kind that has no spec of its own would ask about, and then sweep,
+// whichever store the lookup fell back to. Every kind isPrune reports true for
+// must therefore own a distinct question.
+func TestEveryPruneKindAsksAboutItsOwnStore(t *testing.T) {
+	asked := map[string]deleteKind{}
+	prunes := 0
+	for k := deleteKind(0); k < deleteKind(64); k++ {
+		if !k.isPrune() {
+			continue
+		}
+		prunes++
+		m := newTestModel()
+		m.pendingKind = k
+		q := m.confirmQuestion()
+		if q == "" {
+			t.Fatalf("prune kind %d asks nothing before sweeping a store", k)
+		}
+		if prev, dup := asked[q]; dup {
+			t.Fatalf("prune kinds %d and %d both ask %q: one of them has no spec and would sweep the other's store", k, prev, q)
+		}
+		asked[q] = k
+		if label, done, timeout := pendingAction(k); label == "" || done != "pruned" || timeout != globalTimeout {
+			t.Fatalf("prune kind %d reports (%q, %q, %v) instead of its own prune action", k, label, done, timeout)
+		}
+	}
+	if prunes != 3 {
+		t.Fatalf("expected the three prune kinds, found %d", prunes)
 	}
 }
 
@@ -551,7 +1655,7 @@ func fakeCLI(t *testing.T) string {
 	return bin
 }
 
-func imagesModel(t *testing.T, items []backend.Image) Model {
+func imagesModelWithItems(t *testing.T, items []backend.Image) Model {
 	t.Helper()
 	m := New()
 	m.width, m.height = 100, 30
@@ -582,7 +1686,7 @@ func lastCLICommand(m Model) string {
 }
 
 func TestImagesActionsMenu_listsImageMobility(t *testing.T) {
-	m := imagesModel(t, nil)
+	m := imagesModelWithItems(t, nil)
 	for _, label := range []string{"Tag…", "Save…", "Load…", "Push"} {
 		if findAction(m.buildActions(), label) == nil {
 			t.Fatalf("images actions menu missing %q", label)
@@ -591,7 +1695,7 @@ func TestImagesActionsMenu_listsImageMobility(t *testing.T) {
 }
 
 func TestImagesAction_Tag_flow(t *testing.T) {
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	run := findAction(m.buildActions(), "Tag…")
 	if run == nil {
 		t.Fatal("Tag action missing")
@@ -618,7 +1722,7 @@ func TestImagesAction_Tag_flow(t *testing.T) {
 }
 
 func TestImagesAction_Save_flow(t *testing.T) {
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	run := findAction(m.buildActions(), "Save…")
 	next, _ := run(m)
 	mm := next
@@ -643,7 +1747,7 @@ func TestImagesAction_Load_flow(t *testing.T) {
 	if err := os.WriteFile(path, []byte("oci-archive"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := imagesModel(t, nil)
+	m := imagesModelWithItems(t, nil)
 	run := findAction(m.buildActions(), "Load…")
 	next, _ := run(m)
 	mm := next
@@ -660,7 +1764,7 @@ func TestImagesAction_Load_flow(t *testing.T) {
 }
 
 func TestImagesAction_Load_missingFile(t *testing.T) {
-	m := imagesModel(t, nil)
+	m := imagesModelWithItems(t, nil)
 	run := findAction(m.buildActions(), "Load…")
 	next, _ := run(m)
 	mm := next
@@ -727,7 +1831,7 @@ func TestImagesAction_Push_confirmOmitsAnUnknownDestination(t *testing.T) {
 	// An unqualified ref resolves against the CLI's configured default registry,
 	// which vessel does not read, so the label must name no destination at all
 	// rather than assert a guess before an unrecoverable publish.
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
 	}))
 	view := modalText(t, m)
@@ -743,7 +1847,7 @@ func TestImagesAction_Push_confirmOmitsAnUnknownDestination(t *testing.T) {
 }
 
 func TestImagesAction_Push_confirmNamesPrivateRegistry(t *testing.T) {
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "registry.local:5000/team/app", Tag: "v2"},
 	}))
 	view := modalText(t, m)
@@ -755,7 +1859,7 @@ func TestImagesAction_Push_confirmNamesPrivateRegistry(t *testing.T) {
 func TestImagesActions_refuseUntaggedImage(t *testing.T) {
 	// A digest-pinned row lists with an empty tag; formatting it yields a bare
 	// repository that a registry resolves as :latest — a different artifact.
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: ""}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: ""}})
 	for _, label := range []string{"Tag…", "Save…", "Push"} {
 		run := findAction(m.buildActions(), label)
 		if run == nil {
@@ -785,7 +1889,7 @@ func TestImagesAction_Save_confirmsOverwrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte("precious"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	run := findAction(m.buildActions(), "Save…")
 	next, _ := run(m)
 	res, cmd := next.handlePrompt(promptDoneMsg{kind: "save to", text: path})
@@ -828,7 +1932,7 @@ func TestImagesAction_Save_confirmsOverwrite(t *testing.T) {
 
 func TestImagesAction_Save_newPathNeedsNoConfirmation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fresh.tar")
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	run := findAction(m.buildActions(), "Save…")
 	next, _ := run(m)
 	res, cmd := next.handlePrompt(promptDoneMsg{kind: "save to", text: path})
@@ -845,7 +1949,7 @@ func TestImagesAction_Save_newPathNeedsNoConfirmation(t *testing.T) {
 
 func TestFooterView_clampsCLIErrorToOneRow(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
 	}))
 	next, cmd := m.handleKey(keyMsg("y"))
@@ -908,7 +2012,7 @@ func TestHelpView_imagesFitsAnEightyByTwentyFourTerminal(t *testing.T) {
 
 func TestImagesDetail_showsRegistryLoginAfterAuthFailure(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
 	}))
 	next, cmd := m.handleKey(keyMsg("y"))
@@ -978,7 +2082,7 @@ func TestImagesDetail_noticeSurvivesTheSmallestSupportedPane(t *testing.T) {
 func TestImagesDetail_noticeNotShownForANonPushFailure(t *testing.T) {
 	// Docker Hub answers 401 for a repository that does not exist, so a typo'd
 	// pull produces auth-shaped stderr. It is not a credentials problem.
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	pullErr := &backend.CLIError{
 		Args:   []string{"image", "pull", "vessel-no-such-xyz123:latest"},
 		Stderr: "Error: ... 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io\n",
@@ -1000,7 +2104,7 @@ func TestImagesDetail_noticeNotShownForANonPushFailure(t *testing.T) {
 
 func TestImagesDetail_noticeClearedByALaterNonAuthFailure(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
 	}))
 	next, cmd := m.handleKey(keyMsg("y"))
@@ -1032,7 +2136,7 @@ func twoImages() []backend.Image {
 func pushRefusedOnFirstImage(t *testing.T, items []backend.Image) Model {
 	t.Helper()
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
-	m := beginPush(t, imagesModel(t, items))
+	m := beginPush(t, imagesModelWithItems(t, items))
 	next, cmd := m.handleKey(keyMsg("y"))
 	done := cmd().(actionDoneMsg)
 	if done.err == nil {
@@ -1094,7 +2198,7 @@ func TestHelpView_keyColumnNeverRunsIntoItsDescription(t *testing.T) {
 		m.width, m.height = 80, 24
 		m.activeView = view
 		rendered := ansi.Strip(m.helpView())
-		for _, b := range helpBindings(m.activeView, m.focus, m.mode) {
+		for _, b := range m.helpBindings() {
 			if b.key == "" || b.desc == "" {
 				continue
 			}
@@ -1235,7 +2339,7 @@ func TestActionsModal_windowFollowsTheSelection(t *testing.T) {
 
 func TestImagesDetail_forbiddenPushDoesNotBlameCredentials(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "forbidden")
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "myorg/app", Tag: "v1"},
 	}))
 	next, cmd := m.handleKey(keyMsg("y"))
@@ -1256,7 +2360,7 @@ func TestImagesDetail_forbiddenPushDoesNotBlameCredentials(t *testing.T) {
 }
 
 func TestImagesAction_Tag_promptNamesSourceAndWantsNewRef(t *testing.T) {
-	m := imagesModel(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
+	m := imagesModelWithItems(t, []backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}})
 	run := findAction(m.buildActions(), "Tag…")
 	next, _ := run(m)
 	if next.mode != modePrompt {
@@ -1280,7 +2384,7 @@ func TestFooterView_clampsWideRunesByDisplayWidth(t *testing.T) {
 }
 
 func TestConfirm_pendingActionDoesNotOutliveItsModal(t *testing.T) {
-	m := imagesModel(t, []backend.Image{
+	m := imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:aaa", Repository: "vessel/alpine", Tag: "probe"},
 		{ID: "sha256:bbb", Repository: "vessel/busybox", Tag: "probe"},
 	})
@@ -1320,7 +2424,7 @@ func TestConfirm_pendingActionDoesNotOutliveItsModal(t *testing.T) {
 }
 
 func TestImagesAction_Push_confirmedRunsPush(t *testing.T) {
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
 	}))
 	next, cmd := m.handleKey(keyMsg("y"))
@@ -1343,7 +2447,7 @@ func TestImagesAction_Push_confirmedRunsPush(t *testing.T) {
 }
 
 func TestImagesAction_Push_cancelledDoesNotPush(t *testing.T) {
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "vessel/alpine", Tag: "probe"},
 	}))
 	next, cmd := m.handleKey(keyMsg("n"))
@@ -1361,7 +2465,7 @@ func TestImagesAction_Push_cancelledDoesNotPush(t *testing.T) {
 
 func TestImagesAction_Push_authFailureNamesLogin(t *testing.T) {
 	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
-	m := beginPush(t, imagesModel(t, []backend.Image{
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
 		{ID: "sha256:abc", Repository: "alpine", Tag: "latest"},
 	}))
 	next, cmd := m.handleKey(keyMsg("y"))
@@ -1377,7 +2481,7 @@ func TestImagesAction_Push_authFailureNamesLogin(t *testing.T) {
 }
 
 func TestImagesAction_nilSelectionGuards(t *testing.T) {
-	m := imagesModel(t, nil)
+	m := imagesModelWithItems(t, nil)
 	for _, label := range []string{"Tag…", "Save…", "Push"} {
 		run := findAction(m.buildActions(), label)
 		if run == nil {
@@ -1388,5 +2492,72 @@ func TestImagesAction_nilSelectionGuards(t *testing.T) {
 		if mm.status != "nothing selected" {
 			t.Fatalf("%s with no selection: status=%q want nothing selected", label, mm.status)
 		}
+	}
+}
+
+// A space bar press serialises as the literal string "space", never " "
+// (see AGENTS.md, UI key handling). A prompt that only accepted len==1 byte
+// strings silently dropped it, so "my images" typed into a prompt came out
+// as "myimages" with no error. This proves the fix round-trips it intact.
+func TestHandlePromptKey_spaceSurvivesRoundTrip(t *testing.T) {
+	m := New()
+	next, _ := m.beginPrompt("pull", "image to pull")
+	m = next.(Model)
+	for _, k := range []tea.KeyPressMsg{keyMsg("m"), keyMsg("y"), spaceKey(), keyMsg("i")} {
+		next, _ = m.handleKey(k)
+		m = next.(Model)
+	}
+	if m.promptBuf != "my i" {
+		t.Fatalf("promptBuf = %q, want %q", m.promptBuf, "my i")
+	}
+	next, _ = m.handleKey(enterKey())
+	m = next.(Model)
+	if m.status != "pull my i…" {
+		t.Fatalf("status = %q, want the space preserved in %q", m.status, "pull my i…")
+	}
+}
+
+// A multi-byte rune (accents, CJK, emoji) is still exactly one printable
+// character, but its Key.String() is more than one byte. A prompt keyed on
+// byte length silently dropped it the same way it dropped space.
+func TestHandlePromptKey_multibyteRuneSurvivesRoundTrip(t *testing.T) {
+	m := New()
+	next, _ := m.beginPrompt("pull", "image to pull")
+	m = next.(Model)
+	for _, r := range "café" {
+		next, _ = m.handleKey(keyMsg(string(r)))
+		m = next.(Model)
+	}
+	if m.promptBuf != "café" {
+		t.Fatalf("promptBuf = %q, want %q", m.promptBuf, "café")
+	}
+	// Backspace must remove the whole rune, not just its last byte, or a
+	// trailing multi-byte character would corrupt into invalid UTF-8.
+	next, _ = m.handleKey(keyMsg("backspace"))
+	m = next.(Model)
+	if m.promptBuf != "caf" {
+		t.Fatalf("promptBuf after backspace = %q, want %q", m.promptBuf, "caf")
+	}
+}
+
+// A dangling image has no reference, and the reference is the only thing the
+// CLI accepts, so settling on one must not run `container image inspect ""`.
+func TestScheduleInspect_danglingImageRunsNoSubprocess(t *testing.T) {
+	m := imagesModel(t)
+	m.imgPanel = m.imgPanel.SetItems([]backend.Image{
+		{ID: "1", Repository: "alpine", Tag: "latest"},
+		{ID: "sha256:dangling"},
+	})
+
+	next, cmd := m.handleMouseWheel(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	m = next.(Model)
+	if backend.FormatRef(*m.imgPanel.Selected()) != "" {
+		t.Fatalf("expected the dangling row to be selected, got %+v", m.imgPanel.Selected())
+	}
+	if cmd != nil {
+		t.Errorf("a dangling selection scheduled an inspect: %T", cmd())
+	}
+	if load := m.loadImageInspectCmd(); load != nil {
+		t.Errorf("a dangling selection produced an inspect command: %T", load())
 	}
 }

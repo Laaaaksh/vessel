@@ -46,6 +46,7 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list|ls) cat "$DATA/images.json" ;;
+      inspect) cat "$DATA/image-inspect.json" ;;
       delete|rm) echo "ok image delete ${1:-}" >&2 ;;
       pull) echo "ok image pull ${1:-}" >&2 ;;
       tag) echo "ok image tag $*" >&2 ;;
@@ -77,12 +78,18 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list|ls) cat "$DATA/volumes.json" ;;
+      inspect) cat "$DATA/volume-inspect.json" ;;
       delete|rm) echo "ok volume delete ${1:-}" >&2 ;;
       *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;
+  run)
+    # Echo each remaining argument on its own line (not word-split) so tests
+    # can verify exact argv boundaries even for values containing spaces.
+    printf '%s\n' "$@"
+    ;;
   exec)
-    echo "fake exec $*" >&2
+    printf '%s\n' "$@"
     ;;
   *)
     echo "fake-container: unknown command: $cmd $*" >&2

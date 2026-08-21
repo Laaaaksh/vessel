@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,6 +72,52 @@ func TestMapContainers_empty(t *testing.T) {
 	got := mapContainers(nil)
 	if len(got) != 0 {
 		t.Errorf("expected empty slice, got %d", len(got))
+	}
+}
+
+func TestMapContainers_mountsNetworksResources(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-mounts.json")
+	got := mapContainers(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(got))
+	}
+	c := got[0]
+	if c.Hostname == "" {
+		t.Error("hostname empty")
+	}
+	if c.Platform != "linux/arm64" {
+		t.Errorf("platform want linux/arm64, got %q", c.Platform)
+	}
+	if c.CPUs != 4 {
+		t.Errorf("cpus want 4, got %d", c.CPUs)
+	}
+	if c.MemoryBytes != 1073741824 {
+		t.Errorf("memory want 1073741824, got %d", c.MemoryBytes)
+	}
+	if len(c.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(c.Mounts))
+	}
+	mt := c.Mounts[0]
+	if mt.Destination != "/data" {
+		t.Errorf("mount destination want /data, got %q", mt.Destination)
+	}
+	// A named volume's source is the backing disk image under Application
+	// Support; the volume name is what identifies the mount to a reader.
+	if mt.Source != "p2-live-probe" {
+		t.Errorf("mount source want the volume name p2-live-probe, got %q", mt.Source)
+	}
+	if len(c.Networks) != 1 {
+		t.Fatalf("expected 1 network, got %d", len(c.Networks))
+	}
+	net := c.Networks[0]
+	if net.Name != "default" {
+		t.Errorf("network name want default, got %q", net.Name)
+	}
+	if net.IP == "" || !strings.Contains(net.IP, ".") {
+		t.Errorf("network ip missing or malformed: %q", net.IP)
+	}
+	if len(c.Ports) != 1 || c.Ports[0].HostPort != 18080 {
+		t.Errorf("published ports wrong: %+v", c.Ports)
 	}
 }
 
@@ -200,5 +247,71 @@ func TestCreatedParse(t *testing.T) {
 	want := time.Date(2026, 8, 5, 16, 8, 35, 0, time.UTC)
 	if !got[0].Created.Equal(want) {
 		t.Fatalf("want %v got %v", want, got[0].Created)
+	}
+}
+
+// A bind mount carries no volume name, so its host path is the only identity
+// it has and must survive.
+func TestMapContainers_bindMountKeepsHostPath(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-mounts.json")
+	raw[0].Configuration.Mounts[0].Type.Volume.Name = ""
+	raw[0].Configuration.Mounts[0].Source = "/Users/me/project"
+
+	got := mapContainers(raw)
+	if len(got) != 1 || len(got[0].Mounts) != 1 {
+		t.Fatalf("expected 1 container with 1 mount, got %+v", got)
+	}
+	if src := got[0].Mounts[0].Source; src != "/Users/me/project" {
+		t.Errorf("bind mount source want /Users/me/project, got %q", src)
+	}
+}
+
+// A stopped container reports an empty status.networks, but the network it is
+// configured on is still known. `container list --all` includes stopped rows,
+// so the pane must not lose the network name just because the container is
+// not running.
+func TestMapContainers_stoppedContainerKeepsConfiguredNetwork(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-stopped.json")
+	if len(raw) != 1 {
+		t.Fatalf("expected 1 container in the fixture, got %d", len(raw))
+	}
+	if len(raw[0].Status.Networks) != 0 {
+		t.Fatalf("fixture no longer models a stopped container: status.networks = %+v", raw[0].Status.Networks)
+	}
+
+	got := mapContainers(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(got))
+	}
+	c := got[0]
+	if c.Status != "stopped" {
+		t.Errorf("status want stopped, got %q", c.Status)
+	}
+	if len(c.Networks) != 1 {
+		t.Fatalf("expected the configured network to survive, got %+v", c.Networks)
+	}
+	if c.Networks[0].Name != "default" {
+		t.Errorf("network name want default, got %q", c.Networks[0].Name)
+	}
+	// A stopped container has no runtime address, so only the name renders.
+	if c.Networks[0].IP != "" {
+		t.Errorf("stopped container reported an ip: %q", c.Networks[0].IP)
+	}
+	if got := FormatNetworks(c.Networks); got != "default" {
+		t.Errorf("FormatNetworks = %q, want %q", got, "default")
+	}
+}
+
+// The running case must keep its address rather than being replaced by the
+// bare configured name.
+func TestMapContainers_runningContainerKeepsStatusAddress(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-mounts.json")
+	got := mapContainers(raw)
+	if len(got) != 1 || len(got[0].Networks) != 1 {
+		t.Fatalf("expected 1 container with 1 network, got %+v", got)
+	}
+	net := got[0].Networks[0]
+	if net.Name != "default" || net.IP == "" {
+		t.Errorf("running container network = %+v, want default with an ip", net)
 	}
 }
