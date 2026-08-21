@@ -151,7 +151,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 		uiutil.KVFit("Ports", backend.FormatPorts(sel.Ports), width),
 	)
 	if sel.Hostname != "" {
-		p.Add(uiutil.KV("Hostname", sel.Hostname))
+		p.Add(uiutil.KVFit("Hostname", sel.Hostname, width))
 	}
 	if sel.Platform != "" {
 		p.Add(uiutil.KV("Platform", sel.Platform))

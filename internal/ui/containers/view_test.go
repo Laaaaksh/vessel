@@ -181,26 +181,60 @@ func TestDetailView_narrowPaneRendersRowsInOrder(t *testing.T) {
 	}})
 	poller := backend.NewPoller(nil, time.Second)
 
-	// Pinned so the invariant is actually exercised: at 20x9 the pane has room
-	// for every row up to Ports, then the Hostname row wraps to two rows and no
-	// longer fits. The single-row Platform row after it would fit in the gap,
-	// and must be dropped anyway so what renders stays a prefix.
-	const width, height = 20, 9
+	// Pinned so the invariant is actually exercised: at 20x6 the pane has room
+	// for the title, its spacer and Image, then the ID row wraps to two rows
+	// and no longer fits in the single row left. The single-row Status row
+	// after it would fit in that gap, and must be dropped anyway so what
+	// renders stays a prefix of what was asked for.
+	const width, height = 20, 6
 	v := ansi.Strip(m.DetailView(width, height, poller))
 
 	if got := strings.Count(v, "\n") + 1; got > height {
 		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
 	}
-	for _, want := range []string{"Image", "ID", "Status", "Ports"} {
-		if !strings.Contains(v, want) {
-			t.Fatalf("row %q must render before the gap: %q", want, v)
+	if !strings.Contains(v, "Image") {
+		t.Fatalf("the rows before the gap must render: %q", v)
+	}
+	if strings.Contains(v, "ID") {
+		t.Fatalf("geometry drifted: the wrapping ID row was expected not to fit: %q", v)
+	}
+	for _, dropped := range []string{"Status", "Ports", "Hostname", "Platform"} {
+		if strings.Contains(v, dropped) {
+			t.Errorf("%s jumped ahead of the dropped ID row: %q", dropped, v)
 		}
 	}
-	if strings.Contains(v, "Hostname") {
-		t.Fatalf("geometry drifted: the wrapping Hostname row was expected not to fit: %q", v)
+}
+
+func TestDetailView_uuidHostnameDoesNotEvictLaterRows(t *testing.T) {
+	// A container started without --name gets its UUID as the hostname, which
+	// is 36 characters: unbounded next to the 9-column label, so the row must
+	// be width-bound like its siblings or it wraps and evicts the rows after it.
+	m := New().SetItems([]backend.Container{{
+		ID: "abc123456789", Name: "web", Image: "alpine:latest", Status: "running",
+		Ports:       []backend.PortMapping{{HostPort: 8080, ContainerPort: 80}},
+		Hostname:    "a5337e3a-3096-4b1a-b698-96aaa10814b1",
+		Platform:    "linux/arm64",
+		CPUs:        4,
+		MemoryBytes: 1073741824,
+		Networks:    []backend.Network{{Name: "default", IP: "192.168.64.2/24"}},
+		Mounts:      []backend.Mount{{Source: "p2-live-probe", Destination: "/data"}},
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	// The detail pane on a real terminal is 40 columns wide.
+	const width, height = 40, 16
+	v := ansi.Strip(m.DetailView(width, height, poller))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
 	}
-	if strings.Contains(v, "Platform") {
-		t.Errorf("Platform jumped ahead of the dropped Hostname row: %q", v)
+	if !strings.Contains(v, "Hostname") {
+		t.Fatalf("the hostname row itself must still render: %q", v)
+	}
+	for _, want := range []string{"Platform", "CPUs", "MemLimit", "Networks", "-- Mounts --"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q evicted by an unbounded Hostname row: %q", want, v)
+		}
 	}
 }
 
