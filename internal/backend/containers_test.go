@@ -265,3 +265,53 @@ func TestMapContainers_bindMountKeepsHostPath(t *testing.T) {
 		t.Errorf("bind mount source want /Users/me/project, got %q", src)
 	}
 }
+
+// A stopped container reports an empty status.networks, but the network it is
+// configured on is still known. `container list --all` includes stopped rows,
+// so the pane must not lose the network name just because the container is
+// not running.
+func TestMapContainers_stoppedContainerKeepsConfiguredNetwork(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-stopped.json")
+	if len(raw) != 1 {
+		t.Fatalf("expected 1 container in the fixture, got %d", len(raw))
+	}
+	if len(raw[0].Status.Networks) != 0 {
+		t.Fatalf("fixture no longer models a stopped container: status.networks = %+v", raw[0].Status.Networks)
+	}
+
+	got := mapContainers(raw)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(got))
+	}
+	c := got[0]
+	if c.Status != "stopped" {
+		t.Errorf("status want stopped, got %q", c.Status)
+	}
+	if len(c.Networks) != 1 {
+		t.Fatalf("expected the configured network to survive, got %+v", c.Networks)
+	}
+	if c.Networks[0].Name != "default" {
+		t.Errorf("network name want default, got %q", c.Networks[0].Name)
+	}
+	// A stopped container has no runtime address, so only the name renders.
+	if c.Networks[0].IP != "" {
+		t.Errorf("stopped container reported an ip: %q", c.Networks[0].IP)
+	}
+	if got := FormatNetworks(c.Networks); got != "default" {
+		t.Errorf("FormatNetworks = %q, want %q", got, "default")
+	}
+}
+
+// The running case must keep its address rather than being replaced by the
+// bare configured name.
+func TestMapContainers_runningContainerKeepsStatusAddress(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-mounts.json")
+	got := mapContainers(raw)
+	if len(got) != 1 || len(got[0].Networks) != 1 {
+		t.Fatalf("expected 1 container with 1 network, got %+v", got)
+	}
+	net := got[0].Networks[0]
+	if net.Name != "default" || net.IP == "" {
+		t.Errorf("running container network = %+v, want default with an ip", net)
+	}
+}

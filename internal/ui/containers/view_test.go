@@ -329,3 +329,17 @@ func TestDetailView_sectionsDoNotJumpAheadOfDroppedRows(t *testing.T) {
 		t.Errorf("Labels jumped ahead of the dropped Ports row: %q", v)
 	}
 }
+
+// The Networks row is gated on len(sel.Networks) > 0, so a stopped container
+// whose network survives mapping must actually reach the pane.
+func TestDetailView_stoppedContainerRendersItsNetwork(t *testing.T) {
+	m := New().SetItems([]backend.Container{{
+		ID: "abc", Name: "web", Status: "stopped",
+		Networks: []backend.Network{{Name: "default"}},
+	}})
+
+	v := ansi.Strip(m.DetailView(60, 40, nil))
+	if !strings.Contains(v, "Networks: default") {
+		t.Errorf("stopped container dropped its network row: %q", v)
+	}
+}
