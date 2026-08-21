@@ -89,8 +89,14 @@ Known limits:
 
 - vessel never manages registry credentials. Push reuses whatever session
   `container registry login` has already established - running that login is yours to do.
-- Every `container` invocation is capped at 10 seconds, so saving, loading or pushing a
-  large image is cut off mid-transfer and reported as a timeout rather than a real failure.
+- Long-running verbs get real budgets: starting or stopping a container gets
+  thirty seconds, image tag/save/load/push, prunes and starting a container run
+  up to two minutes, one batched delete of many targets gets one minute for the
+  whole call, and a one-shot exec gets thirty seconds.
+  A huge `image pull` is still bounded by the short default cap. A run without
+  `-d` holds the action status until that budget expires instead of streaming
+  output; streaming or detached-launch support for long-running foreground
+  sessions is future work.
 - The prompt drops the space bar and non-ASCII characters, so a path containing either
   cannot be typed yet - save would write somewhere you did not name, and load reports a
   missing file for one that exists.
