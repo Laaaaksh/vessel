@@ -3,9 +3,11 @@ package uiutil
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // kvLabelWidth is the column width of a KV row's label, which is followed by a
@@ -47,6 +49,28 @@ func Truncate(s string, max int) string {
 // Pad truncates s to w runes and left-aligns it in a field of that width.
 func Pad(s string, w int) string {
 	return fmt.Sprintf("%-*s", w, Truncate(s, w))
+}
+
+// TruncateCells shortens s to at most w terminal cells, ending in an ellipsis
+// when cut. A terminal — and lipgloss, which wraps rather than truncates —
+// measures display width, so a double-width character such as 世 takes two
+// cells: cutting by rune count lets a line overflow the width it was fitted to
+// and wrap onto a second row. A w of zero or less yields an empty string.
+func TruncateCells(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	return ansi.Truncate(s, w, "…")
+}
+
+// PadCells truncates s to w terminal cells and left-aligns it in a field of
+// that width.
+func PadCells(s string, w int) string {
+	s = TruncateCells(s, w)
+	if pad := w - lipgloss.Width(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
 }
 
 // Window returns the [start, end) bounds of a scroll window of at most size
