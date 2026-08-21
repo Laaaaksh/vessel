@@ -268,7 +268,7 @@ func producibleKey(k string) bool {
 	if utf8.RuneCountInString(base) != 1 {
 		return false
 	}
-	return !(mods["shift"] && len(mods) == 1)
+	return !mods["shift"] || len(mods) != 1
 }
 
 // customKey returns the key a configured custom command fires on, or "" when it

@@ -16,8 +16,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Build / test / lint
 - `go build ./... && go vet ./...` then `go test ./... -race -count=1` (see `scripts/smoke.sh`).
-- Lint: `golangci-lint run ./...`. The Homebrew golangci-lint (v2.5.0, built with Go 1.25) refuses to load the config because `go.mod` targets 1.26.5 — use a `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` binary instead (v2.12.2+). Config lives in `.golangci.yml`; goimports group uses `github.com/Laaaaksh/vessel` as the local prefix.
-- Baseline lint on `main` is already red (13 issues: `main.go` errcheck, `config.ConfigPath` revive stutter, `focus.go`/`images/model.go`/`volumes/model.go` exported-comment revives, `containers/view.go` staticcheck). They are pre-existing; a phase should only fix lint its own diff introduces.
+- Lint: `golangci-lint run ./...` (`make lint`), config in `.golangci.yml`; the goimports group uses `github.com/Laaaaksh/vessel` as the local prefix. Needs v2.12.2+: an older build refuses to load the config when `go.mod` targets a newer Go than the binary was built with.
+- `main` is lint-clean; keep it that way and fix any issue a diff introduces.
 
 ## Live CLI probes
 - The Apple `container` CLI (v1.2.2) and its system services are running on this machine (`container system status` → running), so live TUI/backend probes work. `container list --all --format json` for live state.
