@@ -305,6 +305,25 @@ func TestExactRef(t *testing.T) {
 	}
 }
 
+func TestExactRef_refusesDigestPinnedWithOrWithoutTag(t *testing.T) {
+	// A pinned row formats exactly, so the refusal cannot key off the tag:
+	// "repo:tag@sha256:…" carries both and is still a pinned source, which the
+	// CLI's tag/save/push verbs are unverified against.
+	const digest = "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
+	for _, img := range []Image{
+		{Repository: "alpine", Tag: "", Digest: digest},
+		{Repository: "alpine", Tag: "v1", Digest: digest},
+		{Repository: "alpine", Tag: "<none>", Digest: digest},
+	} {
+		if got := FormatRef(img); !strings.Contains(got, digest) {
+			t.Fatalf("precondition: FormatRef(%+v) = %q, want the digest kept", img, got)
+		}
+		if ref, ok := ExactRef(img); ok {
+			t.Errorf("ExactRef(%+v) resolved to %q, want a refusal", img, ref)
+		}
+	}
+}
+
 func TestClient_PushImage_authHintNotTriggeredByImageName(t *testing.T) {
 	// The CLI echoes the reference into stderr, so a repository whose own words
 	// read like a credentials failure must not be classified as one.
