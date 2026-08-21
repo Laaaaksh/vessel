@@ -206,6 +206,7 @@ type Model struct {
 	footerSeq   uint64
 	statusGen   uint64
 	errGen      uint64
+	errDurable  bool
 	pendingKind deleteKind
 	pendingIDs  []string
 	pendingLbl  string
@@ -247,6 +248,18 @@ func (m *Model) setLastErr(err error) {
 	m.footerSeq++
 	m.errGen = m.footerSeq
 	m.lastErr = err
+	m.errDurable = false
+}
+
+// setActionErr records an error from a user-initiated action (tag, save,
+// load, exec, ...) as durable: applyContainersLoaded's self-heal on the next
+// successful poll must not wipe it, because that poll carries no information
+// about whether the action itself succeeded. It stays up until a newer
+// status/error is set or a subsequent action succeeds - see footerLine and
+// applyContainersLoaded.
+func (m *Model) setActionErr(err error) {
+	m.setLastErr(err)
+	m.errDurable = true
 }
 
 // New creates the root model. Backend connection happens in Init.
@@ -370,22 +383,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case networksLoadedMsg:
 		if msg.err != nil {
-			m.lastErr = msg.err
+			m.setLastErr(msg.err)
 		} else {
 			m.netPanel = m.netPanel.SetItems(msg.items)
 		}
 		return m, nil
 	case actionDoneMsg:
-		// Known limitation: m.lastErr set here reaches the footer for one frame
-		// only. refreshCmd below always batches loadContainersCmd, and a
-		// successful containersLoadedMsg clears lastErr unconditionally in
-		// applyContainersLoaded, as does the next tick. Push is the one verb
-		// with a durable surface — the images detail-pane notice set below — so
-		// a tag/save/load failure is reported but not durably shown. Left as is
-		// by decision; the fix belongs in shared refresh plumbing.
+		// An action failure is durable (setActionErr): it must survive the
+		// refreshCmd below and the next periodic tick, both of which land a
+		// containersLoadedMsg carrying no information about this action. See
+		// setActionErr and applyContainersLoaded's errDurable check.
 		m.imgPanel = m.imgPanel.SetNotice("", "")
 		if msg.err != nil {
-			m.setLastErr(msg.err)
+			m.setActionErr(msg.err)
 			m.setStatus("")
 			if msg.pushRef != "" {
 				if notice := backend.PushDenialNotice(msg.err); notice != "" {
@@ -754,8 +764,11 @@ func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cm
 		// plugin-gated prune/create verbs report services-down, so a successful
 		// poll is not evidence the services came back. Keep a services-down hint
 		// visible until the user acts or a different failure replaces it, rather
-		// than wiping it on the next refresh.
-		if !backend.IsServicesDown(m.lastErr) {
+		// than wiping it on the next refresh. A durable action error (see
+		// setActionErr) is the same story for a different reason: this poll
+		// never touched the action that produced it, so it is not evidence
+		// either way and must not clear it.
+		if !backend.IsServicesDown(m.lastErr) && !m.errDurable {
 			m.setLastErr(nil)
 		}
 		m.cntPanel = m.cntPanel.SetItems(msg.items)
