@@ -31,6 +31,40 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `uiutil.Pane.Add` charges each row against a fixed rendered-row budget and drops everything from the first row that doesn't fit onward (`internal/ui/uiutil/layout.go`); `uiutil.KV` gives a value no width bound, so a value long enough to wrap (a version string, a long path) can consume the whole remaining budget and silently drop every row after it, not just wrap ugly. Any value whose length isn't already bounded by the data (contrast a short "local"/"ext4" driver/format) must go through `KVFit`, not `KV`. Reproduce with the real pane width, not the terminal width: `internal/ui/app.go`'s `layoutDims` shrinks a 60-wide terminal's detail pane down to ~18 columns, and a value string short enough to fit a 60-wide test render can still overflow that.
 - `container system status --format json` exits 1 while still printing a valid, parseable JSON body (`status: "unregistered"`) when the services have never been started - `backend.Client.runRaw` exists so that body isn't discarded the way `run`/`runJSON` discard stdout on any non-zero exit. `container system df --format json` has no such fallback: it prints a plain-text error on the same down state, so a services-down `DiskUsage` call is a real error for the caller to handle, even though the sibling `SystemStatus` call for the same state is not. See `internal/backend/system.go`.
 
+## Container CLI sharp edges
+
+- Vessel deliberately does NOT own registry login. A refused `image push` splits
+  two ways in `internal/backend/images.go`, and the advice is deliberately
+  opposite: `credentialStderrPhrases` (401 and friends) tells the user to run
+  `container registry login`; `permissionStderrPhrases` (403) tells them login
+  will NOT help, because the session is valid and the account simply lacks write
+  access. Do not fold 403 back into the credential list or name the login command
+  in its message — a 403 does not establish that the credentials were rejected.
+- Classify a CLI failure from `CLIError.Stderr` (`internal/backend/client.go`),
+  never from `err.Error()` — but stderr echoes the image reference too, so match
+  multi-word phrases only a registry emits ("401 unauthorized", "no credentials
+  found"). A bare "unauthorized" misreads `myorg/unauthorized-proxy:v1`.
+- The footer flattens and truncates the error/status lines it renders (`footerLine`
+  in `internal/ui/app.go`, via `uiutil.TruncateCells`): CLI errors carry raw
+  multi-line stderr and must be flattened to one row. The key-hint branch is
+  deliberately exempt — its grouping is authored to be read as-is. So never
+  route unbounded text through the footer expecting it to be readable; the
+  images detail pane is the surface for anything longer (see its notice, which
+  is charged against the pane's row budget on top of, not instead of, the
+  normal content so it is never itself the thing that gets dropped).
+- On the installed 1.2.2 build (services running) `image save/load/tag/push` are
+  core subcommands and `image pull` works live; honour the plugin gate only when
+  a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
+- `image tag <source> <target>` and `image save --output <path> <ref>` argument
+  order is asserted in tests via `Client.CommandLog`; don't swap the order.
+- `Client.run` caps EVERY invocation at `defaultTimeout` (10s, see
+  `internal/backend/client.go`), which silently overrides the longer budget the
+  UI passes in. So `image save`/`load`/`push`/`pull` of a large image is killed
+  mid-transfer and reports a context deadline, not a real failure. This ships
+  known-broken for large images. The shared-timeout fix is a known limitation,
+  not yet filed, and is deliberately out of the image-mobility scope. The images
+  help view states the same caveat to the user.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
