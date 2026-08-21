@@ -141,9 +141,10 @@ func (c *Client) ShellCmd(id, shell string) *exec.Cmd {
 	return exec.Command("bash", "-lc", script)
 }
 
-// PruneContainers removes all stopped containers.
+// PruneContainers removes all stopped containers. A prune sweeps the whole
+// store, so it runs under the long sweep budget rather than the quick default.
 func (c *Client) PruneContainers(ctx context.Context) error {
-	_, err := c.run(ctx, "prune")
+	_, err := c.runWithTimeout(ctx, globalTimeout, "prune")
 	return err
 }
 

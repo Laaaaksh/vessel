@@ -8,7 +8,16 @@ DATA="${FAKE_CONTAINER_DATA:-$ROOT/../testdata}"
 cmd="${1:-}"
 shift || true
 
+# FAKE_CONTAINER_SLEEP makes every verb take that long, so tests can prove a
+# per-call budget: a shrunken default must kill the fake, an override must not.
+if [[ -n "${FAKE_CONTAINER_SLEEP:-}" ]]; then
+  sleep "${FAKE_CONTAINER_SLEEP}"
+fi
+
 case "$cmd" in
+  prune)
+    echo "ok prune" >&2
+    ;;
   list|ls)
     cat "$DATA/list.json"
     ;;
@@ -48,6 +57,7 @@ case "$cmd" in
       list|ls) cat "$DATA/images.json" ;;
       inspect) cat "$DATA/image-inspect.json" ;;
       delete|rm) echo "ok image delete ${1:-}" >&2 ;;
+      prune) echo "ok image prune" >&2 ;;
       pull) echo "ok image pull ${1:-}" >&2 ;;
       tag) echo "ok image tag $*" >&2 ;;
       save) echo "ok image save $*" >&2 ;;
@@ -80,6 +90,7 @@ case "$cmd" in
       list|ls) cat "$DATA/volumes.json" ;;
       inspect) cat "$DATA/volume-inspect.json" ;;
       delete|rm) echo "ok volume delete ${1:-}" >&2 ;;
+      prune) echo "ok volume prune" >&2 ;;
       *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
     esac
     ;;

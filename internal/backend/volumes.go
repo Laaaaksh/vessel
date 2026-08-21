@@ -44,11 +44,13 @@ func (c *Client) VolumeInspect(ctx context.Context, name string) (*VolumeInspect
 }
 
 // RemoveVolume deletes one or more volumes by name in a single call.
+// The batched invocation shares one budget across every target, so it gets
+// the confirmed-removal window rather than the quick default.
 func (c *Client) RemoveVolume(ctx context.Context, names ...string) error {
 	if len(names) == 0 {
 		return errNoDeleteTargets
 	}
-	_, err := c.run(ctx, append([]string{"volume", "delete"}, names...)...)
+	_, err := c.runWithTimeout(ctx, confirmTimeout, append([]string{"volume", "delete"}, names...)...)
 	return err
 }
 
@@ -58,9 +60,11 @@ func (c *Client) CreateVolume(ctx context.Context, name string) error {
 	return err
 }
 
-// PruneVolumes removes volumes with no container references.
+// PruneVolumes removes volumes with no container references. A prune sweeps
+// the whole store, so it runs under the long sweep budget rather than the
+// quick default.
 func (c *Client) PruneVolumes(ctx context.Context) error {
-	_, err := c.run(ctx, "volume", "prune")
+	_, err := c.runWithTimeout(ctx, globalTimeout, "volume", "prune")
 	return err
 }
 
