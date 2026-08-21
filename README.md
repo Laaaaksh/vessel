@@ -73,7 +73,7 @@ vessel doctor   # check CLI, system status, config
 | `tab` / `1` `2` `3` | Containers / Images / Volumes |
 | `esc` | Close logs, help, modal, or clear filter |
 | `?` | Toggle help |
-| `q` | Quit |
+| `q` / `ctrl+c` | Quit |
 
 A custom command with a `key` set fires on that key and replaces the built-in action on it, except on reserved keys (navigation, filtering, and the global keys) - `config.example.toml` documents which keys can be taken over. The in-app help (`?`) always lists what each key currently does.
 
