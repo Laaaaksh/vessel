@@ -36,6 +36,7 @@ type KeyMap struct {
 	Pull       string
 	Prune      string
 	Create     string
+	Exec       string
 	Follow     string
 	LayoutNext string
 	LayoutPrev string
@@ -73,6 +74,7 @@ func DefaultKeyMap() KeyMap {
 		Pull:       "p",
 		Prune:      "P",
 		Create:     "c",
+		Exec:       "e",
 		Follow:     "f",
 		LayoutNext: "+",
 		LayoutPrev: "_",
@@ -148,7 +150,7 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 			{"p", "pull image (prompt)"},
 			{"P", "prune unused images (confirm)"},
 			{"d", "delete marked (confirm)"},
-			{"c", "run container from image"},
+			{"c", "run container from image (form)"},
 		}, base...)
 	case ViewVolumes:
 		base = append([]helpRow{
@@ -165,7 +167,8 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 			{"r", "restart container"},
 			{"d", "delete marked (confirm)"},
 			{"P", "prune stopped containers (confirm)"},
-			{"c", "run new container (prompt image)"},
+			{"c", "run new container (form)"},
+			{"e", "one-shot exec in running container"},
 		}, base...)
 	}
 	_ = focus
