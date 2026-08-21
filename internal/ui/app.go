@@ -171,9 +171,15 @@ const (
 	// globalTimeout bounds whole-store verbs such as prune, which sweep every
 	// container/image/volume and take far longer than a single removal.
 	globalTimeout = 120 * time.Second
-	// All three are outer bounds only: backend.Client re-wraps every CLI
-	// invocation with its own 10s timeout and the earlier deadline wins, so
-	// today it is that one, not these, that actually fires.
+	// All four are outer bounds: backend.Client applies a per-call budget
+	// of its own to the known-long verbs — the lifecycle window matches
+	// lifecycleTimeout, the transfer/sweep window matches globalTimeout,
+	// the batched-delete window matches confirmTimeout and the one-shot
+	// exec window matches execTimeout — while quick commands keep a short
+	// default of their own. Both halves of each pair are pinned
+	// (TestOuterBounds_matchBackendPerCallBudgets here,
+	// TestLongOperationBudgets_matchInternalUIOuterBounds in backend), so
+	// neither side can drift alone and quietly become the earlier deadline.
 )
 
 // Model is the root bubbletea model for vessel.
@@ -1610,7 +1616,8 @@ func (m Model) submitRunForm() (tea.Model, tea.Cmd) {
 	})
 }
 
-// execTimeout bounds a one-shot exec, matching runOnSelected's per-item budget.
+// execTimeout bounds a one-shot exec, matching runOnSelected's per-item budget
+// and backend's identically named per-call budget for the same verb.
 const execTimeout = 30 * time.Second
 
 // execOutputTruncate keeps a one-shot exec's result on one footer line, the
