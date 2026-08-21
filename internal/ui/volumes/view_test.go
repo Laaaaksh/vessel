@@ -35,7 +35,7 @@ func TestDetailView_rendersInspectFields(t *testing.T) {
 		"vessel-test-vol",
 		"Driver", "local",
 		"Format", "ext4",
-		"Size", "512 GiB",
+		"Quota", "512 GiB",
 		"-- Labels --", "purpose=testing",
 		"-- Options --", "sync=fsync",
 	} {
@@ -206,5 +206,19 @@ func TestDetailView_inspectFieldsWinOverListFields(t *testing.T) {
 		if strings.Contains(v, stale) {
 			t.Errorf("list-sourced value %q rendered alongside the inspect: %q", stale, v)
 		}
+	}
+}
+
+// SizeBytes is the volume's storage quota, not the bytes it consumes, so the
+// row must not read as disk usage.
+func TestDetailView_sizeRowIsLabelledAsAQuota(t *testing.T) {
+	m := New().SetItems([]backend.Volume{richVolume()})
+
+	v := ansi.Strip(m.DetailView(60, 40))
+	if !strings.Contains(v, "Quota:    1 GiB") {
+		t.Errorf("quota row missing or mislabelled: %q", v)
+	}
+	if strings.Contains(v, "Size:") {
+		t.Errorf("the quota still renders as a Size row, which reads as usage: %q", v)
 	}
 }

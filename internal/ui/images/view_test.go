@@ -28,7 +28,7 @@ func inspectModel() Model {
 		LayerCount: 1,
 		Env:        []string{"PATH=/usr/local/sbin:/usr/local/bin"},
 		Platforms: []backend.ImagePlatform{
-			{OS: "linux", Architecture: "arm64", Size: 5242880},
+			{OS: "linux", Architecture: "arm64", Variant: "v8", Size: 5242880},
 			{OS: "linux", Architecture: "amd64", Size: 2097152},
 		},
 	}, nil)
@@ -52,7 +52,7 @@ func TestDetailView_rendersInspectFields(t *testing.T) {
 		"Layers", "1",
 		"-- Env --", "PATH=/usr/local/sbin",
 		"-- Platforms --",
-		"linux/arm64", "linux/amd64",
+		"linux/arm64/v8", "linux/amd64",
 		"5 MiB", "2 MiB",
 	} {
 		if !strings.Contains(v, want) {
@@ -145,5 +145,45 @@ func TestDetailView_longInspectErrorOccupiesOneRow(t *testing.T) {
 		if got := uiutil.RowsFor(row, width); got != 1 {
 			t.Errorf("error row occupies %d rendered rows at width %d, want 1: %q", got, width, row)
 		}
+	}
+}
+
+// The alpine index carries linux/arm twice, as v6 and v7. Without the variant
+// both rows read as plain "linux/arm" and nothing tells them apart.
+func TestDetailView_platformRowsDistinguishVariants(t *testing.T) {
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
+	}).SetInspect(testRef, &backend.ImageInspect{
+		ID:         "28bd5fe8b56d",
+		Repository: "docker.io/library/alpine",
+		Tag:        "latest",
+		Platforms: []backend.ImagePlatform{
+			{OS: "linux", Architecture: "arm", Variant: "v6", Size: 3555096},
+			{OS: "linux", Architecture: "arm", Variant: "v7", Size: 3262261},
+			{OS: "linux", Architecture: "amd64", Size: 3848024},
+		},
+	}, nil)
+
+	v := ansi.Strip(m.DetailView(60, 40))
+	for _, want := range []string{"linux/arm/v6", "linux/arm/v7"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("platform row %q missing: %q", want, v)
+		}
+	}
+	// A platform with no variant keeps the plain two-segment form.
+	if !strings.Contains(v, "linux/amd64  ") {
+		t.Errorf("variantless platform row lost its plain form: %q", v)
+	}
+	var rows []string
+	for _, l := range strings.Split(v, "\n") {
+		if strings.Contains(l, "linux/arm") {
+			rows = append(rows, strings.TrimSpace(l))
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 linux/arm rows, got %v", rows)
+	}
+	if rows[0] == rows[1] {
+		t.Errorf("the two linux/arm variants render identically: %q", rows[0])
 	}
 }
