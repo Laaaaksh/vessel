@@ -46,9 +46,10 @@ type volumesLoadedMsg struct {
 type actionDoneMsg struct {
 	err error
 	msg string
-	// push marks a failure that came from an image push, so credential advice
-	// is only offered for the verb the user actually ran.
-	push bool
+	// pushRef names the image an image push was attempted for, empty for every
+	// other verb. It both limits credential advice to the verb the user actually
+	// ran and pins the advice to the row it is about.
+	pushRef string
 }
 
 type logsOpenedMsg struct {
@@ -228,13 +229,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case actionDoneMsg:
-		m.imgPanel = m.imgPanel.SetNotice("")
+		m.imgPanel = m.imgPanel.SetNotice("", "")
 		if msg.err != nil {
 			m.lastErr = msg.err
 			m.status = ""
-			if msg.push {
+			if msg.pushRef != "" {
 				if notice := backend.PushDenialNotice(msg.err); notice != "" {
-					m.imgPanel = m.imgPanel.SetNotice(notice)
+					m.imgPanel = m.imgPanel.SetNotice(msg.pushRef, notice)
 				}
 			}
 		} else {
@@ -860,22 +861,22 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 }
 
 func (m Model) runGlobal(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
-	return m.runAction(label, false, fn)
+	return m.runAction(label, "", fn)
 }
 
 // runPush is runGlobal for the one verb whose failures may carry registry
-// credential advice.
-func (m Model) runPush(label string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
-	return m.runAction(label, true, fn)
+// credential advice; ref is the image that advice would be about.
+func (m Model) runPush(label, ref string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+	return m.runAction(label, ref, fn)
 }
 
-func (m Model) runAction(label string, push bool, fn func(context.Context) error) (tea.Model, tea.Cmd) {
+func (m Model) runAction(label, pushRef string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
 	m.status = label + "…"
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		if err := fn(ctx); err != nil {
-			return actionDoneMsg{err: err, push: push}
+			return actionDoneMsg{err: err, pushRef: pushRef}
 		}
 		return actionDoneMsg{msg: label + " ok"}
 	}
@@ -1188,7 +1189,7 @@ func (m Model) buildActions() []actionItem {
 					label = ref + " → " + dest
 				}
 				return m.beginConfirm("Push", label, func(m Model) (Model, tea.Cmd) {
-					x, c := m.runPush("push "+ref, func(ctx context.Context) error {
+					x, c := m.runPush("push "+ref, ref, func(ctx context.Context) error {
 						return m.client.PushImage(ctx, ref)
 					})
 					return x.(Model), c

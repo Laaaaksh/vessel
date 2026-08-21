@@ -936,7 +936,7 @@ func TestImagesDetail_showsRegistryLoginAfterAuthFailure(t *testing.T) {
 func TestImagesDetail_noticeNeverGrowsThePaneBeyondItsBudget(t *testing.T) {
 	panel := New().imgPanel.
 		SetItems([]backend.Image{{ID: "sha256:abc", Repository: "alpine", Tag: "latest"}}).
-		SetNotice(backend.PushAuthNotice)
+		SetNotice("alpine:latest", backend.PushAuthNotice)
 	// The geometry mainPanels hands the detail pane on the smallest terminal
 	// View() still renders (60x12) — 18x4 once the command log is open, 18x8
 	// without it — and on 80x24 with the command log open.
@@ -964,7 +964,8 @@ func TestImagesDetail_noticeSurvivesTheSmallestSupportedPane(t *testing.T) {
 	// the detail pane at 60x12 — the smallest frame View() still renders — with
 	// the command log toggled on.
 	for _, notice := range []string{backend.PushAuthNotice, backend.PushPermissionNotice} {
-		panel := New().imgPanel.SetItems(items).SetNotice(notice)
+		panel := New().imgPanel.SetItems(items).
+			SetNotice(backend.FormatRef(items[0]), notice)
 		for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
 			detail := squash(ansi.Strip(panel.DetailView(size.w, size.h)))
 			if !strings.Contains(detail, squash(notice)) {
@@ -1014,6 +1015,76 @@ func TestImagesDetail_noticeClearedByALaterNonAuthFailure(t *testing.T) {
 	detail := squash(ansi.Strip(am.imgPanel.DetailView(40, 20)))
 	if strings.Contains(detail, squash("container registry login")) {
 		t.Fatalf("a non-auth failure must not leave stale credential advice, got: %q", detail)
+	}
+}
+
+// twoImages gives the panel a second row to move the cursor onto, which is the
+// only way to tell an image-scoped notice from a panel-wide one.
+func twoImages() []backend.Image {
+	return []backend.Image{
+		{ID: "sha256:aaa", Repository: "alpine", Tag: "latest"},
+		{ID: "sha256:bbb", Repository: "busybox", Tag: "v1"},
+	}
+}
+
+// pushRefusedOnFirstImage pushes the highlighted (first) image and lets the
+// registry refuse it, leaving the panel holding that image's notice.
+func pushRefusedOnFirstImage(t *testing.T, items []backend.Image) Model {
+	t.Helper()
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
+	m := beginPush(t, imagesModel(t, items))
+	next, cmd := m.handleKey(keyMsg("y"))
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected the push to be refused")
+	}
+	out, _ := next.(Model).Update(done)
+	om := out.(Model)
+	if !strings.Contains(squash(ansi.Strip(om.imgPanel.DetailView(40, 20))), squash("container registry login")) {
+		t.Fatal("precondition: the refusal should have set a notice on the pushed image")
+	}
+	return om
+}
+
+func TestImagesDetail_noticeDoesNotFollowTheCursorToAnotherImage(t *testing.T) {
+	om := pushRefusedOnFirstImage(t, twoImages())
+	other := om.imgPanel.MoveBy(1)
+	if got := backend.FormatRef(*other.Selected()); got != "busybox:v1" {
+		t.Fatalf("precondition: the cursor should be on the second image, got %q", got)
+	}
+	detail := squash(ansi.Strip(other.DetailView(40, 20)))
+	if strings.Contains(detail, squash("container registry login")) {
+		t.Fatalf("a refusal reported for alpine:latest must not show on busybox:v1, got: %q", detail)
+	}
+}
+
+func TestImagesDetail_noticeReturnsWithTheCursorToItsOwnImage(t *testing.T) {
+	om := pushRefusedOnFirstImage(t, twoImages())
+	back := om.imgPanel.MoveBy(1).MoveBy(-1)
+	if got := backend.FormatRef(*back.Selected()); got != "alpine:latest" {
+		t.Fatalf("precondition: the cursor should be back on the pushed image, got %q", got)
+	}
+	detail := squash(ansi.Strip(back.DetailView(40, 20)))
+	if !strings.Contains(detail, squash("container registry login")) {
+		t.Fatalf("the refusal must still be visible on the image it was about, got: %q", detail)
+	}
+}
+
+func TestImagesDetail_noticeStaysOffAnotherImageInTheSmallestPane(t *testing.T) {
+	om := pushRefusedOnFirstImage(t, twoImages())
+	other := om.imgPanel.MoveBy(1)
+	// 18x4 is what mainPanels hands the detail pane at 60x12 — the smallest
+	// frame View() still renders — with the command log toggled on; 18x8 is the
+	// same frame without it. The notice leads the pane, so if it were still
+	// panel-wide it would be the part that survives the cap.
+	for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}} {
+		detail := squash(ansi.Strip(other.DetailView(size.w, size.h)))
+		if strings.Contains(detail, squash("container registry login")) {
+			t.Errorf("detail pane %dx%d shows another image's refusal: %q", size.w, size.h, detail)
+		}
+		if !strings.Contains(detail, "busybox") {
+			t.Errorf("detail pane %dx%d should lead with the selected image, got: %q", size.w, size.h, detail)
+		}
 	}
 }
 
