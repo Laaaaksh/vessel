@@ -59,21 +59,23 @@ vessel doctor   # check CLI, system status, config
 | `enter` | Open shell in container |
 | `L` | View logs |
 | `f` | Freeze / follow logs |
-| `s` / `u` / `r` | Stop / start / restart |
+| `s` / `u` / `r` | Stop / start / restart (stop asks to confirm when `confirm_stop` is set) |
 | `d` | Remove the selected row, or every marked row when 2+ are marked (confirm with `y`) |
 | `space` | Toggle multi-select mark (containers, images, volumes) |
 | `/` | Filter current list |
 | `y` | Yank id / name / path |
 | `x` | Action menu |
 | `p` | Pull image (images view) |
-| `P` | Prune (stopped containers / images / volumes) |
+| `P` | Prune (stopped containers / images / volumes), confirm with `y` |
 | `c` | Create / run (prompt) |
 | `+` / `_` | Cycle layout |
 | `` ` `` | Toggle command log |
 | `tab` / `1` `2` `3` | Containers / Images / Volumes |
 | `esc` | Close logs, help, modal, or clear filter |
 | `?` | Toggle help |
-| `q` | Quit |
+| `q` / `ctrl+c` | Quit |
+
+A custom command with a `key` set fires on that key and replaces the built-in action on it, except on reserved keys (navigation, filtering, and the global keys) - `config.example.toml` documents which keys can be taken over. The in-app help (`?`) always lists what each key currently does.
 
 ## Configuration
 
@@ -87,6 +89,7 @@ shell = "/bin/sh"
 
 # [[custom_commands]]
 # name = "inspect"
+# key = "z"          # optional: "z", "space", "enter", "f5", "ctrl+z"
 # command = "container inspect {{.ID}}"
 ```
 
