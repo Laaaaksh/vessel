@@ -64,13 +64,35 @@ func TestDetailView_rendersInspectDepth(t *testing.T) {
 		"Hostname", "web",
 		"Platform", "linux/arm64",
 		"CPUs", "4",
-		"Memory", "1 GiB",
+		"MemLimit", "1 GiB",
 		"-- Mounts --", "/host/data → /data",
 		"Networks", "default (192.168.64.2/24)",
 	} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detail missing %q", want)
 		}
+	}
+}
+
+// The configured memory limit and the poller's live memory usage are two
+// different numbers and render together whenever a poller is attached, so they
+// must not share a label. Only the live row is called "Memory".
+func TestDetailView_limitAndLiveMemoryRowsAreDistinct(t *testing.T) {
+	m := New().SetItems([]backend.Container{{
+		ID: "abc", Name: "web", Status: "running", MemoryBytes: 1073741824,
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	v := ansi.Strip(m.DetailView(60, 40, poller))
+
+	if !strings.Contains(v, "MemLimit: 1 GiB") {
+		t.Errorf("configured memory limit row missing: %q", v)
+	}
+	if !strings.Contains(v, "Memory:") {
+		t.Errorf("live memory row missing: %q", v)
+	}
+	if got := strings.Count(v, "Memory:"); got != 1 {
+		t.Errorf("%d rows labelled \"Memory:\"; the limit and live usage must be told apart: %q", got, v)
 	}
 }
 
@@ -159,19 +181,26 @@ func TestDetailView_narrowPaneRendersRowsInOrder(t *testing.T) {
 	}})
 	poller := backend.NewPoller(nil, time.Second)
 
-	// The Hostname row wraps to two rows and does not fit, while the
-	// single-row Platform row after it would fit in the gap it left behind.
-	const width, height = 20, 11
+	// Pinned so the invariant is actually exercised: at 20x9 the pane has room
+	// for every row up to Ports, then the Hostname row wraps to two rows and no
+	// longer fits. The single-row Platform row after it would fit in the gap,
+	// and must be dropped anyway so what renders stays a prefix.
+	const width, height = 20, 9
 	v := ansi.Strip(m.DetailView(width, height, poller))
 
 	if got := strings.Count(v, "\n") + 1; got > height {
 		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
 	}
-	if !strings.Contains(v, "Ports") {
-		t.Fatalf("expected the rows before Hostname to render, so the gap is real: %q", v)
+	for _, want := range []string{"Image", "ID", "Status", "Ports"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("row %q must render before the gap: %q", want, v)
+		}
 	}
-	if strings.Contains(v, "Platform") && !strings.Contains(v, "Hostname") {
-		t.Errorf("Platform rendered while the earlier Hostname row was dropped: %q", v)
+	if strings.Contains(v, "Hostname") {
+		t.Fatalf("geometry drifted: the wrapping Hostname row was expected not to fit: %q", v)
+	}
+	if strings.Contains(v, "Platform") {
+		t.Errorf("Platform jumped ahead of the dropped Hostname row: %q", v)
 	}
 }
 
@@ -202,6 +231,36 @@ func TestDetailView_longImageRefDoesNotEvictLaterRows(t *testing.T) {
 	}
 }
 
+func TestDetailView_manyPortsDoNotEvictLaterRows(t *testing.T) {
+	// The Ports row is a key/value row like its siblings and must be bound to
+	// one rendered row the same way, or a long published-port list wraps over
+	// most of the pane and evicts every row after it.
+	ports := make([]backend.PortMapping, 15)
+	for i := range ports {
+		ports[i] = backend.PortMapping{HostPort: 18000 + i, ContainerPort: 8000 + i, Protocol: "tcp"}
+	}
+	m := New().SetItems([]backend.Container{{
+		ID: "abc123456789", Name: "web", Image: "alpine:latest", Status: "running",
+		Ports:    ports,
+		Hostname: "web",
+		Networks: []backend.Network{{Name: "default", IP: "192.168.64.2/24"}},
+		Mounts:   []backend.Mount{{Source: "data", Destination: "/data"}},
+	}})
+	poller := backend.NewPoller(nil, time.Second)
+
+	const width, height = 40, 14
+	v := ansi.Strip(m.DetailView(width, height, poller))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+	}
+	for _, want := range []string{"Hostname", "Networks", "-- Mounts --"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q evicted by an unbounded Ports row: %q", want, v)
+		}
+	}
+}
+
 func TestDetailView_sectionsDoNotJumpAheadOfDroppedRows(t *testing.T) {
 	// A long image reference fills the pane before the identity rows are in;
 	// the live metrics still render because room was reserved for them, but a
@@ -215,15 +274,24 @@ func TestDetailView_sectionsDoNotJumpAheadOfDroppedRows(t *testing.T) {
 	}})
 	poller := backend.NewPoller(nil, time.Second)
 
-	v := ansi.Strip(m.DetailView(18, 7, poller))
+	const width, height = 18, 7
+	v := ansi.Strip(m.DetailView(width, height, poller))
 
-	if got := strings.Count(v, "\n") + 1; got > 7 {
-		t.Errorf("pane rendered %d lines into 18x7", got)
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+	}
+	// Pinned: the wrapping ID row fills the pane exactly, so Status is the
+	// first row dropped and everything after it must stay dropped too.
+	if !strings.Contains(v, "ID") {
+		t.Fatalf("the identity rows before the gap must render: %q", v)
+	}
+	if strings.Contains(v, "Status") {
+		t.Fatalf("geometry drifted: the Status row was expected not to fit: %q", v)
 	}
 	if !strings.Contains(v, "CPU") {
-		t.Fatalf("the reserved metrics rows must still render: %q", v)
+		t.Errorf("the reserved metrics rows must still render: %q", v)
 	}
-	if strings.Contains(v, "-- Labels --") && !strings.Contains(v, "Status") {
-		t.Errorf("Labels rendered while the earlier identity rows were dropped: %q", v)
+	if strings.Contains(v, "-- Labels --") {
+		t.Errorf("Labels jumped ahead of the dropped Ports row: %q", v)
 	}
 }

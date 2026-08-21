@@ -101,8 +101,10 @@ func TestMapContainers_mountsNetworksResources(t *testing.T) {
 	if mt.Destination != "/data" {
 		t.Errorf("mount destination want /data, got %q", mt.Destination)
 	}
-	if mt.Source == "" {
-		t.Error("mount source empty")
+	// A named volume's source is the backing disk image under Application
+	// Support; the volume name is what identifies the mount to a reader.
+	if mt.Source != "p2-live-probe" {
+		t.Errorf("mount source want the volume name p2-live-probe, got %q", mt.Source)
 	}
 	if len(c.Networks) != 1 {
 		t.Fatalf("expected 1 network, got %d", len(c.Networks))
@@ -245,5 +247,21 @@ func TestCreatedParse(t *testing.T) {
 	want := time.Date(2026, 8, 5, 16, 8, 35, 0, time.UTC)
 	if !got[0].Created.Equal(want) {
 		t.Fatalf("want %v got %v", want, got[0].Created)
+	}
+}
+
+// A bind mount carries no volume name, so its host path is the only identity
+// it has and must survive.
+func TestMapContainers_bindMountKeepsHostPath(t *testing.T) {
+	raw := loadFixture[[]cliContainer](t, "container-mounts.json")
+	raw[0].Configuration.Mounts[0].Type.Volume.Name = ""
+	raw[0].Configuration.Mounts[0].Source = "/Users/me/project"
+
+	got := mapContainers(raw)
+	if len(got) != 1 || len(got[0].Mounts) != 1 {
+		t.Fatalf("expected 1 container with 1 mount, got %+v", got)
+	}
+	if src := got[0].Mounts[0].Source; src != "/Users/me/project" {
+		t.Errorf("bind mount source want /Users/me/project, got %q", src)
 	}
 }

@@ -2,7 +2,6 @@ package containers
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -149,7 +148,7 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 	}
 	p.Add(
 		uiutil.KV("Status", sel.Status),
-		uiutil.KV("Ports", backend.FormatPorts(sel.Ports)),
+		uiutil.KVFit("Ports", backend.FormatPorts(sel.Ports), width),
 	)
 	if sel.Hostname != "" {
 		p.Add(uiutil.KV("Hostname", sel.Hostname))
@@ -161,7 +160,8 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 		p.Add(uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
 	}
 	if sel.MemoryBytes > 0 {
-		p.Add(uiutil.KV("Memory", uiutil.HumanBytes(int64(sel.MemoryBytes))))
+		// Distinct from the live "Memory" usage row the poller adds below.
+		p.Add(uiutil.KV("MemLimit", uiutil.HumanBytes(int64(sel.MemoryBytes))))
 	}
 	if len(sel.Networks) > 0 {
 		p.Add(uiutil.KVFit("Networks", backend.FormatNetworks(sel.Networks), width))
@@ -169,19 +169,14 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 
 	mounts := make([]string, 0, len(sel.Mounts))
 	for _, mt := range sel.Mounts {
-		mounts = append(mounts, dim.Render("  "+uiutil.Truncate(mt.Source+" → "+mt.Destination, width-6)))
+		mounts = append(mounts, mt.Source+" → "+mt.Destination)
 	}
-	p.Section(dim.Render("-- Mounts --"), mounts)
+	p.Section(dim.Render("-- Mounts --"), uiutil.IndentedRows(mounts, dim, width))
 
 	p.AddReserved(reserved, metrics...)
 
-	p.Section(dim.Render("-- Labels --"), pairRows(sel.Labels, dim, width))
-
-	env := make([]string, 0, len(sel.Env))
-	for _, e := range sel.Env {
-		env = append(env, dim.Render("  "+uiutil.Truncate(e, width-6)))
-	}
-	p.Section(dim.Render("-- Env --"), env)
+	p.Section(dim.Render("-- Labels --"), uiutil.PairRows(sel.Labels, dim, width))
+	p.Section(dim.Render("-- Env --"), uiutil.IndentedRows(sel.Env, dim, width))
 
 	return uiutil.RenderPane(width, height, p.Lines())
 }
@@ -205,15 +200,6 @@ func metricRows(sel *backend.Container, poller *backend.Poller, width int) []str
 	if spark := poller.Sparkline(sel.ID, min(24, width-6)); spark != "" {
 		rows = append(rows, uiutil.KV("CPU hist", spark))
 	}
-	return rows
-}
-
-func pairRows(pairs map[string]string, style lipgloss.Style, width int) []string {
-	rows := make([]string, 0, len(pairs))
-	for k, v := range pairs {
-		rows = append(rows, style.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
-	}
-	sort.Strings(rows)
 	return rows
 }
 

@@ -2,8 +2,8 @@ package volumes
 
 import (
 	"fmt"
-	"sort"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -34,6 +34,18 @@ type Model struct {
 	inspect     *backend.VolumeInspect
 	inspectName string
 	inspectErr  error
+	// inspectRow fingerprints the list row inspectName was resolved against,
+	// so a failed inspect is invalidated on the same terms as a successful
+	// one instead of outliving the row that produced it.
+	inspectRow volumeFingerprint
+}
+
+// volumeFingerprint is the identity of a list row for inspect-cache
+// invalidation: a volume recreated or resized under the same name is a
+// different row.
+type volumeFingerprint struct {
+	sizeBytes uint64
+	created   time.Time
 }
 
 // New creates an empty volumes model.
@@ -79,18 +91,19 @@ func (m Model) SetItems(items []backend.Volume) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
-	if m.inspect != nil && !inspectMatchesList(items, m.inspectName, *m.inspect) {
+	if m.inspectName != "" && !inspectMatchesList(items, m.inspectName, m.inspectRow) {
 		m.inspect = nil
 		m.inspectName = ""
 		m.inspectErr = nil
+		m.inspectRow = volumeFingerprint{}
 	}
 	return m
 }
 
-func inspectMatchesList(items []backend.Volume, name string, ins backend.VolumeInspect) bool {
+func inspectMatchesList(items []backend.Volume, name string, row volumeFingerprint) bool {
 	for _, it := range items {
 		if it.Name == name {
-			return it.SizeBytes == ins.SizeBytes && it.Created.Equal(ins.Created)
+			return it.SizeBytes == row.sizeBytes && it.Created.Equal(row.created)
 		}
 	}
 	return false
@@ -141,6 +154,13 @@ func (m Model) SetInspect(name string, ins *backend.VolumeInspect, err error) Mo
 	m.inspect = ins
 	m.inspectName = name
 	m.inspectErr = err
+	// A successful inspect reports the volume's own size and age; a failure
+	// leaves only the list row it was asked for. Either way the fingerprint is
+	// what a later list must still agree with.
+	m.inspectRow = volumeFingerprint{sizeBytes: sel.SizeBytes, created: sel.Created}
+	if ins != nil {
+		m.inspectRow = volumeFingerprint{sizeBytes: ins.SizeBytes, created: ins.Created}
+	}
 	return m
 }
 
@@ -328,8 +348,8 @@ func (m Model) DetailView(width, height int) string {
 		if m.inspect.SizeBytes > 0 {
 			p.Add(uiutil.KV("Size", uiutil.HumanBytes(int64(m.inspect.SizeBytes))))
 		}
-		p.Section(dim.Render("-- Labels --"), pairRows(m.inspect.Labels, dim, width))
-		p.Section(dim.Render("-- Options --"), pairRows(m.inspect.Options, dim, width))
+		p.Section(dim.Render("-- Labels --"), uiutil.PairRows(m.inspect.Labels, dim, width))
+		p.Section(dim.Render("-- Options --"), uiutil.PairRows(m.inspect.Options, dim, width))
 	} else if m.inspectErr != nil && sel.Name == m.inspectName {
 		p.Add("", lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
 			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
@@ -337,13 +357,4 @@ func (m Model) DetailView(width, height int) string {
 
 	p.AddReserved(reserved, "", keybar)
 	return uiutil.RenderPane(width, height, p.Lines())
-}
-
-func pairRows(pairs map[string]string, style lipgloss.Style, width int) []string {
-	rows := make([]string, 0, len(pairs))
-	for k, v := range pairs {
-		rows = append(rows, style.Render("  "+uiutil.Truncate(k+"="+v, width-6)))
-	}
-	sort.Strings(rows)
-	return rows
 }

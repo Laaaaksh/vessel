@@ -33,6 +33,10 @@ type Model struct {
 	inspect    *backend.ImageInspect
 	inspectRef string
 	inspectErr error
+	// inspectID is the content id inspectRef was resolved against, so a failed
+	// inspect is invalidated on the same terms as a successful one instead of
+	// outliving the row that produced it.
+	inspectID string
 }
 
 // New creates an empty images model.
@@ -98,10 +102,11 @@ func (m Model) SetItems(items []backend.Image) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
-	if m.inspect != nil && !inspectMatchesList(items, m.inspectRef, m.inspect.ID) {
+	if m.inspectRef != "" && !inspectMatchesList(items, m.inspectRef, m.inspectID) {
 		m.inspect = nil
 		m.inspectRef = ""
 		m.inspectErr = nil
+		m.inspectID = ""
 	}
 	return m
 }
@@ -151,6 +156,13 @@ func (m Model) SetInspect(ref string, ins *backend.ImageInspect, err error) Mode
 	m.inspect = ins
 	m.inspectRef = ref
 	m.inspectErr = err
+	// A successful inspect reports the digest it actually resolved; a failure
+	// leaves only the list row it was asked for. Either way that id is what a
+	// later list must still agree with for the result to stay valid.
+	m.inspectID = sel.ID
+	if ins != nil {
+		m.inspectID = ins.ID
+	}
 	return m
 }
 
@@ -351,18 +363,13 @@ func (m Model) DetailView(width, height int) string {
 			p.Add(uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
 		}
 
-		env := make([]string, 0, len(m.inspect.Env))
-		for _, e := range m.inspect.Env {
-			env = append(env, dim.Render("  "+uiutil.Truncate(e, width-6)))
-		}
-		p.Section(dim.Render("-- Env --"), env)
+		p.Section(dim.Render("-- Env --"), uiutil.IndentedRows(m.inspect.Env, dim, width))
 
 		platforms := make([]string, 0, len(m.inspect.Platforms))
 		for _, pf := range m.inspect.Platforms {
-			line := pf.OS + "/" + pf.Architecture + "  " + uiutil.HumanBytes(pf.Size)
-			platforms = append(platforms, dim.Render("  "+uiutil.Truncate(line, width-6)))
+			platforms = append(platforms, pf.OS+"/"+pf.Architecture+"  "+uiutil.HumanBytes(pf.Size))
 		}
-		p.Section(dim.Render("-- Platforms --"), platforms)
+		p.Section(dim.Render("-- Platforms --"), uiutil.IndentedRows(platforms, dim, width))
 	} else if m.inspectErr != nil && m.inspectRef == backend.FormatRef(*sel) {
 		p.Add("", lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
 			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))

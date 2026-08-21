@@ -1,6 +1,7 @@
 package images
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -280,6 +281,34 @@ func TestSetItems_dropsInspectWhenImageIsGone(t *testing.T) {
 
 	if got := m.InspectedRef(); got != "" {
 		t.Errorf("inspect kept after image removal: %q", got)
+	}
+}
+
+// A failed inspect is keyed to the image it was asked about just as a
+// successful one is. Deleting and re-pulling a tag gives a fresh image behind
+// the same reference, and the old error must not be shown against it.
+func TestSetItems_dropsInspectErrorWhenTagIsRepulled(t *testing.T) {
+	m := New().SetItems([]backend.Image{imageWithID("oldid")})
+	m = m.SetInspect(testRef, nil, errors.New("boom"))
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Fatalf("error not shown for the image it belongs to: %q", v)
+	}
+
+	m = m.SetItems([]backend.Image{imageWithID("newid")})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "boom") {
+		t.Errorf("stale inspect error rendered against the re-pulled image: %q", v)
+	}
+}
+
+func TestSetItems_keepsInspectErrorForUnchangedImage(t *testing.T) {
+	m := New().SetItems([]backend.Image{imageWithID("sameid")})
+	m = m.SetInspect(testRef, nil, errors.New("boom"))
+
+	m = m.SetItems([]backend.Image{imageWithID("sameid")})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Errorf("error dropped for the image it still describes: %q", v)
 	}
 }
 

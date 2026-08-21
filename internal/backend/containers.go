@@ -188,9 +188,13 @@ func mapContainers(raw []cliContainer) []Container {
 			}
 		}
 		for _, mt := range r.Configuration.Mounts {
-			src := mt.Source
+			// A named volume reports source as the backing disk image on the
+			// host (~95 chars of Application Support path), so the volume name
+			// is the only human-meaningful identity. Bind mounts carry no
+			// volume name and their source is the host path the user asked for.
+			src := mt.Type.Volume.Name
 			if src == "" {
-				src = mt.Type.Volume.Name
+				src = mt.Source
 			}
 			c.Mounts = append(c.Mounts, Mount{Source: src, Destination: mt.Destination})
 		}
