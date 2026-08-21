@@ -180,7 +180,11 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 // after a refused push. Container registry login is intentionally out of
 // vessel's scope: the user owns their registry session. Both lead with the
 // verdict and carry no more prose than that, because the smallest supported pane
-// (18x4 at 60x12 with the command log open) holds roughly three wrapped rows.
+// (18x4 at 60x12 with the command log open) holds roughly four wrapped rows.
+// PushPermissionNotice already wraps to exactly four rows there, saturating that
+// budget with no slack: it leads the pane, so it renders in full today, but any
+// reword that makes it longer is clipped rather than merely crowding the fields
+// below it. Measure a reword against that geometry, not against the terminal.
 const (
 	PushAuthNotice = "push rejected — run `container registry login`"
 	// A 403 does not on its own establish that the session holds valid,
