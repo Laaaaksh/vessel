@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 const testRef = "docker.io/library/alpine:latest"
@@ -120,5 +121,29 @@ func TestListView_rendersRows(t *testing.T) {
 	}
 	if !strings.Contains(v, "REPOSITORY:TAG") {
 		t.Fatalf("list missing header: %q", v)
+	}
+}
+
+// A long inspect error must be indented and shortened to a single rendered row
+// like every other section row, or it costs the pane extra rows it has already
+// budgeted away.
+func TestDetailView_longInspectErrorOccupiesOneRow(t *testing.T) {
+	long := errors.New("inspect image docker.io/library/alpine:latest: exit status 1: unable to reach the container daemon")
+	m := New().SetItems([]backend.Image{
+		{ID: "28bd5fe8b56d", Repository: "docker.io/library/alpine", Tag: "latest", Size: 3848024},
+	}).SetInspect(testRef, nil, long)
+
+	for _, width := range []int{18, 40, 60} {
+		v := ansi.Strip(m.DetailView(width, 20))
+		row := lineContaining(v, "  inspect")
+		if row == "" {
+			t.Fatalf("no error row rendered at width %d: %q", width, v)
+		}
+		if !strings.HasPrefix(row, "  ") {
+			t.Errorf("error row not indented at width %d: %q", width, row)
+		}
+		if got := uiutil.RowsFor(row, width); got != 1 {
+			t.Errorf("error row occupies %d rendered rows at width %d, want 1: %q", got, width, row)
+		}
 	}
 }

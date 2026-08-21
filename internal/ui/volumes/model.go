@@ -327,6 +327,7 @@ func (m Model) DetailView(width, height int) string {
 			Foreground(lipgloss.Color("#6b7280")).Render("  no volume selected")
 	}
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
 	hints, reserved := uiutil.KeyBar("[c] create  [d] delete  [P] prune  [y] yank path", width, height)
 	keybar := dim.Render(hints)
 
@@ -351,8 +352,8 @@ func (m Model) DetailView(width, height int) string {
 		p.Section(dim.Render("-- Labels --"), uiutil.PairRows(m.inspect.Labels, dim, width))
 		p.Section(dim.Render("-- Options --"), uiutil.PairRows(m.inspect.Options, dim, width))
 	} else if m.inspectErr != nil && sel.Name == m.inspectName {
-		p.Add("", lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).
-			Render("  "+uiutil.Truncate(m.inspectErr.Error(), width-6)))
+		p.Add("")
+		p.Add(uiutil.IndentedRows([]string{m.inspectErr.Error()}, errStyle, width)...)
 	}
 
 	p.AddReserved(reserved, "", keybar)

@@ -27,6 +27,11 @@ type Container struct {
 
 // Mount is a host→container volume mount.
 type Mount struct {
+	// Source identifies where the mount comes from, but is not always a path:
+	// for a named volume it is the volume's display name, because the CLI
+	// reports its source as the backing disk image rather than anything a
+	// reader would recognise. Only a bind mount's Source is a host filesystem
+	// path.
 	Source      string
 	Destination string
 }
