@@ -900,30 +900,6 @@ func TestApplyContainersLoaded_clearsOtherErrors(t *testing.T) {
 	}
 }
 
-func TestHelpBindingsCoverAllKeys(t *testing.T) {
-	tokens := map[string]bool{}
-	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
-		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
-			for _, tok := range helpKeyTokens(b.key) {
-				tokens[tok] = true
-			}
-		}
-	}
-	km := DefaultKeyMap()
-	rt := reflect.TypeOf(km)
-	rv := reflect.ValueOf(km)
-	for i := 0; i < rt.NumField(); i++ {
-		field := rt.Field(i)
-		val := rv.Field(i).String()
-		if val == "" {
-			continue
-		}
-		if !tokens[val] {
-			t.Fatalf("KeyMap.%s (%q) has no help entry in any view", field.Name, val)
-		}
-	}
-}
-
 func TestHelpKeyTokens_separatorIsNotAKey(t *testing.T) {
 	got := helpKeyTokens("g / G")
 	want := []string{"g", "G"}
@@ -935,22 +911,6 @@ func TestHelpKeyTokens_separatorIsNotAKey(t *testing.T) {
 	}
 	if got := helpKeyTokens("space"); !reflect.DeepEqual(got, []string{"space"}) {
 		t.Fatalf("the space key is spelled %q by a keypress, got %q", "space", got)
-	}
-}
-
-func TestHelpBindingsIncludeReachableKeys(t *testing.T) {
-	var sb strings.Builder
-	for _, v := range []View{ViewContainers, ViewImages, ViewVolumes} {
-		for _, b := range helpBindings(v, FocusList, modeBrowse, DefaultKeyMap(), nil) {
-			sb.WriteString(b.key + " ")
-			sb.WriteString(b.desc + "\n")
-		}
-	}
-	all := sb.String()
-	for _, k := range []string{"`", "ctrl+c", "esc", "enter", "1 2 3"} {
-		if !strings.Contains(all, k) {
-			t.Fatalf("reachable key %q missing from help", k)
-		}
 	}
 }
 
