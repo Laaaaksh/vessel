@@ -46,6 +46,15 @@ type Volume struct {
 	Created    time.Time
 }
 
+// Network represents a container network.
+type Network struct {
+	Name    string
+	Mode    string
+	Gateway string
+	Subnet  string
+	Created time.Time
+}
+
 // IsRunning reports whether the container is in the running state.
 func (c Container) IsRunning() bool {
 	return c.Status == "running"

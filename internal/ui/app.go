@@ -16,6 +16,7 @@ import (
 	"github.com/Laaaaksh/vessel/internal/ui/containers"
 	"github.com/Laaaaksh/vessel/internal/ui/images"
 	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/networks"
 	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
@@ -38,6 +39,11 @@ type imagesLoadedMsg struct {
 
 type volumesLoadedMsg struct {
 	items []backend.Volume
+	err   error
+}
+
+type networksLoadedMsg struct {
+	items []backend.Network
 	err   error
 }
 
@@ -115,6 +121,7 @@ type Model struct {
 	cntPanel containers.Model
 	imgPanel images.Model
 	volPanel volumes.Model
+	netPanel networks.Model
 	logPanel logs.Model
 
 	lastErr     error
@@ -152,6 +159,7 @@ func New() Model {
 		cntPanel:   containers.New(),
 		imgPanel:   images.New(),
 		volPanel:   volumes.New(),
+		netPanel:   networks.New(),
 		logPanel:   logs.New(),
 	}
 	return m.withKeys(DefaultKeyMap())
@@ -195,6 +203,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cntPanel = m.cntPanel.SetPageRows(rows)
 		m.imgPanel = m.imgPanel.SetPageRows(rows)
 		m.volPanel = m.volPanel.SetPageRows(rows)
+		m.netPanel = m.netPanel.SetPageRows(rows)
 		m.logPanel = m.logPanel.SetSize(msg.Width, msg.Height)
 		return m, nil
 	case tickMsg:
@@ -216,6 +225,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastErr = msg.err
 		} else {
 			m.volPanel = m.volPanel.SetItems(msg.items)
+		}
+		return m, nil
+	case networksLoadedMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err
+		} else {
+			m.netPanel = m.netPanel.SetItems(msg.items)
 		}
 		return m, nil
 	case actionDoneMsg:
@@ -360,6 +376,9 @@ func (m Model) mainPanels(listW, detailW, height int) (string, string) {
 	case ViewVolumes:
 		list = m.volPanel.ListView(listW-2, height-2)
 		detail = m.volPanel.DetailView(detailW-2, height-2)
+	case ViewNetworks:
+		list = m.netPanel.ListView(listW-2, height-2)
+		detail = m.netPanel.DetailView(detailW-2, height-2)
 	default:
 		list = m.cntPanel.ListView(listW-2, height-2, m.poller)
 		detail = m.cntPanel.DetailView(detailW-2, height-2, m.poller)
@@ -410,6 +429,8 @@ func (m Model) activeViewLoadCmd() tea.Cmd {
 		return m.loadImagesCmd()
 	case ViewVolumes:
 		return m.loadVolumesCmd()
+	case ViewNetworks:
+		return m.loadNetworksCmd()
 	default:
 		return m.loadContainersCmd()
 	}
@@ -442,6 +463,16 @@ func (m Model) loadVolumesCmd() tea.Cmd {
 		defer cancel()
 		items, err := client.ListVolumes(ctx)
 		return volumesLoadedMsg{items: items, err: err}
+	}
+}
+
+func (m Model) loadNetworksCmd() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		items, err := client.ListNetworks(ctx)
+		return networksLoadedMsg{items: items, err: err}
 	}
 }
 
@@ -525,7 +556,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case Match(k, m.keys.Tab):
-		m.activeView = (m.activeView + 1) % 3
+		m.activeView = (m.activeView + 1) % numViews
 		return m, m.activeViewLoadCmd()
 	case k == "1":
 		m.activeView = ViewContainers
@@ -535,6 +566,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.activeViewLoadCmd()
 	case k == "3":
 		m.activeView = ViewVolumes
+		return m, m.activeViewLoadCmd()
+	case k == "4":
+		m.activeView = ViewNetworks
 		return m, m.activeViewLoadCmd()
 	case Match(k, m.keys.LayoutNext):
 		m.layout = (m.layout + 1) % 3
@@ -562,10 +596,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focus == FocusSidebar {
 		switch {
 		case m.keys.NavDown(k):
-			m.activeView = (m.activeView + 1) % 3
+			m.activeView = (m.activeView + 1) % numViews
 			return m, m.activeViewLoadCmd()
 		case m.keys.NavUp(k):
-			m.activeView = (m.activeView + 2) % 3
+			m.activeView = (m.activeView + numViews - 1) % numViews
 			return m, m.activeViewLoadCmd()
 		case Match(k, m.keys.Enter):
 			m.focus = FocusList
@@ -655,6 +689,8 @@ func (m Model) panelFiltering() bool {
 		return m.imgPanel.Filtering()
 	case ViewVolumes:
 		return m.volPanel.Filtering()
+	case ViewNetworks:
+		return m.netPanel.Filtering()
 	default:
 		return m.cntPanel.Filtering()
 	}
@@ -667,6 +703,8 @@ func (m Model) routeToPanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.imgPanel, cmd = m.imgPanel.Update(msg)
 	case ViewVolumes:
 		m.volPanel, cmd = m.volPanel.Update(msg)
+	case ViewNetworks:
+		m.netPanel, cmd = m.netPanel.Update(msg)
 	default:
 		m.cntPanel, cmd = m.cntPanel.Update(msg)
 	}
@@ -689,6 +727,8 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		m.imgPanel = m.imgPanel.SetCursor(row)
 	case ViewVolumes:
 		m.volPanel = m.volPanel.SetCursor(row)
+	case ViewNetworks:
+		m.netPanel = m.netPanel.SetCursor(row)
 	default:
 		m.cntPanel = m.cntPanel.SetCursor(row)
 	}
@@ -709,6 +749,8 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		m.imgPanel = m.imgPanel.MoveBy(delta)
 	case ViewVolumes:
 		m.volPanel = m.volPanel.MoveBy(delta)
+	case ViewNetworks:
+		m.netPanel = m.netPanel.MoveBy(delta)
 	default:
 		m.cntPanel = m.cntPanel.MoveBy(delta)
 	}
@@ -910,6 +952,10 @@ func (m Model) yankSelected() (tea.Model, tea.Cmd) {
 			if text == "" {
 				text = sel.Name
 			}
+		}
+	case ViewNetworks:
+		if sel := m.netPanel.Selected(); sel != nil {
+			text = sel.Name
 		}
 	default:
 		if sel := m.cntPanel.Selected(); sel != nil {
@@ -1118,6 +1164,10 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		if sel := m.volPanel.Selected(); sel != nil {
 			id, name = sel.Name, sel.Name
 		}
+	case ViewNetworks:
+		if sel := m.netPanel.Selected(); sel != nil {
+			id, name = sel.Name, sel.Name
+		}
 	default:
 		if sel := m.cntPanel.Selected(); sel != nil {
 			id, name, image = sel.ID, sel.Name, sel.Image
@@ -1167,6 +1217,8 @@ func (m Model) viewName() string {
 		return "images"
 	case ViewVolumes:
 		return "volumes"
+	case ViewNetworks:
+		return "networks"
 	default:
 		return "containers"
 	}
@@ -1190,6 +1242,8 @@ func (m Model) footerView() string {
 		keys = "[p] pull  [c] run  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
 	case ViewVolumes:
 		keys = "[c] create  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
+	case ViewNetworks:
+		keys = "[/] filter  [y] yank"
 	default:
 		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [d] remove  [/] filter  [x] actions  [y] yank"
 	}
@@ -1202,6 +1256,8 @@ func (m Model) cursorInfo() (int, int) {
 		return m.imgPanel.Cursor(), m.imgPanel.Len()
 	case ViewVolumes:
 		return m.volPanel.Cursor(), m.volPanel.Len()
+	case ViewNetworks:
+		return m.netPanel.Cursor(), m.netPanel.Len()
 	default:
 		return m.cntPanel.Cursor(), m.cntPanel.Len()
 	}
@@ -1215,6 +1271,7 @@ func (m Model) sidebarView(width, height int) string {
 		{"Containers", ViewContainers},
 		{"Images", ViewImages},
 		{"Volumes", ViewVolumes},
+		{"Networks", ViewNetworks},
 	}
 
 	focused := m.focus == FocusSidebar
