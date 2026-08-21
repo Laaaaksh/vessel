@@ -41,6 +41,26 @@ type volumesLoadedMsg struct {
 	err   error
 }
 
+// inspectSettledMsg fires once the images/volumes selection has stopped
+// moving, so holding a cursor key spawns one inspect subprocess instead of one
+// per step. It is keyed by selection rather than by a counter, so a repeated
+// request for the selection already pending cannot supersede its own timer.
+type inspectSettledMsg struct {
+	key string
+}
+
+type imageInspectMsg struct {
+	ref string
+	ins *backend.ImageInspect
+	err error
+}
+
+type volumeInspectMsg struct {
+	name string
+	ins  *backend.VolumeInspect
+	err  error
+}
+
 type actionDoneMsg struct {
 	err error
 	msg string
@@ -128,6 +148,8 @@ type Model struct {
 	pollCancel  context.CancelFunc
 	tickPaused  bool
 
+	inspectKey  string
+	inspectRun  string
 	actionIdx   int
 	actionItems []actionItem
 	promptKind  string
@@ -210,13 +232,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.imgPanel = m.imgPanel.SetItems(msg.items)
 		}
-		return m, nil
+		return m.scheduleInspect()
 	case volumesLoadedMsg:
 		if msg.err != nil {
 			m.lastErr = msg.err
 		} else {
 			m.volPanel = m.volPanel.SetItems(msg.items)
 		}
+		return m.scheduleInspect()
+	case inspectSettledMsg:
+		if msg.key == m.inspectKey {
+			m.inspectKey = ""
+		}
+		if msg.key != m.selectionKey() || msg.key == m.inspectRun {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		switch m.activeView {
+		case ViewImages:
+			cmd = m.loadImageInspectCmd()
+		case ViewVolumes:
+			cmd = m.loadVolumeInspectCmd()
+		}
+		if cmd != nil {
+			m.inspectRun = msg.key
+		}
+		return m, cmd
+	case imageInspectMsg:
+		if m.inspectRun == imageKey(msg.ref) {
+			m.inspectRun = ""
+		}
+		m.imgPanel = m.imgPanel.SetInspect(msg.ref, msg.ins, msg.err)
+		return m, nil
+	case volumeInspectMsg:
+		if m.inspectRun == volumeKey(msg.name) {
+			m.inspectRun = ""
+		}
+		m.volPanel = m.volPanel.SetInspect(msg.name, msg.ins, msg.err)
 		return m, nil
 	case actionDoneMsg:
 		if msg.err != nil {
@@ -445,6 +497,101 @@ func (m Model) loadVolumesCmd() tea.Cmd {
 	}
 }
 
+// inspectDebounce is how long the selection must hold still before the pane is
+// inspected.
+const inspectDebounce = 120 * time.Millisecond
+
+// selectionKey identifies what the active view would inspect right now. It is
+// empty for views and selections that have nothing to inspect.
+func (m Model) selectionKey() string {
+	switch m.activeView {
+	case ViewImages:
+		// A dangling image has no reference, and the reference is the only
+		// thing the CLI can be asked to inspect, so there is nothing to run.
+		if sel := m.imgPanel.Selected(); sel != nil {
+			if ref := backend.FormatRef(*sel); ref != "" {
+				return imageKey(ref)
+			}
+		}
+	case ViewVolumes:
+		if sel := m.volPanel.Selected(); sel != nil {
+			return volumeKey(sel.Name)
+		}
+	}
+	return ""
+}
+
+func imageKey(ref string) string { return "image:" + ref }
+
+func volumeKey(name string) string { return "volume:" + name }
+
+// scheduleInspect coalesces inspect requests: a burst of cursor movement
+// results in a single inspect of the selection the user settled on, and a
+// request for a selection already awaiting its timer or already out at the
+// CLI is a no-op rather than a fresh timer, so neither a fast poll interval
+// nor a slow inspect can multiply the subprocesses for one selection.
+func (m Model) scheduleInspect() (tea.Model, tea.Cmd) {
+	key := m.selectionKey()
+	if m.client == nil || key == "" || key == m.inspectKey || key == m.inspectRun {
+		return m, nil
+	}
+	m.inspectKey = key
+	return m, tea.Tick(inspectDebounce, func(time.Time) tea.Msg {
+		return inspectSettledMsg{key: key}
+	})
+}
+
+// loadImageInspectCmd inspects the currently selected image (if any) so the
+// images detail pane can render the enriched fields.
+func (m Model) loadImageInspectCmd() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	sel := m.imgPanel.Selected()
+	if sel == nil {
+		return nil
+	}
+	ref := backend.FormatRef(*sel)
+	if ref == "" {
+		return nil
+	}
+	// The panel already holds a successful inspect for this exact image, so
+	// re-running the subprocess on every poll tick would only reproduce it.
+	if m.imgPanel.InspectedRef() == ref {
+		return nil
+	}
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		ins, err := client.ImageInspect(ctx, ref)
+		return imageInspectMsg{ref: ref, ins: ins, err: err}
+	}
+}
+
+// loadVolumeInspectCmd inspects the currently selected volume (if any) so the
+// volumes detail pane can render size/format/labels/options.
+func (m Model) loadVolumeInspectCmd() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	sel := m.volPanel.Selected()
+	if sel == nil {
+		return nil
+	}
+	name := sel.Name
+	if m.volPanel.InspectedName() == name {
+		return nil
+	}
+	client := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		ins, err := client.VolumeInspect(ctx, name)
+		return volumeInspectMsg{name: name, ins: ins, err: err}
+	}
+}
+
 func (m Model) applyContainersLoaded(msg containersLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.lastErr = msg.err
@@ -664,13 +811,40 @@ func (m Model) routeToPanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.activeView {
 	case ViewImages:
+		before := m.imgPanel.Selected()
 		m.imgPanel, cmd = m.imgPanel.Update(msg)
+		if selectionRefChanged(before, m.imgPanel.Selected()) {
+			next, icmd := m.scheduleInspect()
+			return next, tea.Batch(cmd, icmd)
+		}
 	case ViewVolumes:
+		before := m.volPanel.Selected()
 		m.volPanel, cmd = m.volPanel.Update(msg)
+		if selectionNameChanged(before, m.volPanel.Selected()) {
+			next, icmd := m.scheduleInspect()
+			return next, tea.Batch(cmd, icmd)
+		}
 	default:
 		m.cntPanel, cmd = m.cntPanel.Update(msg)
 	}
 	return m, cmd
+}
+
+// selectionRefChanged reports whether the selected image changed, so the app
+// can trigger a fresh inspect for the new selection.
+func selectionRefChanged(before, after *backend.Image) bool {
+	if before == nil || after == nil {
+		return before != after
+	}
+	return backend.FormatRef(*before) != backend.FormatRef(*after)
+}
+
+// selectionNameChanged reports whether the selected volume changed.
+func selectionNameChanged(before, after *backend.Volume) bool {
+	if before == nil || after == nil {
+		return before != after
+	}
+	return before.Name != after.Name
 }
 
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
@@ -686,9 +860,17 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	m.focus = FocusList
 	switch m.activeView {
 	case ViewImages:
+		before := m.imgPanel.Selected()
 		m.imgPanel = m.imgPanel.SetCursor(row)
+		if selectionRefChanged(before, m.imgPanel.Selected()) {
+			return m.scheduleInspect()
+		}
 	case ViewVolumes:
+		before := m.volPanel.Selected()
 		m.volPanel = m.volPanel.SetCursor(row)
+		if selectionNameChanged(before, m.volPanel.Selected()) {
+			return m.scheduleInspect()
+		}
 	default:
 		m.cntPanel = m.cntPanel.SetCursor(row)
 	}
@@ -706,9 +888,17 @@ func (m Model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	m.focus = FocusList
 	switch m.activeView {
 	case ViewImages:
+		before := m.imgPanel.Selected()
 		m.imgPanel = m.imgPanel.MoveBy(delta)
+		if selectionRefChanged(before, m.imgPanel.Selected()) {
+			return m.scheduleInspect()
+		}
 	case ViewVolumes:
+		before := m.volPanel.Selected()
 		m.volPanel = m.volPanel.MoveBy(delta)
+		if selectionNameChanged(before, m.volPanel.Selected()) {
+			return m.scheduleInspect()
+		}
 	default:
 		m.cntPanel = m.cntPanel.MoveBy(delta)
 	}

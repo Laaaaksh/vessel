@@ -1,11 +1,15 @@
 package volumes
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Laaaaksh/vessel/internal/backend"
@@ -219,5 +223,259 @@ func TestRenderRowAlignsWithHeader(t *testing.T) {
 		if got := column(t, r, "local"); got != want {
 			t.Errorf("row %d: driver at column %d, header DRIVER at %d", i, got, want)
 		}
+	}
+}
+
+var created = time.Date(2026, 8, 5, 16, 8, 41, 0, time.UTC)
+
+func volumeRow(size uint64, at time.Time) backend.Volume {
+	return backend.Volume{Name: "data", Driver: "local", SizeBytes: size, Created: at}
+}
+
+func volumeInspect(size uint64, at time.Time) *backend.VolumeInspect {
+	return &backend.VolumeInspect{
+		Name:      "data",
+		Driver:    "local",
+		SizeBytes: size,
+		Created:   at,
+		Format:    "ext4",
+	}
+}
+
+func TestSetItems_dropsInspectWhenVolumeChanged(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+	if m.InspectedName() != "data" {
+		t.Fatalf("inspect not cached: %q", m.InspectedName())
+	}
+
+	m = m.SetItems([]backend.Volume{volumeRow(2<<30, created)})
+
+	if got := m.InspectedName(); got != "" {
+		t.Errorf("inspect kept after the volume was resized: %q", got)
+	}
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "ext4") {
+		t.Errorf("stale inspect still rendered after resize: %q", v)
+	}
+}
+
+func TestSetItems_dropsInspectWhenVolumeRecreated(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created.Add(time.Hour))})
+
+	if got := m.InspectedName(); got != "" {
+		t.Errorf("inspect kept after the volume was recreated: %q", got)
+	}
+}
+
+// A failed inspect is keyed to the volume it was asked about just as a
+// successful one is. Deleting and recreating a volume under the same name
+// gives a fresh row, and the old error must not be shown against it.
+func TestSetItems_dropsInspectErrorWhenVolumeRecreated(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", nil, errors.New("boom"))
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Fatalf("error not shown for the volume it belongs to: %q", v)
+	}
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created.Add(time.Hour))})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); strings.Contains(v, "boom") {
+		t.Errorf("stale inspect error rendered against the recreated volume: %q", v)
+	}
+}
+
+func TestSetItems_keepsInspectErrorForUnchangedVolume(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", nil, errors.New("boom"))
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created)})
+
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "boom") {
+		t.Errorf("error dropped for the volume it still describes: %q", v)
+	}
+}
+
+func TestSetItems_keepsInspectForUnchangedVolume(t *testing.T) {
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+
+	m = m.SetItems([]backend.Volume{volumeRow(1<<30, created)})
+
+	if got := m.InspectedName(); got != "data" {
+		t.Errorf("inspect dropped for unchanged volume: %q", got)
+	}
+	if v := ansi.Strip(m.DetailView(60, 40)); !strings.Contains(v, "ext4") {
+		t.Errorf("format missing after unchanged refresh: %q", v)
+	}
+}
+
+func TestSetInspect_lateResultForOtherVolumeKeepsCurrentCache(t *testing.T) {
+	m := New().SetItems([]backend.Volume{
+		volumeRow(1<<30, created),
+		{Name: "cache", Driver: "local"},
+	})
+	m = m.SetInspect("data", volumeInspect(1<<30, created), nil)
+
+	m = m.SetInspect("cache", &backend.VolumeInspect{Name: "cache", Format: "xfs"}, nil)
+
+	if got := m.InspectedName(); got != "data" {
+		t.Errorf("late foreign result evicted the cache: %q", got)
+	}
+	v := ansi.Strip(m.DetailView(60, 40))
+	if !strings.Contains(v, "ext4") {
+		t.Errorf("current volume's format lost: %q", v)
+	}
+	if strings.Contains(v, "xfs") {
+		t.Errorf("foreign format rendered: %q", v)
+	}
+}
+
+func manyPairs(n int, prefix string) map[string]string {
+	out := make(map[string]string, n)
+	for i := range n {
+		out[fmt.Sprintf("%s_%02d", prefix, i)] = "some-value"
+	}
+	return out
+}
+
+func TestDetailView_staysWithinHeightBudget(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(12, "label")
+	ins.Options = manyPairs(4, "option")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	const height = 20
+	v := ansi.Strip(m.DetailView(60, height))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into a %d-line budget", got, height)
+	}
+	lines := strings.Split(v, "\n")
+	for i, l := range lines {
+		head := strings.TrimSpace(l)
+		if !strings.HasPrefix(head, "--") {
+			continue
+		}
+		next := ""
+		if i+1 < len(lines) {
+			next = strings.TrimSpace(lines[i+1])
+		}
+		if next == "" || strings.HasPrefix(next, "--") {
+			t.Errorf("section header %q rendered with no rows under it", head)
+		}
+	}
+	if !strings.Contains(v, "[c] create") {
+		t.Errorf("key hints pushed out of the pane: %q", v)
+	}
+}
+
+func TestDetailView_sectionRowsAreStablyOrdered(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(6, "label")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	first := ansi.Strip(m.DetailView(60, 40))
+	for range 5 {
+		if got := ansi.Strip(m.DetailView(60, 40)); got != first {
+			t.Fatal("label rows render in a different order between calls")
+		}
+	}
+}
+
+func TestDetailView_fitsTheMinimumTerminalSize(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(3, "label")
+	ins.Options = manyPairs(2, "option")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	for _, width := range []int{18, 38} {
+		for _, height := range []int{4, 6, 8, 10} {
+			v := ansi.Strip(m.DetailView(width, height))
+			if got := strings.Count(v, "\n") + 1; got > height {
+				t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+			}
+		}
+	}
+}
+
+func TestDetailView_sectionsAndKeyHintsSurviveWrapping(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	ins.Labels = manyPairs(4, "label")
+	ins.Options = manyPairs(2, "option")
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	for _, height := range []int{12, 16, 20, 24} {
+		v := ansi.Strip(m.DetailView(40, height))
+		if got := strings.Count(v, "\n") + 1; got > height {
+			t.Errorf("pane rendered %d lines into 40x%d", got, height)
+		}
+		lines := strings.Split(v, "\n")
+		for i, l := range lines {
+			head := strings.TrimSpace(l)
+			if !strings.HasPrefix(head, "--") {
+				continue
+			}
+			next := ""
+			if i+1 < len(lines) {
+				next = strings.TrimSpace(lines[i+1])
+			}
+			if next == "" || strings.HasPrefix(next, "--") {
+				t.Errorf("section header %q rendered with no rows under it at height %d", head, height)
+			}
+		}
+		// At this width the bar wraps but still fits alongside the volume, so
+		// it renders in full rather than being truncated.
+		for _, want := range []string{"[c] create", "[y]", "yank path"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("key hints clipped at height %d: %q in %q", height, want, v)
+			}
+		}
+		for _, want := range []string{"data", "Driver"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("detail missing %q at height %d: %q", want, height, v)
+			}
+		}
+	}
+	if v := ansi.Strip(m.DetailView(40, 24)); !strings.Contains(v, "-- Labels --") {
+		t.Fatalf("no section rendered, the header assertions are vacuous: %q", v)
+	}
+}
+
+func TestDetailView_narrowPaneStillIdentifiesTheVolume(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	m := New().SetItems([]backend.Volume{volumeRow(1<<30, created)}).SetInspect("data", ins, nil)
+
+	const width, height = 18, 6
+	v := ansi.Strip(m.DetailView(width, height))
+
+	if got := strings.Count(v, "\n") + 1; got > height {
+		t.Errorf("pane rendered %d lines into %dx%d", got, width, height)
+	}
+	for _, want := range []string{"data", "Driver", "local"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("narrow pane dropped %q for key hints: %q", want, v)
+		}
+	}
+}
+
+func TestDetailView_narrowestPaneStillIdentifiesTheVolume(t *testing.T) {
+	ins := volumeInspect(1<<30, created)
+	m := New().SetItems([]backend.Volume{
+		{Name: "a-rather-long-volume-name", Driver: "local", SizeBytes: 1 << 30, Created: created},
+	}).SetInspect("a-rather-long-volume-name", ins, nil)
+
+	v := ansi.Strip(m.DetailView(10, 8))
+
+	if got := strings.Count(v, "\n") + 1; got > 8 {
+		t.Errorf("pane rendered %d lines into 10x8", got)
+	}
+	if !strings.Contains(v, "a-rather") {
+		t.Errorf("the volume name must still render: %q", v)
+	}
+	if !strings.Contains(v, "Driver") {
+		t.Errorf("a wrapping title crowded the data rows out of the pane: %q", v)
 	}
 }

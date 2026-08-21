@@ -46,6 +46,7 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list|ls) cat "$DATA/images.json" ;;
+      inspect) cat "$DATA/image-inspect.json" ;;
       delete|rm) echo "ok image delete ${1:-}" >&2 ;;
       pull) echo "ok image pull ${1:-}" >&2 ;;
       *) echo "unknown image subcommand: $sub" >&2; exit 1 ;;
@@ -55,6 +56,7 @@ case "$cmd" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list|ls) cat "$DATA/volumes.json" ;;
+      inspect) cat "$DATA/volume-inspect.json" ;;
       delete|rm) echo "ok volume delete ${1:-}" >&2 ;;
       *) echo "unknown volume subcommand: $sub" >&2; exit 1 ;;
     esac

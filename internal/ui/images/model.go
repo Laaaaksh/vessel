@@ -26,6 +26,21 @@ type Model struct {
 	marked     map[string]bool
 	toggleMark string
 	pageRows   int
+
+	// inspect holds the latest ImageInspect for inspectRef, if it matches the
+	// currently selected image. It is carried separately from the list so the
+	// detail pane can keep showing list info while inspection is in flight.
+	inspect    *backend.ImageInspect
+	inspectRef string
+	inspectErr error
+	// inspectKey identifies the row the result was accepted for. A reference
+	// alone is not an identity - every dangling image has an empty one - so a
+	// result keyed by reference would surface under all of them.
+	inspectKey string
+	// inspectID is the content id inspectKey was resolved against, so a failed
+	// inspect is invalidated on the same terms as a successful one instead of
+	// outliving the row that produced it.
+	inspectID string
 }
 
 // New creates an empty images model.
@@ -72,8 +87,12 @@ func markKey(img backend.Image) string {
 	return img.ID + "\x00" + backend.FormatRef(img)
 }
 
-// SetItems replaces the image list and drops marks for images it no longer
-// contains, so a mark can never outlive the row it points at.
+// SetItems replaces the image list. Marks for images the list no longer
+// contains are dropped, so a mark can never outlive the row it points at. So
+// is a cached inspect whose image is gone from the list, or whose reference
+// now resolves to different content (a re-pulled tag keeps the ref but changes
+// the index digest), so the detail pane cannot pair a fresh list row with a
+// stale inspect.
 func (m Model) SetItems(items []backend.Image) Model {
 	m.items = items
 	m.filtered = applyFilter(items, m.filter)
@@ -87,7 +106,23 @@ func (m Model) SetItems(items []backend.Image) Model {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+	if m.inspectKey != "" && !inspectMatchesList(items, m.inspectKey, m.inspectID) {
+		m.inspect = nil
+		m.inspectRef = ""
+		m.inspectErr = nil
+		m.inspectKey = ""
+		m.inspectID = ""
+	}
 	return m
+}
+
+func inspectMatchesList(items []backend.Image, key, id string) bool {
+	for _, it := range items {
+		if markKey(it) == key {
+			return it.ID == id
+		}
+	}
+	return false
 }
 
 // Selected returns the highlighted image.
@@ -111,6 +146,41 @@ func (m Model) MarkedIDs() []string {
 		}
 	}
 	return out
+}
+
+// SetInspect stores the inspected detail for the given image reference. The
+// panel keeps the result keyed by ref and only renders it while that image is
+// selected, so a slow response never labels the wrong image. A result for an
+// image that is no longer selected is discarded rather than replacing the
+// cache, so it cannot evict a valid inspect for the current selection.
+func (m Model) SetInspect(ref string, ins *backend.ImageInspect, err error) Model {
+	sel := m.Selected()
+	if sel == nil || backend.FormatRef(*sel) != ref {
+		return m
+	}
+	m.inspect = ins
+	m.inspectRef = ref
+	m.inspectErr = err
+	m.inspectKey = markKey(*sel)
+	// A successful inspect reports the digest it actually resolved; a failure
+	// leaves only the list row it was asked for. Either way that id is what a
+	// later list must still agree with for the result to stay valid.
+	m.inspectID = sel.ID
+	if ins != nil {
+		m.inspectID = ins.ID
+	}
+	return m
+}
+
+// InspectedRef returns the image reference the panel already holds a
+// successful inspect for, or "" when the last inspect failed or none has
+// arrived. The app uses it to avoid re-inspecting an unchanged selection on
+// every poll tick.
+func (m Model) InspectedRef() string {
+	if m.inspect == nil || m.inspectErr != nil {
+		return ""
+	}
+	return m.inspectRef
 }
 
 // MoveBy adjusts cursor.
@@ -271,15 +341,54 @@ func (m Model) DetailView(width, height int) string {
 		return lipgloss.NewStyle().Width(width).Height(height).
 			Foreground(lipgloss.Color("#6b7280")).Render("  no image selected")
 	}
-	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(backend.FormatRef(*sel)),
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
+	hints, reserved := uiutil.KeyBar("[p] pull  [c] run  [d] delete  [P] prune", width, height)
+	keybar := dim.Render(hints)
+
+	p := uiutil.NewPane(width, height-reserved)
+	p.Add(
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
+			Render(uiutil.Headline(backend.FormatRef(*sel), width, height)),
 		"",
+		// Deliberately not KVFit: the id is the identity content the pane must
+		// still show at minimum geometry, so binding it to the pane width would
+		// defeat the rule that binding its siblings serves.
 		uiutil.KV("ID", uiutil.Truncate(sel.ID, 16)),
 		uiutil.KV("Size", uiutil.HumanBytes(sel.Size)),
 		uiutil.KV("Created", uiutil.Ago(sel.Created)),
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("[p] pull  [c] run  [d] delete  [P] prune"),
+	)
+
+	if m.inspect != nil && m.inspectKey == markKey(*sel) {
+		if d := m.inspect.Digest; d != "" {
+			p.Add(uiutil.KVFit("Digest", d, width))
+		}
+		if len(m.inspect.Cmd) > 0 {
+			p.Add(uiutil.KVFit("Cmd", strings.Join(m.inspect.Cmd, " "), width))
+		}
+		if m.inspect.WorkingDir != "" {
+			p.Add(uiutil.KVFit("Workdir", m.inspect.WorkingDir, width))
+		}
+		if m.inspect.LayerCount > 0 {
+			p.Add(uiutil.KV("Layers", fmt.Sprintf("%d", m.inspect.LayerCount)))
+		}
+
+		p.Section(dim.Render("-- Env --"), uiutil.IndentedRows(m.inspect.Env, dim, width))
+
+		platforms := make([]string, 0, len(m.inspect.Platforms))
+		for _, pf := range m.inspect.Platforms {
+			name := pf.OS + "/" + pf.Architecture
+			if pf.Variant != "" {
+				name += "/" + pf.Variant
+			}
+			platforms = append(platforms, name+"  "+uiutil.HumanBytes(pf.Size))
+		}
+		p.Section(dim.Render("-- Platforms --"), uiutil.IndentedRows(platforms, dim, width))
+	} else if m.inspectErr != nil && m.inspectKey == markKey(*sel) {
+		p.Add("")
+		p.Add(uiutil.IndentedRows([]string{m.inspectErr.Error()}, errStyle, width)...)
 	}
-	return lipgloss.NewStyle().Width(width).Height(height).PaddingLeft(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+
+	p.AddReserved(reserved, "", keybar)
+	return uiutil.RenderPane(width, height, p.Lines())
 }

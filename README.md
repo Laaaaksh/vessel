@@ -15,7 +15,8 @@ brew install vessel
 - Start, stop, restart, remove, and prune
 - Drop into a shell inside any running container (clean UI restore on exit)
 - Stream logs with follow freeze and in-buffer search
-- Inspect ports, env, labels, and details
+- Inspect containers: ports, mounts, networks and IP, CPUs, memory, platform, hostname, env, labels
+- Inspect images (digest, layers, command, platform variants) and volumes (quota, format, labels, options)
 - Browse / pull / prune images; create / prune volumes
 - Filter on every list; multi-select; action menu; custom commands
 - Vim-style navigation, pane focus, mouse click/wheel
