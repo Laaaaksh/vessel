@@ -56,6 +56,9 @@ condensed into user-facing terms. Format is based on
 - The README links to this changelog and CONTRIBUTING.md asks contributors to
   record user-facing changes under `Unreleased`, so version history stays
   discoverable and maintained.
+- Tagged releases now publish their CHANGELOG section as the GitHub release
+  notes (falling back to `Unreleased` for a brand-new version) instead of
+  goreleaser's raw commit list.
 
 ### Removed
 - An unreferenced personal development script left behind in `scripts/`.

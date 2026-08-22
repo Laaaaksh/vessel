@@ -22,6 +22,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Generate release notes from CHANGELOG
+        id: notes
+        # goreleaser-action passes args to the binary without shell expansion,
+        # so the notes path travels through a step output rather than $RUNNER_TEMP.
+        run: |
+          scripts/release_notes.sh "$RUNNER_TEMP/release-notes.md" "${GITHUB_REF_NAME#v}"
+          echo "path=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_OUTPUT"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -30,7 +38,7 @@ jobs:
           # release that removes the deprecated `brews` support; bump this
           # deliberately after a snapshot drill, not by floating.
           version: v2.17.1
-          args: release --clean
+          args: release --clean --release-notes=${{ steps.notes.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
