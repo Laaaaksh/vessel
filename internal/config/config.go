@@ -35,6 +35,14 @@ type Config struct {
 	Theme          Theme           `toml:"theme"`
 }
 
+// Defaults shared by Default() and sanitize(); changing one means changing
+// all derived sites together.
+const (
+	defaultPollInterval = 2 * time.Second
+	defaultLogTailLines = 100
+	defaultShell        = "/bin/sh"
+)
+
 // duration is a TOML-friendly time.Duration wrapper.
 type duration struct{ time.Duration }
 
@@ -47,32 +55,46 @@ func (d *duration) UnmarshalText(text []byte) error {
 // Default returns the default configuration.
 func Default() Config {
 	return Config{
-		PollInterval: duration{2 * time.Second},
-		LogTailLines: 100,
+		PollInterval: duration{defaultPollInterval},
+		LogTailLines: defaultLogTailLines,
 		MouseEnabled: true,
-		Shell:        "/bin/sh",
+		Shell:        defaultShell,
 		ConfirmStop:  false,
 	}
 }
 
 // Load reads the config from the standard location (~/.config/vessel/config.toml).
 // If the file does not exist, Default() is returned with no error.
+//
+// A file that fails to parse returns the error AND a usable config: a failed
+// decode can leave dangerous partial values behind - a bad poll_interval
+// zeroes its field because UnmarshalText stores ParseDuration's zero result
+// before returning the error, and the metrics poller panics in time.NewTicker
+// on any non-positive interval. sanitize clamps every such value.
 func Load() (Config, error) {
 	cfg := Default()
 	path := Path()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return cfg, nil
 	}
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
-		return cfg, err
+	_, decodeErr := toml.DecodeFile(path, &cfg)
+	sanitize(&cfg)
+	return cfg, decodeErr
+}
+
+// sanitize clamps values the dashboard cannot survive back to their defaults:
+// the poller builds a time.Ticker from PollInterval, which panics unless it
+// is positive, and an empty shell would hand exec a zero-valued command.
+func sanitize(cfg *Config) {
+	if cfg.PollInterval.Duration <= 0 {
+		cfg.PollInterval.Duration = defaultPollInterval
 	}
 	if cfg.Shell == "" {
-		cfg.Shell = "/bin/sh"
+		cfg.Shell = defaultShell
 	}
 	if cfg.LogTailLines <= 0 {
-		cfg.LogTailLines = 100
+		cfg.LogTailLines = defaultLogTailLines
 	}
-	return cfg, nil
 }
 
 // Path returns the path to the user config file.

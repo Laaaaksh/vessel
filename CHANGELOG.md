@@ -17,6 +17,10 @@ condensed into user-facing terms. Format is based on
   killed by the short default timeout partway through a real download.
 - Pressing a write action (prune, pull, run, volume create) when the `container`
   CLI is absent reports "container CLI unavailable" instead of crashing.
+- A malformed `config.toml` no longer crashes the dashboard (a bad
+  `poll_interval` panicked the metrics loop) or silently run with defaults:
+  the parse error is reported in the footer at startup, unsafe values are
+  clamped to safe defaults, and `vessel doctor` already printed the error.
 
 ### Changed
 - Unknown command-line arguments print usage and exit with code 2 rather than

@@ -270,8 +270,39 @@ func (m *Model) setActionErr(err error) {
 
 // New creates the root model. Backend connection happens in Init.
 func New() Model {
-	cfg, _ := config.Load()
-	return newModel(cfg)
+	cfg, err := config.Load()
+	m := newModel(cfg)
+	if err != nil {
+		// A broken config.toml must not silently degrade to defaults: join
+		// the load error onto whatever startup notice newModel stamped so
+		// the user learns about it through the ordinary footer lifecycle.
+		m.setStatus(joinNotices(m.status, configLoadNotice(err)))
+	}
+	return m
+}
+
+// configLoadNotice renders a failed config load as a one-time startup footer
+// message, or "" when the load succeeded. The error leads so footer
+// truncation keeps the actionable part; the path trails so users can find
+// the file (vessel doctor prints the same path).
+func configLoadNotice(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("config: %v (%s)", err, config.Path())
+}
+
+// joinNotices merges two independent one-time startup messages into a single
+// footer line; either side may be empty.
+func joinNotices(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + noticeDetailSep + b
+	}
 }
 
 // newModel builds the root model around an already-loaded config, so tests can
