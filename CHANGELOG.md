@@ -31,8 +31,10 @@ condensed into user-facing terms. Format is based on
   prompt-input behavior that no longer exists.
 - Recaptured `docs/APPLE_CONTAINER_MATRIX.md` against live Apple `container`
   1.2.2 output and recorded what has been live-verified.
-- Removed the parsed-but-never-applied `[theme]` block from
-  `config.example.toml`.
+- Removed the never-applied `[theme]` configuration: the example block is gone
+  from `config.example.toml` and the parsed-but-unused struct was deleted from
+  the code. Old config files carrying a `[theme]` table still load fine (the
+  key is simply ignored).
 - Normalized developer home paths out of test fixtures and captured CLI output.
 - The README now shows a CI status badge so workflow health is visible at a
   glance.
