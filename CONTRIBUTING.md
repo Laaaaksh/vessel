@@ -73,7 +73,8 @@ Releases are cut by pushing a tag; GitHub Actions does the rest
    existing sections, and update the compare links at the bottom of the file -
    add `[x.y.z]: https://github.com/Laaaaksh/vessel/compare/v<prev>...vx.y.z`
    and repoint `[Unreleased]` at `compare/vx.y.z...HEAD`.
-3. Commit those changelog edits to `main`, then tag and push:
+3. Land those changelog edits on `main` through a pull request (see the
+   contribution workflow above), then tag and push:
 
    ```bash
    git tag vx.y.z && git push origin vx.y.z

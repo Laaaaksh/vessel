@@ -69,6 +69,7 @@ jobs:
     # that status on PR heads and verifies the module graph is consistent.
     name: update-go_modules-graph
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
