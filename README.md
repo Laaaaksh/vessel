@@ -2,6 +2,8 @@
 
 A keyboard-driven terminal UI for Apple's native Mac containers.
 
+[![CI](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml/badge.svg)](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml)
+
 ```
 brew tap Laaaaksh/vessel
 brew install vessel
