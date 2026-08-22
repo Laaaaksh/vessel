@@ -35,12 +35,14 @@ func TestHelpCompletenessSuite(t *testing.T) {
 	suite.Run(t, new(helpCompletenessSuite))
 }
 
-// dispatchedLiteralKeys lists every user-reachable key handleKey matches as a
-// bare literal rather than a KeyMap field, spelling them with the same
-// keys.go constants dispatch reads. The inventory itself is hand-synced: no
-// test observes handleKey's switch literals, so adding one there without
-// extending this list fails nothing today — review is what keeps the walk's
-// input complete.
+// dispatchedLiteralKeys lists the keys handleKey matches as bare literals in
+// browse-mode action dispatch rather than a KeyMap field, spelled with the
+// same keys.go constants dispatch reads. Bare literals matched inside other
+// modes (confirm y/n, log-view esc/q) stay out of this list on purpose: their
+// surfaces document themselves. The inventory itself is hand-synced: no test
+// observes handleKey's switch literals, so adding one there without extending
+// this list fails nothing today — review is what keeps the walk's input
+// complete.
 var dispatchedLiteralKeys = []string{
 	keyForceQuit,
 	keyViewContainers,
@@ -51,10 +53,13 @@ var dispatchedLiteralKeys = []string{
 	keyToggleCmdLog,
 }
 
-// helpHiddenBindings names every user-reachable binding deliberately absent
-// from the main help screen, with the reason each may stay hidden. An entry
-// here is a reviewed decision, not an oversight: anything reachable that is
-// neither classified below nor listed here fails the completeness walk.
+// helpHiddenBindings names classified bindings deliberately absent from the
+// main help screen, with the reason each may stay hidden. The walk enforces
+// only what its inventories require — every non-empty KeyMap field plus the
+// dispatched literals above — so reachable keys outside that set (confirm
+// y, say) are neither listed here nor checked anywhere. An entry here is a
+// reviewed decision, not an oversight, and keeping the map itself honest for
+// the enforced set is review work, not something a test observes.
 var helpHiddenBindings = map[string]string{
 	// Editing key inside an open input (filter box, prompt, run form); the
 	// surface holding the input shows its own editing chrome.
