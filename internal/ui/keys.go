@@ -97,8 +97,6 @@ const (
 	keyViewSystem     = "4"
 	keyViewNetworks   = "5"
 	keyToggleCmdLog   = "`"
-	navAliasDown      = "j"
-	navAliasUp        = "k"
 )
 
 // Match reports whether k equals any of the candidates.
