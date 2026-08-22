@@ -61,3 +61,23 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+
+  graph:
+    # Required by branch protection on `main`. Dependabot's own
+    # update-go_modules-graph check only fires on pushes to the default branch,
+    # so pull requests would wait forever for it to report; this job provides
+    # that status on PR heads and verifies the module graph is consistent.
+    name: update-go_modules-graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve module graph
+        run: |
+          go mod download
+          git diff --exit-code go.mod go.sum
