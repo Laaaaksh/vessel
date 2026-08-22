@@ -420,6 +420,57 @@ func TestClient_PushImage_forbiddenIsNotACredentialsFailure(t *testing.T) {
 	}
 }
 
+// TestClient_PushImage_refusalCarriesHintBesideTheError pins the structural
+// fix for the footer hint being truncated away: the refusal travels as an
+// error plus a separate hint rather than one baked string, so a renderer can
+// budget the two independently. Error() still reads as one message and
+// classification still reaches the raw CLI failure through Unwrap.
+func TestClient_PushImage_refusalCarriesHintBesideTheError(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "forbidden")
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := c.PushImage(ctx, "myorg/app:v1")
+	if err == nil {
+		t.Fatal("expected the forbidden push to fail")
+	}
+	var hinted *HintedError
+	if !errors.As(err, &hinted) {
+		t.Fatalf("a refused push must carry its hint beside the raw error, got %T", err)
+	}
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("the raw CLI error must stay reachable through Unwrap, got %T", err)
+	}
+	if hinted.Err.Error() != cliErr.Error() {
+		t.Fatalf("carried error = %q, want the raw CLI failure %q", hinted.Err.Error(), cliErr.Error())
+	}
+	if hinted.Hint != pushPermissionHint {
+		t.Fatalf("a 403 must carry the permission hint, got %q", hinted.Hint)
+	}
+	if hinted.Err.Error()+hinted.Hint != err.Error() {
+		t.Fatalf("Error() must read as raw error then hint, got %q", err.Error())
+	}
+	if got := PushDenialNotice(err); got != PushPermissionNotice {
+		t.Fatalf("classification must see through the hint wrapper, notice = %q", got)
+	}
+}
+
+func TestClient_PushImage_authRefusalCarriesTheCredentialHint(t *testing.T) {
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "auth")
+	c := NewClientWithBinary(fakeBinary(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := c.PushImage(ctx, "myorg/app:v1")
+	var hinted *HintedError
+	if err == nil || !errors.As(err, &hinted) {
+		t.Fatalf("a refused push must carry its hint beside the raw error, got %T", err)
+	}
+	if hinted.Hint != pushAuthHint {
+		t.Fatalf("a 401 must carry the credentials hint, got %q", hinted.Hint)
+	}
+}
+
 func TestPushDenialNotice_distinguishesTheTwoRefusals(t *testing.T) {
 	credentials := &CLIError{
 		Stderr: "Error: ... 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io\n",
