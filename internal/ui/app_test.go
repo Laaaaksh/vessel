@@ -33,6 +33,51 @@ func TestView_shellModeEmpty(t *testing.T) {
 	}
 }
 
+// TestView_tooSmallGuardFloorsBelow60x12 pins the View-level minimum-frame
+// gate: below 60 columns or 12 rows the dashboard must never render — every
+// panel subtracts raw chrome from width/height and only stays non-negative
+// because this branch short-circuits it with a one-line resize hint.
+func TestView_tooSmallGuardFloorsBelow60x12(t *testing.T) {
+	tooSmall := []struct {
+		name          string
+		width, height int
+	}{
+		{"narrow", 59, 24},
+		{"short", 120, 11},
+		{"both below floor", 59, 11},
+	}
+	for _, tc := range tooSmall {
+		m := newTestModel()
+		m.width, m.height = tc.width, tc.height
+		got := ansi.Strip(viewString(m.View()))
+		if !strings.Contains(got, "terminal too small") {
+			t.Fatalf("%s (%dx%d): View must show the resize hint, got %q",
+				tc.name, tc.width, tc.height, got)
+		}
+		if strings.Contains(got, "FLEET") || strings.Contains(got, "Fleet") {
+			t.Fatalf("%s (%dx%d): dashboard must not render below the floor, got %q",
+				tc.name, tc.width, tc.height, got)
+		}
+	}
+
+	// Before the first WindowSizeMsg (width still 0) the boot line renders
+	// instead — its own branch, ahead of the size guard.
+	m := newTestModel()
+	if got := ansi.Strip(viewString(m.View())); !strings.Contains(got, "initialising vessel") {
+		t.Fatalf("width==0 must show the initialising line, got %q", got)
+	}
+
+	// The exact floor still renders the full dashboard.
+	m = newTestModel()
+	m.width, m.height = 60, 12
+	got := ansi.Strip(viewString(m.View()))
+	for _, needle := range []string{"Containers", "Networks"} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("at the exact 60x12 floor the sidebar row %q must render, got %q", needle, got)
+		}
+	}
+}
+
 func TestSelection_listContainsRows(t *testing.T) {
 	m := newTestModel()
 	m.width = 120
@@ -648,6 +693,65 @@ func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
 	}
 }
 
+// isolatedProfileHome points $HOME at a temp dir whose login-shell profile
+// writes noise to stderr, reproducing machines where ~/.profile chatter (a
+// stale line, a version manager's notice) would otherwise contaminate every
+// custom command's displayed output. t.Setenv keeps the override test-local.
+func isolatedProfileHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	prof := filepath.Join(home, ".bash_profile")
+	noisy := "#!/bin/bash\necho profile-noise >&2\n"
+	if err := os.WriteFile(prof, []byte(noisy), 0o644); err != nil {
+		t.Fatalf("write .bash_profile: %v", err)
+	}
+	t.Setenv("HOME", home)
+}
+
+func TestRunCustom_profileNoiseDoesNotHideStdout(t *testing.T) {
+	isolatedProfileHome(t)
+	m := newTestModel()
+	_, cmd := m.runCustom("printf vessel-custom-stdout")
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("runCustom returned %T, want actionDoneMsg", done)
+	}
+	if done.msg != "vessel-custom-stdout" {
+		t.Fatalf("custom output must be the command's stdout alone, got %q", done.msg)
+	}
+}
+
+func TestRunCustom_errorCarriesStderrDiagnostics(t *testing.T) {
+	isolatedProfileHome(t)
+	m := newTestModel()
+	_, cmd := m.runCustom("echo boom-diag >&2; exit 7")
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("runCustom returned %T, want actionDoneMsg", done)
+	}
+	if done.err == nil {
+		t.Fatal("failing custom command must produce an error")
+	}
+	for _, want := range []string{"exit status 7", "boom-diag"} {
+		if !strings.Contains(done.err.Error(), want) {
+			t.Fatalf("error must carry %q, got %q", want, done.err.Error())
+		}
+	}
+}
+
+func TestRunCustom_silentSuccessReportsCustomOk(t *testing.T) {
+	isolatedProfileHome(t)
+	m := newTestModel()
+	_, cmd := m.runCustom("true")
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("runCustom returned %T, want actionDoneMsg", done)
+	}
+	if done.msg != "custom ok" {
+		t.Fatalf("silent success must report custom ok, got %q", done.msg)
+	}
+}
+
 func TestFooterView_servicesDownHint(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
@@ -1007,6 +1111,71 @@ func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
 	if !strings.Contains(m.status, "prune") {
 		t.Fatalf("running prune must show progress in the footer, status=%q", m.status)
 	}
+}
+
+// When Init cannot find the container CLI the model keeps running with a nil
+// client. Every write action reachable in that state - prunes (no selection
+// needed) and typed prompts like pull/run/volume-create - used to dereference
+// the nil client inside its action goroutine and panic the whole TUI. The
+// actions must instead fail through the ordinary actionDoneMsg error path.
+func TestActionsWithoutClient_failNotPanic(t *testing.T) {
+	run := func(cmd tea.Cmd) actionDoneMsg {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("action without a client must still produce its command")
+		}
+		done, ok := cmd().(actionDoneMsg)
+		if !ok {
+			t.Fatalf("action without a client produced %T, want actionDoneMsg", cmd())
+		}
+		if done.err == nil || !strings.Contains(done.err.Error(), "container CLI unavailable") {
+			t.Fatalf("action without a client must report unavailability, got %+v", done)
+		}
+		return done
+	}
+
+	// Prune: P opens the confirm, y confirms.
+	m := newTestModel()
+	m.width, m.height = 100, 30
+	next, _ := m.handleKey(keyMsg("P"))
+	m = next.(Model)
+	if m.mode != modeConfirmDelete {
+		t.Fatalf("P must open the prune confirm, mode=%v", m.mode)
+	}
+	var cmd tea.Cmd
+	next, cmd = m.handleKey(keyMsg("y"))
+	m = next.(Model)
+	if m.mode != modeBrowse {
+		t.Fatalf("confirming must close the modal, mode=%v", m.mode)
+	}
+	run(cmd)
+
+	// Pull prompt: type a reference and submit.
+	m = newTestModel()
+	m.width, m.height = 100, 30
+	m.activeView = ViewImages
+	next, _ = m.handleKey(keyMsg("p"))
+	m = next.(Model)
+	for _, r := range "alpine" {
+		next, _ = m.handleKey(keyMsg(string(r)))
+		m = next.(Model)
+	}
+	next, cmd = m.handleKey(enterKey())
+	m = next.(Model)
+	run(cmd)
+
+	// Run form: fill the image field and submit.
+	m = newTestModel()
+	m.width, m.height = 100, 30
+	next, _ = m.handleKey(keyMsg("c"))
+	m = next.(Model)
+	for _, r := range "alpine" {
+		next, _ = m.handleKey(keyMsg(string(r)))
+		m = next.(Model)
+	}
+	next, cmd = m.handleKey(enterKey())
+	m = next.(Model)
+	run(cmd)
 }
 
 func TestHelpView_fitsTerminalHeight(t *testing.T) {
@@ -2892,4 +3061,73 @@ func TestScheduleInspect_danglingImageRunsNoSubprocess(t *testing.T) {
 	if load := m.loadImageInspectCmd(); load != nil {
 		t.Errorf("a dangling selection produced an inspect command: %T", load())
 	}
+}
+
+// configLoadNotice(nil) must stay empty so a healthy config load leaves New()
+// byte-for-byte identical to the pre-notice behavior.
+func TestConfigLoadNotice_emptyWhenLoaded(t *testing.T) {
+	if got := configLoadNotice(nil); got != "" {
+		t.Fatalf("configLoadNotice(nil) = %q, want empty", got)
+	}
+}
+
+// The notice leads with the error (the actionable part) and trails the config
+// path (so users can find the file); footer truncation cuts from the tail.
+func TestConfigLoadNotice_namesErrorAndPath(t *testing.T) {
+	got := configLoadNotice(errors.New("toml: line 1: expected value"))
+	if !strings.HasPrefix(got, "config: ") {
+		t.Fatalf("configLoadNotice = %q, want 'config: ' prefix", got)
+	}
+	if !strings.Contains(got, "toml: line 1: expected value") {
+		t.Fatalf("configLoadNotice = %q, want the error text", got)
+	}
+	if !strings.Contains(got, config.Path()) {
+		t.Fatalf("configLoadNotice = %q, want the path %s", got, config.Path())
+	}
+}
+
+func TestJoinNotices_bothSidesMayBeEmpty(t *testing.T) {
+	cases := []struct{ a, b, want string }{
+		{"", "", ""},
+		{"only-a", "", "only-a"},
+		{"", "only-b", "only-b"},
+		{"a", "b", "a; b"},
+	}
+	for _, c := range cases {
+		if got := joinNotices(c.a, c.b); got != c.want {
+			t.Errorf("joinNotices(%q, %q) = %q, want %q", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// A broken config can coexist with unusable custom bindings only when the
+// file partially decoded; the startup footer must carry both halves.
+func TestConfigErrorNoticeJoinsBindingNotice(t *testing.T) {
+	cfg := config.Config{CustomCommands: []config.CustomCommand{{
+		Name: "inspect", Key: testNoticeReservedKey, Command: testNoticeCommand,
+	}}}
+	m := newModel(cfg)
+	binding := m.status
+	if binding == "" {
+		t.Fatal("precondition failed: reserved-key binding produced no notice")
+	}
+
+	got := joinNotices(binding, configLoadNotice(errors.New("toml: bad duration")))
+	if !strings.Contains(got, binding) || !strings.Contains(got, "config: toml: bad duration") {
+		t.Fatalf("joined notice = %q, want both binding notice and config error", got)
+	}
+}
+
+// The config-error head must survive footer truncation at the smallest
+// supported frame, mirroring the ignored-binding notice's guarantee.
+func TestConfigErrorFooterHeadSurvivesSmallestFrame(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 60, 12
+	m.setStatus(configLoadNotice(errors.New("toml: line 2: expected value but found 'banana' instead")))
+
+	footer := ansi.Strip(m.footerView())
+	if !strings.Contains(footer, "config:") {
+		t.Fatalf("footer = %q, want the config-error head to survive truncation", footer)
+	}
+	assertOneRow(t, m, "config-error startup notice")
 }

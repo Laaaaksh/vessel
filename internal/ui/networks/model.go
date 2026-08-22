@@ -6,6 +6,7 @@ package networks
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -97,17 +98,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case "enter", "esc":
 			m.filtering = false
 		case "backspace":
-			if len(m.filter) > 0 {
-				m.filter = m.filter[:len(m.filter)-1]
+			if m.filter != "" {
+				_, size := utf8.DecodeLastRuneInString(m.filter)
+				m.filter = m.filter[:len(m.filter)-size]
 				m.filtered = applyFilter(m.items, m.filter)
 				m.cursor = 0
 			}
 		default:
-			if len(k) == 1 {
-				m.filter += k
-				m.filtered = applyFilter(m.items, m.filter)
-				m.cursor = 0
+			// Bubble Tea reports a space press as "space", and Key.String()
+			// is byte-lengthed, so accept one full rune of text either way.
+			if k == "space" {
+				k = " "
+			} else if utf8.RuneCountInString(k) != 1 {
+				return m, nil
 			}
+			m.filter += k
+			m.filtered = applyFilter(m.items, m.filter)
+			m.cursor = 0
 		}
 		return m, nil
 	}

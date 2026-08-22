@@ -10,7 +10,7 @@ Probed live on this machine. Used to drive honest UI demotion vs Docker parity.
 | image list/pull/delete/prune/inspect | supported | `container image …` |
 | image tag/save/load/push | supported, verified live on 1.2.2 | `container image tag\|save\|load\|push` |
 | volume list/create/delete/prune/inspect | supported | `container volume …` |
-| network list/create/delete/prune | supported | `container network …` (UI later) |
+| network list/create/delete/prune | supported | `container network …` (vessel exposes list/inspect only) |
 | system status / df | supported | `container system status\|df` |
 
 ---
@@ -203,93 +203,80 @@ MANAGEMENT OPTIONS:
 
 ## container image prune
 ```
-Error: Plugins are unavailable. Start the container system services and retry:
+OVERVIEW: Remove unused or all images
 
-    container system start
+USAGE: container image prune [--debug] [--all]
 
-Check to see that the plugin exists under:
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container-plugins/image prune
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container/plugins/image prune
-
-Usage: container [--debug] <subcommand>
-  See 'container --help' for more information.
+OPTIONS:
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  -a, --all               Remove all unused images, not just dangling ones
+  --version               Show the version.
+  -h, --help              Show help information.
 ```
 
 ## container volume create
 ```
-Error: Plugins are unavailable. Start the container system services and retry:
+OVERVIEW: Create a new volume
 
-    container system start
+USAGE: container volume create [--label <label> ...] [--opt <opt> ...] [-s <s>] [--debug] <name>
 
-Check to see that the plugin exists under:
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container-plugins/volume create
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container/plugins/volume create
+ARGUMENTS:
+  <name>                  Volume name
 
-Usage: container [--debug] <subcommand>
-  See 'container --help' for more information.
+OPTIONS:
+  --label <label>         Set metadata for a volume
+  --opt <opt>             Set driver specific options
+  -s <s>                  Size of the volume in bytes, with optional K, M, G,
+                          T, or P suffix
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
 ```
 
 ## container volume prune
 ```
-Error: Plugins are unavailable. Start the container system services and retry:
+OVERVIEW: Remove volumes with no container references
 
-    container system start
-
-Check to see that the plugin exists under:
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container-plugins/volume prune
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container/plugins/volume prune
-
-Usage: container [--debug] <subcommand>
-  See 'container --help' for more information.
-```
-
-## container network list
-```
-Error: Plugins are unavailable. Start the container system services and retry:
-
-    container system start
-
-Check to see that the plugin exists under:
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container-plugins/network list
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container/plugins/network list
-
-Usage: container [--debug] <subcommand>
-  See 'container --help' for more information.
-```
-
-## container system status
-```
-Error: Plugins are unavailable. Start the container system services and retry:
-
-    container system start
-
-Check to see that the plugin exists under:
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container-plugins/system status
-  - /opt/homebrew/Cellar/container/1.2.0/libexec/container/plugins/system status
-
-Usage: container [--debug] <subcommand>
-  See 'container --help' for more information.
-```
-
-OVERVIEW: Manage images
-
-USAGE: container image [--debug] <subcommand>
+USAGE: container volume prune [--debug]
 
 OPTIONS:
   --debug                 Enable debug output [environment: CONTAINER_DEBUG]
   --version               Show the version.
   -h, --help              Show help information.
+```
 
-SUBCOMMANDS:
-  delete, rm              Delete one or more images
-  inspect                 Display information about one or more images
-  list, ls                List images
-  load                    Load images from an OCI compatible tar archive
-  prune                   Remove unused or all images
-  pull                    Pull an image
-  push                    Push an image
-  save                    Save one or more images as an OCI compatible tar
-                          archive
-  tag                     Create a new reference for an existing image
+## container network list (live)
+```
+NETWORK  SUBNET
+default  192.168.64.0/24
+```
 
-  See 'container help image <subcommand>' for detailed help.
+## container system status (live)
+```
+FIELD              VALUE
+status             running
+appRoot            ~/Library/Application Support/com.apple.container/
+installRoot        /opt/homebrew/Cellar/container/1.2.2_1/
+logRoot
+apiserver.version  container-apiserver version 1.2.2 (build: release, commit: unspeci)
+apiserver.commit   unspecified
+apiserver.build    release
+apiserver.appName  container-apiserver
+```
+
+## Probe capture state and live verification
+
+All outputs above were captured on container 1.2.2 with the system services
+running (`container system status` → running). The destructive verbs
+(image/volume prune, volume create) are recorded from `--help` so the probe
+never touched shared resources; their plugin resolution here is what the older
+"Plugins are unavailable" errors used to disprove while services were down.
+
+Verified live through vessel's own smoke suite (`scripts/smoke.sh -tags=live`)
+and manual probes against this runtime:
+
+- container lifecycle: list / stop / start / restart / logs tail
+- image save/load round-trip, inspect depth, digest-pinned refs in `image list`
+- one-shot `exec` under a TTY (requires `-it`; piped stdin produces no output)
+- `rm --force` on a running container and detached `run -d`
+- networks list JSON shape driving vessel's read-only networks view
