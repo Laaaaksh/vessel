@@ -145,7 +145,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   through a Cask `binary` shim rather than a formula's direct `bin.install`. That's a real
   `brew install` UX change for a plain CLI, so migrating now is deliberately deferred. When `brews:`
   is finally removed upstream, re-evaluate against the then-current `homebrew_casks:` docs before
-  switching.
+  switching. While the deprecation stands, `goreleaser check` EXITS NON-ZERO purely because of it
+  ("configuration is valid, but uses deprecated properties" -> "check failed"), so check is not a
+  usable pass/fail gate in this state - the snapshot drill (`goreleaser release --snapshot --clean`,
+  verified green on v2.17.1) is the real gate; treat a red `goreleaser check` as the known
+  deprecation, not a config regression.
 - `version`/`commit`/`date` in `main.go` must stay package-level `var`s, not `const`s - the
   `-X main.version=...` linker flag goreleaser passes silently no-ops against a `const`.
 - Tagged releases carry curated notes, not goreleaser's raw commit list: release.yml's
