@@ -61,6 +61,9 @@ condensed into user-facing terms. Format is based on
 - Tagged releases now publish their CHANGELOG section as the GitHub release
   notes (falling back to `Unreleased` for a brand-new version) instead of
   goreleaser's raw commit list.
+- CONTRIBUTING.md documents the release process end to end: turning
+  `Unreleased` changelog work into a dated version section, tagging, and what
+  the tag triggers (curated release notes, GoReleaser build, Homebrew formula).
 
 ### Removed
 - An unreferenced personal development script left behind in `scripts/`.

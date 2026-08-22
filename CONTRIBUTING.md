@@ -44,6 +44,32 @@ go test -tags=live ./internal/backend -run Live -v
 ./scripts/smoke.sh   # unit tests, plus the live tests if `container` is available
 ```
 
+## Releases
+
+Releases are cut by pushing a tag; GitHub Actions does the rest
+(`.github/workflows/release.yml`):
+
+1. Make sure every user-facing change since the last release has a bullet under
+   `Unreleased` in [CHANGELOG.md](CHANGELOG.md) (step 4 of the workflow above).
+2. Give the release its own changelog section: insert `## [x.y.z] - YYYY-MM-DD`
+   above the (now empty) `## [Unreleased]` heading, following the format of the
+   existing sections, and update the compare links at the bottom of the file -
+   add `[x.y.z]: https://github.com/Laaaaksh/vessel/compare/v<prev>...vx.y.z`
+   and repoint `[Unreleased]` at `compare/vx.y.z...HEAD`.
+3. Commit those changelog edits to `main`, then tag and push:
+
+   ```bash
+   git tag vx.y.z && git push origin vx.y.z
+   ```
+
+The workflow extracts the tagged version's CHANGELOG section as the GitHub
+release notes (`scripts/release_notes.sh`: if the version has no heading yet it
+falls back to the `Unreleased` bullets, and it fails the release rather than
+publishing empty notes). GoReleaser - pinned to an exact version, see the
+workflow - then builds the Apple-silicon tarball and checksums, publishes the
+release with those notes, and updates the Homebrew tap formula. The tag itself
+becomes the binary's self-reported version (`vessel --version`).
+
 ## Code style
 
 - Standard `gofmt` / `goimports` formatting (enforced by CI).
