@@ -124,6 +124,10 @@ shell = "/bin/sh"
 
 Live probe notes for Apple `container` 1.2.x live in [`docs/APPLE_CONTAINER_MATRIX.md`](docs/APPLE_CONTAINER_MATRIX.md).
 
+## Changelog
+
+Notable changes per release live in [CHANGELOG.md](CHANGELOG.md).
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) - all contributors must sign the CLA before their first PR is merged.

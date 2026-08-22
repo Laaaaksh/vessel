@@ -32,7 +32,9 @@ make test
 1. Fork the repo and create a feature branch from `main`.
 2. Make your changes with tests.
 3. Run `make lint` and `make test` - both must pass.
-4. Open a PR against `main`. The CLA bot will prompt you to sign the CLA if you haven't already.
+4. If your change is user-facing (a feature, fix, or behavior change), add one
+   bullet under the `Unreleased` heading in [CHANGELOG.md](CHANGELOG.md).
+5. Open a PR against `main`. The CLA bot will prompt you to sign the CLA if you haven't already.
 
 `make test` runs against the fake `container` CLI in `internal/backend/fakecli/`, so it needs
 no runtime. To exercise the real Apple CLI:
