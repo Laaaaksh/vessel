@@ -2030,6 +2030,30 @@ func (m Model) footerView() string {
 	return style.Width(m.width).Render(uiutil.TruncateCells(line, m.width))
 }
 
+// footerErrorPrefix leads the footer's single error row.
+const footerErrorPrefix = "error: "
+
+// servicesDownFooterHint tells the user how to bring the CLI's system services
+// back. Like a push-refusal hint it is budgeted beside the truncated error
+// rather than left as tail text that truncation could eat.
+const servicesDownFooterHint = " — run `container system start` to start services"
+
+// footerErrorParts splits an active error into the message the footer may
+// truncate and the hint that keeps its reserved space beside it. A refused
+// push arrives as a HintedError precisely so this split is structural: baked
+// into the message itself the hint would sit at the tail of a string far
+// longer than any footer row and never survive truncation.
+func footerErrorParts(err error) (base, hint string) {
+	var hinted *backend.HintedError
+	if errors.As(err, &hinted) {
+		return hinted.Err.Error(), hinted.Hint
+	}
+	if backend.IsServicesDown(err) {
+		return err.Error(), servicesDownFooterHint
+	}
+	return err.Error(), ""
+}
+
 func (m Model) footerLine() (lipgloss.Style, string) {
 	// Whichever of status and lastErr was set last takes the footer. A status
 	// set after a sticky services-down hint must be visible (that hint survives
@@ -2041,16 +2065,20 @@ func (m Model) footerLine() (lipgloss.Style, string) {
 		return m.st.footerHelp, strings.Join(strings.Fields(m.status), " ")
 	}
 	if m.lastErr != nil {
-		const prefix = "error: "
-		hint := ""
-		if backend.IsServicesDown(m.lastErr) {
-			hint = " — run `container system start` to start services"
-		}
+		base, hint := footerErrorParts(m.lastErr)
 		// The raw CLI error is long and multi-line; collapse and truncate it to
 		// what is left beside the hint so the hint itself is never cut.
-		msg := strings.Join(strings.Fields(m.lastErr.Error()), " ")
-		msg = uiutil.TruncateCells(msg, max(0, m.width-lipgloss.Width(prefix)-lipgloss.Width(hint)))
-		return m.st.errorText, prefix + msg + hint
+		msg := strings.Join(strings.Fields(base), " ")
+		room := m.width - lipgloss.Width(footerErrorPrefix) - lipgloss.Width(hint)
+		if room < 0 {
+			// The row is narrower than prefix plus hint alone, so something
+			// must give even with an empty message. Cut from the hint's head:
+			// its tail carries the command to run, and a right-cut here would
+			// drop exactly that while leaving the diagnosis that caused it.
+			return m.st.errorText, footerErrorPrefix + uiutil.TruncateTail(hint, m.width-lipgloss.Width(footerErrorPrefix))
+		}
+		msg = uiutil.TruncateCells(msg, room)
+		return m.st.errorText, footerErrorPrefix + msg + hint
 	}
 	cur, n := m.cursorInfo()
 	prefix := fmt.Sprintf("%d/%d  ", cur+1, n)
