@@ -33,6 +33,51 @@ func TestView_shellModeEmpty(t *testing.T) {
 	}
 }
 
+// TestView_tooSmallGuardFloorsBelow60x12 pins the View-level minimum-frame
+// gate: below 60 columns or 12 rows the dashboard must never render — every
+// panel subtracts raw chrome from width/height and only stays non-negative
+// because this branch short-circuits it with a one-line resize hint.
+func TestView_tooSmallGuardFloorsBelow60x12(t *testing.T) {
+	tooSmall := []struct {
+		name          string
+		width, height int
+	}{
+		{"narrow", 59, 24},
+		{"short", 120, 11},
+		{"both below floor", 59, 11},
+	}
+	for _, tc := range tooSmall {
+		m := newTestModel()
+		m.width, m.height = tc.width, tc.height
+		got := ansi.Strip(viewString(m.View()))
+		if !strings.Contains(got, "terminal too small") {
+			t.Fatalf("%s (%dx%d): View must show the resize hint, got %q",
+				tc.name, tc.width, tc.height, got)
+		}
+		if strings.Contains(got, "FLEET") || strings.Contains(got, "Fleet") {
+			t.Fatalf("%s (%dx%d): dashboard must not render below the floor, got %q",
+				tc.name, tc.width, tc.height, got)
+		}
+	}
+
+	// Before the first WindowSizeMsg (width still 0) the boot line renders
+	// instead — its own branch, ahead of the size guard.
+	m := newTestModel()
+	if got := ansi.Strip(viewString(m.View())); !strings.Contains(got, "initialising vessel") {
+		t.Fatalf("width==0 must show the initialising line, got %q", got)
+	}
+
+	// The exact floor still renders the full dashboard.
+	m = newTestModel()
+	m.width, m.height = 60, 12
+	got := ansi.Strip(viewString(m.View()))
+	for _, needle := range []string{"Containers", "Networks"} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("at the exact 60x12 floor the sidebar row %q must render, got %q", needle, got)
+		}
+	}
+}
+
 func TestSelection_listContainsRows(t *testing.T) {
 	m := newTestModel()
 	m.width = 120
