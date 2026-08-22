@@ -117,6 +117,26 @@ func TestDuration_unmarshalErrorZeroesField(t *testing.T) {
 	}
 }
 
+// The [theme] table was removed from Config (parsed but never applied), and
+// BurntSushi ignores undecoded keys rather than erroring, so a config.toml
+// carried over from an older vessel must keep loading cleanly.
+func TestLoad_unknownKeysIgnored(t *testing.T) {
+	writeConfig(t, `
+poll_interval = "3s"
+
+[theme]
+accent = "#ff0000"
+`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("config with unknown [theme] table failed to load: %v", err)
+	}
+	if cfg.PollInterval.Duration != 3*time.Second {
+		t.Errorf("PollInterval = %v, want 3s", cfg.PollInterval.Duration)
+	}
+}
+
 func TestLoad_validFileRoundTrips(t *testing.T) {
 	writeConfig(t, `
 poll_interval = "5s"

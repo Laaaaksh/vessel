@@ -15,15 +15,6 @@ type CustomCommand struct {
 	Command string `toml:"command"`
 }
 
-// Theme holds optional colour overrides (hex strings). Empty = defaults.
-type Theme struct {
-	SelectedBg string `toml:"selected_bg"`
-	SelectedFg string `toml:"selected_fg"`
-	Accent     string `toml:"accent"`
-	StatusRun  string `toml:"status_running"`
-	StatusStop string `toml:"status_stopped"`
-}
-
 // Config holds all user configuration for vessel.
 type Config struct {
 	PollInterval   duration        `toml:"poll_interval"`
@@ -32,7 +23,6 @@ type Config struct {
 	Shell          string          `toml:"shell"`
 	ConfirmStop    bool            `toml:"confirm_stop"`
 	CustomCommands []CustomCommand `toml:"custom_commands"`
-	Theme          Theme           `toml:"theme"`
 }
 
 // Defaults shared by Default() and sanitize(); changing one means changing
