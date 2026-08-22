@@ -103,6 +103,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   suffices) while `release.yml` keeps `contents: write` for goreleaser.
   `.github/dependabot.yml` opens weekly gomod + github-actions update PRs -
   expect them and treat them like any other PR (gate: make build/lint/test).
+- Workflow concurrency asymmetry is deliberate: `ci.yml` sets
+  `cancel-in-progress: true` (CI publishes nothing; superseded macos runs are
+  pure 10x-rate waste) while `release.yml` queues overlapping runs with no
+  cancel (a publish killed mid-flight can half-ship assets/formula). Both jobs
+  carry explicit `timeout-minutes` so a hang fails fast instead of hitting the
+  360-minute runner default. Keep both when editing the workflows.
 - `release.yml` pins goreleaser to an exact version (`v2.17.1`), not `latest`:
   goreleaser removes deprecated features at majors, so floating would silently
   cross the `brews:` removal cliff and fail tagging with zero repo changes.
