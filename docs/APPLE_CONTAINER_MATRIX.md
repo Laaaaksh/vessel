@@ -257,7 +257,7 @@ FIELD              VALUE
 status             running
 appRoot            ~/Library/Application Support/com.apple.container/
 installRoot        /opt/homebrew/Cellar/container/1.2.2_1/
-logRoot            
+logRoot
 apiserver.version  container-apiserver version 1.2.2 (build: release, commit: unspeci)
 apiserver.commit   unspecified
 apiserver.build    release
