@@ -159,7 +159,13 @@ Found a security issue? Please report it privately - see [SECURITY.md](SECURITY.
 
 If `vessel` makes managing containers on your Mac easier, [leave a star](https://github.com/Laaaaksh/vessel/stargazers) - it helps other people find it.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Laaaaksh/vessel&type=Date)](https://star-history.com/#Laaaaksh/vessel&Date)
+<a href="https://www.star-history.com/?repos=Laaaaksh%2Fvessel&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Laaaaksh/vessel&type=date&theme=dark&legend=top-left&sealed_token=bSqxGpLu26r_YCDhMfizVeRbrTRt1pSHUKpuWVK76B4W7RIjFJ3H8u7fXpdN4FHdbo17xglDSw7DIhiMkMj5_ZjyB9AzKbl12afWgx-FI94bpnH9lGpLQVne--mPYYYbNmCVnFqaTYd9mFjCHVVIFvllkW4mFw-QTRLPdBKPf7lrk0g36F8rdcvh9L1e" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Laaaaksh/vessel&type=date&theme=light&legend=top-left&sealed_token=bSqxGpLu26r_YCDhMfizVeRbrTRt1pSHUKpuWVK76B4W7RIjFJ3H8u7fXpdN4FHdbo17xglDSw7DIhiMkMj5_ZjyB9AzKbl12afWgx-FI94bpnH9lGpLQVne--mPYYYbNmCVnFqaTYd9mFjCHVVIFvllkW4mFw-QTRLPdBKPf7lrk0g36F8rdcvh9L1e" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Laaaaksh/vessel&type=date&legend=top-left&sealed_token=bSqxGpLu26r_YCDhMfizVeRbrTRt1pSHUKpuWVK76B4W7RIjFJ3H8u7fXpdN4FHdbo17xglDSw7DIhiMkMj5_ZjyB9AzKbl12afWgx-FI94bpnH9lGpLQVne--mPYYYbNmCVnFqaTYd9mFjCHVVIFvllkW4mFw-QTRLPdBKPf7lrk0g36F8rdcvh9L1e" />
+ </picture>
+</a>
 
 ## License
 
