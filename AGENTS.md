@@ -111,6 +111,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   is a real list name that parses to a non-empty tag AND digest. Revisit only
   with a probe, and note push needs registry credentials to test fully.
 
+## internal/doctor
+
+- `Run` (`internal/doctor/doctor.go`) probes through package-level test seams (`stdout`, `lookPath`, `runCmd`, `hostArch`) so tests fake a whole machine without touching the host - build scenarios off `stubDoctor(t)` in `doctor_test.go`, which restores every seam on cleanup. The support floors live as constants in that one file and mirror README Requirements + `docs/APPLE_CONTAINER_MATRIX.md`: `container --version` must parse to >= 1.2.0, macOS major must be >= 26 (fatal below 15, "LIMITED" warning for 15..25), host arch must be arm64. The version/status checks invoke the LookPath-resolved path, not a fresh PATH lookup, so fakes must dispatch on args rather than the binary name.
+
 ## Release pipeline
 
 - CI is least-privilege on purpose: `ci.yml` pins `permissions: contents: read`
@@ -142,7 +146,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   through a Cask `binary` shim rather than a formula's direct `bin.install`. That's a real
   `brew install` UX change for a plain CLI, so migrating now is deliberately deferred. When `brews:`
   is finally removed upstream, re-evaluate against the then-current `homebrew_casks:` docs before
-  switching.
+  switching. While the deprecation stands, `goreleaser check` EXITS NON-ZERO purely because of it
+  ("configuration is valid, but uses deprecated properties" -> "check failed"), so check is not a
+  usable pass/fail gate in this state - the snapshot drill (`goreleaser release --snapshot --clean`,
+  verified green on v2.17.1) is the real gate; treat a red `goreleaser check` as the known
+  deprecation, not a config regression.
 - `version`/`commit`/`date` in `main.go` must stay package-level `var`s, not `const`s - the
   `-X main.version=...` linker flag goreleaser passes silently no-ops against a `const`.
 - Tagged releases carry curated notes, not goreleaser's raw commit list: release.yml's
