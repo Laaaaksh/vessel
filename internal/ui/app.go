@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1951,12 +1952,30 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		c := exec.CommandContext(ctx, "bash", "-lc", cmdStr)
-		out, err := c.CombinedOutput()
+		// Capture stdout and stderr separately: the login shell (-l) sources
+		// the user's profile, whose chatter (a stale line in ~/.profile, a
+		// version manager's notice) lands on stderr. Merging the streams made
+		// that chatter part of the result text and pushed the command's real
+		// output past the footer's 80-char truncation window.
+		var stdout, stderr bytes.Buffer
+		c.Stdout = &stdout
+		c.Stderr = &stderr
+		err := c.Run()
 		if err != nil {
-			return actionDoneMsg{err: fmt.Errorf("%w: %s", err, string(out))}
+			diag := strings.TrimSpace(stderr.String())
+			if diag == "" {
+				diag = strings.TrimSpace(stdout.String())
+			}
+			if diag != "" {
+				return actionDoneMsg{err: fmt.Errorf("%w: %s", err, diag)}
+			}
+			return actionDoneMsg{err: err}
 		}
-		msg := strings.TrimSpace(string(out))
+		msg := strings.TrimSpace(stdout.String())
 		if msg == "" {
+			// Deliberately no stderr fallback here: on a machine whose login
+			// profile writes to stderr, the fallback would show that chatter
+			// for every silent command instead of the honest "custom ok".
 			msg = "custom ok"
 		}
 		return actionDoneMsg{msg: uiutil.Truncate(msg, 80)}
