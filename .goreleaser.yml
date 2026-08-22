@@ -23,7 +23,7 @@ builds:
 archives:
   - id: vessel
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - LICENSE
       - README.md
@@ -40,13 +40,14 @@ release:
 
 brews:
   - name: vessel
+    directory: Formula
     repository:
       owner: Laaaaksh
       name: homebrew-vessel
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/Laaaaksh/vessel"
     description: "A keyboard-driven TUI for Apple's native Mac containers"
-    license: "Apache-2.0"
+    license: "MIT"
     install: |
       bin.install "vessel"
     test: |

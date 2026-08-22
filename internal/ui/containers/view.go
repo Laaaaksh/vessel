@@ -111,11 +111,9 @@ func (m Model) renderRow(c backend.Container, selected bool, width int, poller *
 	if selected {
 		return m.styleSelected.Width(width).Render(line)
 	}
-	st := m.styleRow
+	st := m.styleExited
 	if c.IsRunning() {
 		st = m.styleRunning
-	} else {
-		st = m.styleExited
 	}
 	return st.Width(width).Render(line)
 }
@@ -129,60 +127,83 @@ func (m Model) DetailView(width, height int, poller *backend.Poller) string {
 			Render("  no container selected")
 	}
 
-	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).Render(sel.Name))
-	lines = append(lines, "")
-	lines = append(lines, uiutil.KV("Image", sel.Image))
-	lines = append(lines, uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)))
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	metrics := metricRows(sel, poller, width)
+	metricRowCount := 0
+	for _, r := range metrics {
+		metricRowCount += uiutil.RowsFor(r, width)
+	}
+	reserved := uiutil.Reserve(metricRowCount, height)
+
+	p := uiutil.NewPane(width, height-reserved)
+	p.Add(
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")).Bold(true).
+			Render(uiutil.Headline(sel.Name, width, height)),
+		"",
+		uiutil.KVFit("Image", sel.Image, width),
+		// Deliberately not KVFit: the id is the identity content the pane must
+		// still show at minimum geometry, so binding it to the pane width would
+		// defeat the rule that binding its siblings serves.
+		uiutil.KV("ID", uiutil.Truncate(sel.ID, 12)),
+	)
 	if !sel.Created.IsZero() {
-		lines = append(lines, uiutil.KV("Created", uiutil.Ago(sel.Created)))
+		p.Add(uiutil.KV("Created", uiutil.Ago(sel.Created)))
 	}
-	lines = append(lines, uiutil.KV("Status", sel.Status))
-	lines = append(lines, uiutil.KV("Ports", backend.FormatPorts(sel.Ports)))
-
-	if poller != nil {
-		m2, ok := poller.Snapshot().Get(sel.ID)
-		lines = append(lines, uiutil.KV("CPU", backend.FormatCPU(m2, ok)))
-		lines = append(lines, uiutil.KV("Memory", backend.FormatMem(m2, ok)))
-		if ok {
-			lines = append(lines, renderBar(m2.CPUPercent/100.0, width-4))
-			if m2.MemLimit > 0 {
-				lines = append(lines, renderBar(float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
-			}
-			if spark := poller.Sparkline(sel.ID, min(24, width-6)); spark != "" {
-				lines = append(lines, uiutil.KV("CPU hist", spark))
-			}
-		}
+	p.Add(
+		uiutil.KV("Status", sel.Status),
+		uiutil.KVFit("Ports", backend.FormatPorts(sel.Ports), width),
+	)
+	if sel.Hostname != "" {
+		p.Add(uiutil.KVFit("Hostname", sel.Hostname, width))
 	}
-
-	if len(sel.Labels) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Labels --"))
-		for k, v := range sel.Labels {
-			if len(lines) > height-4 {
-				break
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-				Render("  "+uiutil.Truncate(k+"="+v, width-6)))
-		}
+	if sel.Platform != "" {
+		p.Add(uiutil.KV("Platform", sel.Platform))
+	}
+	if sel.CPUs > 0 {
+		p.Add(uiutil.KV("CPUs", fmt.Sprintf("%d", sel.CPUs)))
+	}
+	if sel.MemoryBytes > 0 {
+		// Distinct from the live "Memory" usage row the poller adds below.
+		p.Add(uiutil.KV("MemLimit", uiutil.HumanBytes(int64(sel.MemoryBytes))))
+	}
+	if len(sel.Networks) > 0 {
+		p.Add(uiutil.KVFit("Networks", backend.FormatNetworks(sel.Networks), width))
 	}
 
-	if len(sel.Env) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Render("-- Env --"))
-		for _, e := range sel.Env {
-			if len(lines) > height-4 {
-				break
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).
-				Render("  "+uiutil.Truncate(e, width-6)))
-		}
+	mounts := make([]string, 0, len(sel.Mounts))
+	for _, mt := range sel.Mounts {
+		mounts = append(mounts, mt.Source+" → "+mt.Destination)
 	}
+	p.Section(dim.Render("-- Mounts --"), uiutil.IndentedRows(mounts, dim, width))
 
-	return lipgloss.NewStyle().
-		Width(width).Height(height).
-		PaddingLeft(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	p.AddReserved(reserved, metrics...)
+
+	p.Section(dim.Render("-- Labels --"), uiutil.PairRows(sel.Labels, dim, width))
+	p.Section(dim.Render("-- Env --"), uiutil.IndentedRows(sel.Env, dim, width))
+
+	return uiutil.RenderPane(width, height, p.Lines())
+}
+
+func metricRows(sel *backend.Container, poller *backend.Poller, width int) []string {
+	if poller == nil {
+		return nil
+	}
+	m2, ok := poller.Snapshot().Get(sel.ID)
+	rows := []string{
+		uiutil.KV("CPU", backend.FormatCPU(m2, ok)),
+		uiutil.KV("Memory", backend.FormatMem(m2, ok)),
+	}
+	if !ok {
+		return rows
+	}
+	rows = append(rows, renderBar(m2.CPUPercent/100.0, width-4))
+	if m2.MemLimit > 0 {
+		rows = append(rows, renderBar(float64(m2.MemUsage)/float64(m2.MemLimit), width-4))
+	}
+	if spark := poller.Sparkline(sel.ID, min(24, width-6)); spark != "" {
+		rows = append(rows, uiutil.KV("CPU hist", spark))
+	}
+	return rows
 }
 
 func renderBar(pct float64, width int) string {

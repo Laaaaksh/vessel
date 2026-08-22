@@ -3,16 +3,34 @@ package uiutil
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
+
+// kvLabelWidth is the column width of a KV row's label, which is followed by a
+// single separating space.
+const kvLabelWidth = 9
+
+// ellipsis marks a cut in one cell, matching what ansi.Truncate appends.
+const ellipsis = "…"
 
 // KV renders a dim "key:" label followed by its value.
 func KV(key, val string) string {
-	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(9).Render(key + ":")
+	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(kvLabelWidth).Render(key + ":")
 	v := lipgloss.NewStyle().Foreground(lipgloss.Color("#e2e8f0")).Render(val)
 	return lipgloss.JoinHorizontal(lipgloss.Top, k, " ", v)
+}
+
+// KVFit renders a KV row whose value is shortened to whatever is left after the
+// label and its separating space, so the row occupies a single rendered row in
+// a pane of that width. Callers must not compute that budget themselves: the
+// label geometry belongs here, and getting it one column wrong costs the row an
+// extra rendered row.
+func KVFit(key, val string, width int) string {
+	return KV(key, Truncate(val, width-kvLabelWidth-2))
 }
 
 // Truncate shortens s to at most max runes, ending in an ellipsis when cut.
@@ -34,6 +52,56 @@ func Truncate(s string, max int) string {
 // Pad truncates s to w runes and left-aligns it in a field of that width.
 func Pad(s string, w int) string {
 	return fmt.Sprintf("%-*s", w, Truncate(s, w))
+}
+
+// TruncateCells shortens s to at most w terminal cells, ending in an ellipsis
+// when cut. A terminal — and lipgloss, which wraps rather than truncates —
+// measures display width, so a double-width character such as 世 takes two
+// cells: cutting by rune count lets a line overflow the width it was fitted to
+// and wrap onto a second row. A w of zero or less yields an empty string.
+func TruncateCells(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	return ansi.Truncate(s, w, ellipsis)
+}
+
+// TruncateTail keeps the last w terminal cells of s, leading with an ellipsis
+// when cut — the mirror of TruncateCells. A hint whose tail carries the
+// actionable command must lose its diagnosis, not its instruction, when the
+// surface holding it is narrower than the whole text.
+func TruncateTail(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= w {
+		return s
+	}
+	budget := w - ansi.StringWidth(ellipsis)
+	runes := []rune(s)
+	// Widths grow monotonically as the kept tail lengthens, so the first
+	// overflow marks one past the longest tail that fits beside the ellipsis.
+	kept := 0
+	for keep := 1; keep <= len(runes); keep++ {
+		if ansi.StringWidth(string(runes[len(runes)-keep:])) > budget {
+			break
+		}
+		kept = keep
+	}
+	if kept == 0 {
+		return ellipsis
+	}
+	return ellipsis + string(runes[len(runes)-kept:])
+}
+
+// PadCells truncates s to w terminal cells and left-aligns it in a field of
+// that width.
+func PadCells(s string, w int) string {
+	s = TruncateCells(s, w)
+	if pad := w - lipgloss.Width(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
 }
 
 // Window returns the [start, end) bounds of a scroll window of at most size

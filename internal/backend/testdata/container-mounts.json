@@ -1,0 +1,119 @@
+[
+ {
+  "configuration": {
+   "capAdd": [],
+   "capDrop": [],
+   "creationDate": "2026-08-18T07:47:08Z",
+   "dns": {
+    "nameservers": [],
+    "options": [],
+    "searchDomains": []
+   },
+   "id": "a5337e3a-3096-4b1a-b698-96aaa10814b1",
+   "image": {
+    "descriptor": {
+     "annotations": {
+      "com.apple.containerization.image.name": "docker.io/library/alpine:latest",
+      "io.containerd.image.name": "docker.io/library/alpine:latest",
+      "org.opencontainers.image.ref.name": "docker.io/library/alpine:latest"
+     },
+     "digest": "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
+     "mediaType": "application/vnd.oci.image.index.v1+json",
+     "size": 9218
+    },
+    "reference": "docker.io/library/alpine:latest"
+   },
+   "initProcess": {
+    "arguments": [
+     "3600"
+    ],
+    "environment": [
+     "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "executable": "sleep",
+    "rlimits": [],
+    "supplementalGroups": [],
+    "terminal": false,
+    "user": {
+     "id": {
+      "gid": 0,
+      "uid": 0
+     }
+    },
+    "workingDirectory": "/"
+   },
+   "labels": {},
+   "mounts": [
+    {
+     "destination": "/data",
+     "options": [],
+     "source": "/Users/dev/Library/Application Support/com.apple.container/volumes/p2-live-probe/volume.img",
+     "type": {
+      "volume": {
+       "cache": {
+        "on": {}
+       },
+       "format": "ext4",
+       "name": "p2-live-probe",
+       "sync": {
+        "fsync": {}
+       }
+      }
+     }
+    }
+   ],
+   "networks": [
+    {
+     "network": "default",
+     "options": {
+      "hostname": "a5337e3a-3096-4b1a-b698-96aaa10814b1",
+      "mtu": 1280
+     }
+    }
+   ],
+   "platform": {
+    "architecture": "arm64",
+    "os": "linux"
+   },
+   "publishedPorts": [
+    {
+     "containerPort": 80,
+     "count": 1,
+     "hostAddress": "0.0.0.0",
+     "hostPort": 18080,
+     "proto": "tcp"
+    }
+   ],
+   "publishedSockets": [],
+   "readOnly": false,
+   "resources": {
+    "cpuOverhead": 1,
+    "cpus": 4,
+    "memoryInBytes": 1073741824
+   },
+   "rosetta": false,
+   "runtimeHandler": "container-runtime-linux",
+   "ssh": false,
+   "sysctls": {},
+   "useInit": false,
+   "virtualization": false
+  },
+  "id": "a5337e3a-3096-4b1a-b698-96aaa10814b1",
+  "status": {
+   "networks": [
+    {
+     "hostname": "a5337e3a-3096-4b1a-b698-96aaa10814b1",
+     "ipv4Address": "192.168.64.2/24",
+     "ipv4Gateway": "192.168.64.1",
+     "ipv6Address": "fd0c:b0ca:5941:8a21:f02d:f7ff:fe41:4c50/64",
+     "macAddress": "f2:2d:f7:41:4c:50",
+     "mtu": 1280,
+     "network": "default",
+     "variant": "reserved"
+    }
+   ],
+   "startedDate": "2026-08-18T07:47:09Z",
+   "state": "running"
+  }
+ }
+]
