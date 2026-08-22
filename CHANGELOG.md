@@ -21,6 +21,12 @@ condensed into user-facing terms. Format is based on
   `poll_interval` panicked the metrics loop) or silently run with defaults:
   the parse error is reported in the footer at startup, unsafe values are
   clamped to safe defaults, and `vessel doctor` already printed the error.
+- Custom command output is no longer polluted by login-shell profile chatter:
+  `bash -l` sources `~/.profile`, whose stderr noise used to be merged into
+  the result text and push the command's real output out of the footer's
+  truncation window. Success now shows the command's stdout alone (empty
+  output still reports "custom ok"); failures carry the exit status plus the
+  command's stderr diagnostics.
 - The README install instructions work on current Homebrew: since Homebrew
   6.0.0, third-party taps must be trusted before they can be installed from,
   so the documented flow now includes a one-time `brew trust laaaaksh/vessel`
