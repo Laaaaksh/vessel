@@ -210,7 +210,10 @@ func (e *HintedError) Unwrap() error { return e.Err }
 // PushPermissionNotice already wraps to exactly four rows there, saturating that
 // budget with no slack: it leads the pane, so it renders in full today, but any
 // reword that makes it longer is clipped rather than merely crowding the fields
-// below it. Measure a reword against that geometry, not against the terminal.
+// below it. LayoutWideList hands the same 60x12 terminal a 10-column pane,
+// where the notice wraps harder and needs the taller 10x8 frame to survive.
+// Measure a reword against both geometries, not against the terminal;
+// TestImagesDetail_notice* pins them.
 const (
 	PushAuthNotice = "push rejected — run `container registry login`"
 	// A 403 does not on its own establish that the session holds valid,
@@ -222,8 +225,9 @@ const (
 	PushPermissionNotice = "push forbidden — may lack write access or need login"
 )
 
-// The fuller instructions appended to the error itself, which the footer
-// renders. Each stays on one line because the footer budgets exactly one row.
+// The fuller instructions carried beside a refused push's error as a
+// HintedError, which the footer renders next to the truncated message. Each
+// stays on one line because the footer budgets exactly one row.
 const (
 	pushAuthHint       = " — registry rejected these credentials; run `container registry login`, then retry"
 	pushPermissionHint = " — registry refused the push: this account may lack write access, or you may need to log in with `container registry login`"
