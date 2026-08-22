@@ -2,6 +2,8 @@
 
 A keyboard-driven terminal UI for Apple's native Mac containers.
 
+[![CI](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml/badge.svg)](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml)
+
 ```
 brew tap Laaaaksh/vessel
 brew install vessel
@@ -14,6 +16,7 @@ brew install vessel
 - Live container list with status, CPU %, memory, and sparklines
 - Start, stop, restart, remove, and prune
 - Drop into a shell inside any running container (clean UI restore on exit)
+- Run a one-shot command in a running container and see its output (`e`)
 - Stream logs with follow freeze and in-buffer search
 - Inspect containers: ports, mounts, networks and IP, CPUs, memory, platform, hostname, env, labels
 - Inspect images (digest, layers, command, platform variants) and volumes (quota, format, labels, options)
@@ -35,8 +38,12 @@ container system start   # downloads a default Linux kernel on first run
 
 ```bash
 brew tap Laaaaksh/vessel
+brew trust laaaaksh/vessel   # once; Homebrew 6+ refuses untrusted third-party taps
 brew install vessel
 ```
+
+On Homebrew versions before 6.0 there is no trust gate and no `brew trust`
+command - skip that step. See [Tap Trust](https://docs.brew.sh/Tap-Trust).
 
 Or download a binary from [GitHub Releases](https://github.com/Laaaaksh/vessel/releases).
 
@@ -55,8 +62,9 @@ vessel doctor   # check CLI, system status, config
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `g` / `G` | Go to top / bottom |
-| `pgup` / `pgdn` / `ctrl+u` / `ctrl+d` | Page scroll |
+| `pgup` / `pgdown` / `ctrl+u` / `ctrl+d` | Page scroll |
 | `enter` | Open shell in container |
+| `e` | Run a one-shot command in the selected running container |
 | `L` | View logs |
 | `f` | Freeze / follow logs |
 | `s` / `u` / `r` | Stop / start / restart (stop asks to confirm when `confirm_stop` is set) |
@@ -67,7 +75,7 @@ vessel doctor   # check CLI, system status, config
 | `x` | Action menu |
 | `p` | Pull image (images view) |
 | `P` | Prune (stopped containers / images / volumes), confirm with `y` |
-| `c` | Create / run (prompt) |
+| `c` | New container (form) / new volume (name prompt) |
 | `+` / `_` | Cycle layout |
 | `` ` `` | Toggle command log |
 | `tab` / `1`-`5` | Containers / Images / Volumes / System / Networks |
@@ -92,16 +100,13 @@ Known limits:
 - vessel never manages registry credentials. Push reuses whatever session
   `container registry login` has already established - running that login is yours to do.
 - Long-running verbs get real budgets: starting or stopping a container gets
-  thirty seconds, image tag/save/load/push, prunes and starting a container run
+  thirty seconds, image pull/tag/save/load/push, prunes and starting a container run
   up to two minutes, one batched delete of many targets gets one minute for the
   whole call, and a one-shot exec gets thirty seconds.
-  A huge `image pull` is still bounded by the short default cap. A run without
+  A run without
   `-d` holds the action status until that budget expires instead of streaming
   output; streaming or detached-launch support for long-running foreground
   sessions is future work.
-- The prompt drops the space bar and non-ASCII characters, so a path containing either
-  cannot be typed yet - save would write somewhere you did not name, and load reports a
-  missing file for one that exists.
 
 ## Configuration
 
@@ -122,6 +127,10 @@ shell = "/bin/sh"
 ## Apple CLI matrix
 
 Live probe notes for Apple `container` 1.2.x live in [`docs/APPLE_CONTAINER_MATRIX.md`](docs/APPLE_CONTAINER_MATRIX.md).
+
+## Changelog
+
+Notable changes per release live in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

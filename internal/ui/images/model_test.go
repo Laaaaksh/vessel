@@ -49,6 +49,29 @@ func img(id, repo string) backend.Image {
 	return backend.Image{ID: id, Repository: repo, Tag: "latest"}
 }
 
+// The filter used to drop a space press (it arrives as "space") and every
+// multi-byte rune (Key.String() is byte-lengthed), so "my repo" or an accented
+// tag could never be typed. Backspace also trimmed single bytes, corrupting
+// multi-byte input into invalid UTF-8.
+func TestImageFilterAcceptsSpacesAndUnicode(t *testing.T) {
+	m := New().SetItems([]backend.Image{img("1", "alpine"), img("2", "busybox")})
+	m, _ = m.Update(keyMsg("/"))
+	m, _ = m.Update(spaceKey())
+	if m.filter != " " {
+		t.Fatalf("filter = %q after space, want a literal space", m.filter)
+	}
+	for _, r := range "café" {
+		m, _ = m.Update(keyMsg(string(r)))
+	}
+	if m.filter != " café" {
+		t.Fatalf("filter = %q, want the multi-byte runes preserved", m.filter)
+	}
+	m, _ = m.Update(keyMsg("backspace"))
+	if m.filter != " caf" || !utf8.ValidString(m.filter) {
+		t.Fatalf("filter = %q after backspace, want exactly the trailing rune removed", m.filter)
+	}
+}
+
 func TestImageSpaceTogglesMarkOnSelected(t *testing.T) {
 	m := New().SetItems([]backend.Image{img("a", "alpine"), img("b", "busybox")})
 	m, _ = m.Update(spaceKey())

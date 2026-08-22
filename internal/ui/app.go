@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -270,8 +271,39 @@ func (m *Model) setActionErr(err error) {
 
 // New creates the root model. Backend connection happens in Init.
 func New() Model {
-	cfg, _ := config.Load()
-	return newModel(cfg)
+	cfg, err := config.Load()
+	m := newModel(cfg)
+	if err != nil {
+		// A broken config.toml must not silently degrade to defaults: join
+		// the load error onto whatever startup notice newModel stamped so
+		// the user learns about it through the ordinary footer lifecycle.
+		m.setStatus(joinNotices(m.status, configLoadNotice(err)))
+	}
+	return m
+}
+
+// configLoadNotice renders a failed config load as a one-time startup footer
+// message, or "" when the load succeeded. The error leads so footer
+// truncation keeps the actionable part; the path trails so users can find
+// the file (vessel doctor prints the same path).
+func configLoadNotice(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("config: %v (%s)", err, config.Path())
+}
+
+// joinNotices merges two independent one-time startup messages into a single
+// footer line; either side may be empty.
+func joinNotices(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + noticeDetailSep + b
+	}
 }
 
 // newModel builds the root model around an already-loaded config, so tests can
@@ -1294,6 +1326,10 @@ func (m Model) confirmDelete() (tea.Model, tea.Cmd) {
 	client := m.client
 	label, done, timeout := pendingAction(kind)
 	m = m.clearPending()
+	if client == nil {
+		m.setStatus(label + "…")
+		return m, unavailableCmd()
+	}
 	if len(ids) == 0 && !kind.isPrune() {
 		return m, nil
 	}
@@ -1339,6 +1375,9 @@ func (m Model) runOnSelected(verb string, fn func(context.Context, string) error
 	id := sel.ID
 	name := sel.Name
 	m.setStatus(verb + " " + name + "…")
+	if m.client == nil {
+		return m, unavailableCmd()
+	}
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 		defer cancel()
@@ -1361,6 +1400,9 @@ func (m Model) runPush(label, ref string, fn func(context.Context) error) (tea.M
 
 func (m Model) runAction(label, pushRef string, fn func(context.Context) error) (tea.Model, tea.Cmd) {
 	m.setStatus(label + "…")
+	if m.client == nil {
+		return m, unavailableCmd()
+	}
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 		defer cancel()
@@ -1368,6 +1410,16 @@ func (m Model) runAction(label, pushRef string, fn func(context.Context) error) 
 			return actionDoneMsg{err: err, pushRef: pushRef}
 		}
 		return actionDoneMsg{msg: label + " ok"}
+	}
+}
+
+// unavailableCmd is what a write action returns when Init could not find the
+// container CLI (m.client == nil): an ordinary failed-action message through
+// the one error-rendering path, instead of the action closure dereferencing
+// the nil client inside its goroutine and panicking.
+func unavailableCmd() tea.Cmd {
+	return func() tea.Msg {
+		return actionDoneMsg{err: errors.New("container CLI unavailable")}
 	}
 }
 
@@ -1900,12 +1952,30 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		c := exec.CommandContext(ctx, "bash", "-lc", cmdStr)
-		out, err := c.CombinedOutput()
+		// Capture stdout and stderr separately: the login shell (-l) sources
+		// the user's profile, whose chatter (a stale line in ~/.profile, a
+		// version manager's notice) lands on stderr. Merging the streams made
+		// that chatter part of the result text and pushed the command's real
+		// output past the footer's 80-char truncation window.
+		var stdout, stderr bytes.Buffer
+		c.Stdout = &stdout
+		c.Stderr = &stderr
+		err := c.Run()
 		if err != nil {
-			return actionDoneMsg{err: fmt.Errorf("%w: %s", err, string(out))}
+			diag := strings.TrimSpace(stderr.String())
+			if diag == "" {
+				diag = strings.TrimSpace(stdout.String())
+			}
+			if diag != "" {
+				return actionDoneMsg{err: fmt.Errorf("%w: %s", err, diag)}
+			}
+			return actionDoneMsg{err: err}
 		}
-		msg := strings.TrimSpace(string(out))
+		msg := strings.TrimSpace(stdout.String())
 		if msg == "" {
+			// Deliberately no stderr fallback here: on a machine whose login
+			// profile writes to stderr, the fallback would show that chatter
+			// for every silent command instead of the honest "custom ok".
 			msg = "custom ok"
 		}
 		return actionDoneMsg{msg: uiutil.Truncate(msg, 80)}

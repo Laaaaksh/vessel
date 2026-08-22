@@ -95,9 +95,12 @@ func (c *Client) RemoveImage(ctx context.Context, ids ...string) error {
 	return err
 }
 
-// PullImage pulls an image (blocking until complete).
+// PullImage pulls an image (blocking until complete). A pull is an image
+// transfer like save/load/push — and `container run` holds this same budget
+// precisely because it may pull a missing image first — so it runs under the
+// long transfer budget rather than the quick default.
 func (c *Client) PullImage(ctx context.Context, ref string) error {
-	_, err := c.run(ctx, "image", "pull", ref)
+	_, err := c.runWithTimeout(ctx, globalTimeout, "image", "pull", ref)
 	return err
 }
 
