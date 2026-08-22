@@ -31,6 +31,12 @@ condensed into user-facing terms. Format is based on
   6.0.0, third-party taps must be trusted before they can be installed from,
   so the documented flow now includes a one-time `brew trust laaaaksh/vessel`
   (verified end-to-end against Homebrew 6.0).
+- Image push refusals keep their recovery hint visible at any terminal size:
+  the hint used to ride at the tail of the long registry error string, so
+  footer truncation could erase it entirely, and the images detail pane's
+  permission notice overflowed the narrower frame the wide-list layout hands
+  it. The raw error is truncated instead, so the `container registry login`
+  command always stays on screen.
 
 ### Changed
 - Unknown command-line arguments print usage and exit with code 2 rather than
