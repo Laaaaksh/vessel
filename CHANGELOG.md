@@ -55,6 +55,9 @@ condensed into user-facing terms. Format is based on
   reporting.
 - Automated dependency updates via Dependabot (Go modules and GitHub Actions),
   and the CI workflow now runs with read-only token permissions.
+- Workflow hardening: superseded CI runs are cancelled automatically, release
+  runs queue instead of racing on a re-pushed tag, and every job fails fast on
+  a hang via an explicit timeout instead of the 6-hour runner default.
 - The README links to this changelog and CONTRIBUTING.md asks contributors to
   record user-facing changes under `Unreleased`, so version history stays
   discoverable and maintained.
