@@ -8,10 +8,19 @@ on:
 permissions:
   contents: write
 
+# A release run must never be cancelled mid-publish (assets/formula can end up
+# half-shipped), so overlapping runs queue instead: cancel-in-progress stays
+# unset. Distinct tags are distinct refs and never share a group anyway; the
+# guard covers the delete-and-re-push-same-tag race.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 jobs:
   release:
     name: GoReleaser
     runs-on: macos-latest
+    # Fail hung jobs fast instead of burning the runner default (360m).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
