@@ -2821,3 +2821,72 @@ func TestScheduleInspect_danglingImageRunsNoSubprocess(t *testing.T) {
 		t.Errorf("a dangling selection produced an inspect command: %T", load())
 	}
 }
+
+// configLoadNotice(nil) must stay empty so a healthy config load leaves New()
+// byte-for-byte identical to the pre-notice behavior.
+func TestConfigLoadNotice_emptyWhenLoaded(t *testing.T) {
+	if got := configLoadNotice(nil); got != "" {
+		t.Fatalf("configLoadNotice(nil) = %q, want empty", got)
+	}
+}
+
+// The notice leads with the error (the actionable part) and trails the config
+// path (so users can find the file); footer truncation cuts from the tail.
+func TestConfigLoadNotice_namesErrorAndPath(t *testing.T) {
+	got := configLoadNotice(errors.New("toml: line 1: expected value"))
+	if !strings.HasPrefix(got, "config: ") {
+		t.Fatalf("configLoadNotice = %q, want 'config: ' prefix", got)
+	}
+	if !strings.Contains(got, "toml: line 1: expected value") {
+		t.Fatalf("configLoadNotice = %q, want the error text", got)
+	}
+	if !strings.Contains(got, config.Path()) {
+		t.Fatalf("configLoadNotice = %q, want the path %s", got, config.Path())
+	}
+}
+
+func TestJoinNotices_bothSidesMayBeEmpty(t *testing.T) {
+	cases := []struct{ a, b, want string }{
+		{"", "", ""},
+		{"only-a", "", "only-a"},
+		{"", "only-b", "only-b"},
+		{"a", "b", "a; b"},
+	}
+	for _, c := range cases {
+		if got := joinNotices(c.a, c.b); got != c.want {
+			t.Errorf("joinNotices(%q, %q) = %q, want %q", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// A broken config can coexist with unusable custom bindings only when the
+// file partially decoded; the startup footer must carry both halves.
+func TestConfigErrorNoticeJoinsBindingNotice(t *testing.T) {
+	cfg := config.Config{CustomCommands: []config.CustomCommand{{
+		Name: "inspect", Key: testNoticeReservedKey, Command: testNoticeCommand,
+	}}}
+	m := newModel(cfg)
+	binding := m.status
+	if binding == "" {
+		t.Fatal("precondition failed: reserved-key binding produced no notice")
+	}
+
+	got := joinNotices(binding, configLoadNotice(errors.New("toml: bad duration")))
+	if !strings.Contains(got, binding) || !strings.Contains(got, "config: toml: bad duration") {
+		t.Fatalf("joined notice = %q, want both binding notice and config error", got)
+	}
+}
+
+// The config-error head must survive footer truncation at the smallest
+// supported frame, mirroring the ignored-binding notice's guarantee.
+func TestConfigErrorFooterHeadSurvivesSmallestFrame(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 60, 12
+	m.setStatus(configLoadNotice(errors.New("toml: line 2: expected value but found 'banana' instead")))
+
+	footer := ansi.Strip(m.footerView())
+	if !strings.Contains(footer, "config:") {
+		t.Fatalf("footer = %q, want the config-error head to survive truncation", footer)
+	}
+	assertOneRow(t, m, "config-error startup notice")
+}
