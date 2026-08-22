@@ -1,0 +1,22 @@
+[
+  {
+    "configuration" : {
+      "creationDate" : "2026-08-21T00:20:03Z",
+      "labels" : {
+        "com.apple.container.resource.role" : "builtin"
+      },
+      "mode" : "nat",
+      "name" : "default",
+      "options" : {
+
+      },
+      "plugin" : "container-network-vmnet"
+    },
+    "id" : "default",
+    "status" : {
+      "ipv4Gateway" : "192.168.64.1",
+      "ipv4Subnet" : "192.168.64.0\/24",
+      "ipv6Subnet" : "fd6c:c4d5:70c9:8abc::\/64"
+    }
+  }
+]

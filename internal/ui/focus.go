@@ -3,6 +3,7 @@ package ui
 // Focus is which pane receives navigation keys.
 type Focus int
 
+// Panes that can hold focus, in cycle order.
 const (
 	FocusSidebar Focus = iota
 	FocusList
@@ -23,6 +24,7 @@ func (f Focus) String() string {
 // LayoutMode controls browse layout proportions.
 type LayoutMode int
 
+// Available browse layout proportions.
 const (
 	LayoutNormal LayoutMode = iota
 	LayoutWideList
