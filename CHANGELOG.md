@@ -34,6 +34,8 @@ condensed into user-facing terms. Format is based on
 - Removed the parsed-but-never-applied `[theme]` block from
   `config.example.toml`.
 - Normalized developer home paths out of test fixtures and captured CLI output.
+- The README now shows a CI status badge so workflow health is visible at a
+  glance.
 - The release workflow pins GoReleaser to v2.17.1 (verified end-to-end with a
   local snapshot build of this tree) instead of floating to `latest`, so a
   future upstream release that drops the deprecated Homebrew tap support can
@@ -43,6 +45,9 @@ condensed into user-facing terms. Format is based on
 - Regression test pinning every README keybinding to a help-overlay row and vice
   versa (`internal/ui/readme_parity_test.go`), so keybinding documentation
   cannot drift again.
+- Regression test proving the dashboard shows a "terminal too small" hint below
+  its documented 60x12 minimum size instead of rendering broken layout
+  (verified live down to a 1x5 terminal).
 - Community health files: Code of Conduct, bug-report and feature-request issue
   forms, pull-request template, and SECURITY.md with private vulnerability
   reporting.
