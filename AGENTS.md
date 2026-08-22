@@ -121,6 +121,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   switching.
 - `version`/`commit`/`date` in `main.go` must stay package-level `var`s, not `const`s - the
   `-X main.version=...` linker flag goreleaser passes silently no-ops against a `const`.
+- Tagged releases carry curated notes, not goreleaser's raw commit list: release.yml's
+  "Generate release notes from CHANGELOG" step runs `scripts/release_notes.sh` and passes the
+  file via `--release-notes=`. The script extracts the tag's own `## [x.y.z]` section,
+  falls back to `[Unreleased]` when the version has no heading yet, and hard-fails when
+  neither has content so a tag can never publish empty notes. Headings match by prefix
+  (they carry ` - YYYY-MM-DD` suffixes; exact-line equality silently fell back to
+  Unreleased in testing), and link-reference lines at the CHANGELOG tail terminate a
+  section so they never leak into the oldest version's notes. goreleaser-action passes
+  args to the binary WITHOUT shell expansion, so `$RUNNER_TEMP` inside `args:` would stay
+  literal - the path travels through a step output (`steps.notes.outputs.path`) instead.
 - `brews:` must set `directory: Formula` (confirmed against installed v2.17.1's own
   `goreleaser jsonschema` output - `folder` isn't even a valid property on that version).
   Without it, goreleaser writes the generated formula to the tap repo's root instead of
