@@ -1,0 +1,103 @@
+[
+ {
+  "configuration": {
+   "capAdd": [],
+   "capDrop": [],
+   "creationDate": "2026-08-18T08:16:41Z",
+   "dns": {
+    "nameservers": [],
+    "options": [],
+    "searchDomains": []
+   },
+   "id": "p2-live-check",
+   "image": {
+    "descriptor": {
+     "digest": "sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
+     "mediaType": "application/vnd.oci.image.index.v1+json",
+     "size": 9218
+    },
+    "reference": "docker.io/library/alpine:latest"
+   },
+   "initProcess": {
+    "arguments": [
+     "300"
+    ],
+    "environment": [
+     "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "executable": "sleep",
+    "rlimits": [],
+    "supplementalGroups": [],
+    "terminal": false,
+    "user": {
+     "id": {
+      "gid": 0,
+      "uid": 0
+     }
+    },
+    "workingDirectory": "/"
+   },
+   "labels": {},
+   "mounts": [
+    {
+     "destination": "/data",
+     "options": [],
+     "source": "/Users/dev/Library/Application Support/com.apple.container/volumes/vessel-p2-probe/volume.img",
+     "type": {
+      "volume": {
+       "cache": {
+        "on": {}
+       },
+       "format": "ext4",
+       "name": "vessel-p2-probe",
+       "sync": {
+        "fsync": {}
+       }
+      }
+     }
+    }
+   ],
+   "networks": [
+    {
+     "network": "default",
+     "options": {
+      "hostname": "p2-live-check",
+      "mtu": 1280
+     }
+    }
+   ],
+   "platform": {
+    "architecture": "arm64",
+    "os": "linux"
+   },
+   "publishedPorts": [
+    {
+     "containerPort": 80,
+     "count": 1,
+     "hostAddress": "0.0.0.0",
+     "hostPort": 18080,
+     "proto": "tcp"
+    }
+   ],
+   "publishedSockets": [],
+   "readOnly": false,
+   "resources": {
+    "cpuOverhead": 1,
+    "cpus": 4,
+    "memoryInBytes": 1073741824
+   },
+   "rosetta": false,
+   "runtimeHandler": "container-runtime-linux",
+   "ssh": false,
+   "sysctls": {},
+   "useInit": false,
+   "virtualization": false
+  },
+  "id": "p2-live-check",
+  "status": {
+   "networks": [],
+   "startedDate": "2026-08-18T08:16:41Z",
+   "state": "stopped"
+  }
+ }
+]
