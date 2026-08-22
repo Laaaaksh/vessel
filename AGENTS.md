@@ -106,9 +106,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Workflow concurrency asymmetry is deliberate: `ci.yml` sets
   `cancel-in-progress: true` (CI publishes nothing; superseded macos runs are
   pure 10x-rate waste) while `release.yml` queues overlapping runs with no
-  cancel (a publish killed mid-flight can half-ship assets/formula). Both jobs
-  carry explicit `timeout-minutes` so a hang fails fast instead of hitting the
-  360-minute runner default. Keep both when editing the workflows.
+  cancel (a publish killed mid-flight can half-ship assets/formula). Every job
+  in both workflows carries an explicit `timeout-minutes` so a hang fails fast
+  instead of hitting the 360-minute runner default - including ci.yml's
+  `graph` job (the required `update-go_modules-graph` context on PR heads,
+  added on main after the Dependabot-only version was found to deadlock PR
+  merges). Keep both when editing the workflows.
 - `release.yml` pins goreleaser to an exact version (`v2.17.1`), not `latest`:
   goreleaser removes deprecated features at majors, so floating would silently
   cross the `brews:` removal cliff and fail tagging with zero repo changes.
