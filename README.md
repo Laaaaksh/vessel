@@ -66,7 +66,7 @@ Or download a binary from [GitHub Releases](https://github.com/Laaaaksh/vessel/r
 
 ```bash
 vessel
-vessel doctor   # check CLI, system status, config
+vessel doctor   # check CLI version, macOS, arch, system status, config
 ```
 
 ### Keybindings
@@ -149,7 +149,7 @@ Notable changes per release live in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) - all contributors must sign the CLA before their first PR is merged.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
