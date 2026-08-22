@@ -1,13 +1,28 @@
-# vessel
+<div align="center">
 
-A keyboard-driven terminal UI for Apple's native Mac containers.
+<img src="docs/assets/vessel-banner.svg" alt="vessel" width="640">
+
+**vessel** — why run many commands when few keys do the trick?
+
+A keyboard-driven terminal UI for [Apple's native Mac containers](https://github.com/apple/container)
+(the OCI-compatible containers introduced in macOS at WWDC 2025). Live lists, logs, shells,
+images, and volumes - one screen, zero daemons, no CLI flags to memorize.
+
+[![Star this repo](https://img.shields.io/github/stars/Laaaaksh/vessel?style=for-the-badge&logo=github&label=star%20this%20repo&color=yellow)](https://github.com/Laaaaksh/vessel/stargazers)
+[![Built for Apple container](https://img.shields.io/badge/built_for-Apple_Container-00ADD8?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/apple/container)
 
 [![CI](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml/badge.svg)](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Laaaaksh/vessel?color=green&display_name=tag)](https://github.com/Laaaaksh/vessel/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%E2%80%A2%20Apple%20silicon-000?logo=apple&logoColor=white)](#requirements)
+[![Homebrew](https://img.shields.io/badge/brew-Laaaaksh%2Fvessel-orange?logo=homebrew)](#install)
 
-```
-brew tap Laaaaksh/vessel
-brew install vessel
-```
+**[Install](#install) • [Usage](#usage) • [Keybindings](#keybindings) • [Configuration](#configuration) • [CLI matrix](docs/APPLE_CONTAINER_MATRIX.md) • [Changelog](CHANGELOG.md) • [Contributing](CONTRIBUTING.md) • [License](LICENSE)**
+
+**[Code of conduct](CODE_OF_CONDUCT.md) • [Contributing](CONTRIBUTING.md) • [License](LICENSE) • [Security](SECURITY.md)**
+
+</div>
 
 ## What it does
 
@@ -135,6 +150,16 @@ Notable changes per release live in [CHANGELOG.md](CHANGELOG.md).
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) - all contributors must sign the CLA before their first PR is merged.
+
+## Security
+
+Found a security issue? Please report it privately - see [SECURITY.md](SECURITY.md).
+
+## Star this repo
+
+If `vessel` makes managing containers on your Mac easier, [leave a star](https://github.com/Laaaaksh/vessel/stargazers) - it helps other people find it.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Laaaaksh/vessel&type=Date)](https://star-history.com/#Laaaaksh/vessel&Date)
 
 ## License
 
