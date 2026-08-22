@@ -8,10 +8,19 @@ on:
 permissions:
   contents: write
 
+# A release run must never be cancelled mid-publish (assets/formula can end up
+# half-shipped), so overlapping runs queue instead: cancel-in-progress stays
+# unset. Distinct tags are distinct refs and never share a group anyway; the
+# guard covers the delete-and-re-push-same-tag race.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 jobs:
   release:
     name: GoReleaser
     runs-on: macos-latest
+    # Fail hung jobs fast instead of burning the runner default (360m).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,12 +31,23 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Generate release notes from CHANGELOG
+        id: notes
+        # goreleaser-action passes args to the binary without shell expansion,
+        # so the notes path travels through a step output rather than $RUNNER_TEMP.
+        run: |
+          scripts/release_notes.sh "$RUNNER_TEMP/release-notes.md" "${GITHUB_REF_NAME#v}"
+          echo "path=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_OUTPUT"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
-          args: release --clean
+          # Pinned so tagged releases cannot be broken by a future upstream
+          # release that removes the deprecated `brews` support; bump this
+          # deliberately after a snapshot drill, not by floating.
+          version: v2.17.1
+          args: release --clean --release-notes=${{ steps.notes.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
