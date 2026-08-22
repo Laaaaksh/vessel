@@ -61,6 +61,8 @@ condensed into user-facing terms. Format is based on
   the code. Old config files carrying a `[theme]` table still load fine (the
   key is simply ignored).
 - Normalized developer home paths out of test fixtures and captured CLI output.
+- Dropped incorrect statements in README and CONTRIBUTING.md that contributing
+  requires signing a Contributor License Agreement; no CLA mechanism exists.
 - The README now shows a CI status badge so workflow health is visible at a
   glance.
 - The release workflow pins GoReleaser to v2.17.1 (verified end-to-end with a
@@ -69,6 +71,11 @@ condensed into user-facing terms. Format is based on
   no longer break tagging.
 
 ### Added
+- `vessel doctor` now verifies the machine against the documented requirements
+  before first run: it parses `container --version` and enforces the 1.2.x
+  floor, checks macOS version (26+ required; 15-25 prints a limited-support
+  note), and confirms an arm64 host, failing loudly on whichever requirement
+  is not met.
 - Regression test pinning every README keybinding to a help-overlay row and vice
   versa (`internal/ui/readme_parity_test.go`), so keybinding documentation
   cannot drift again.

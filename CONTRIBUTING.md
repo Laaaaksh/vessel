@@ -3,15 +3,6 @@
 Thank you for your interest in contributing. vessel is a keyboard-driven terminal UI for
 Apple's native Mac containers, open source under the MIT license.
 
-## Contributor License Agreement (CLA)
-
-Before your first pull request is merged, you must sign the Contributor License Agreement.
-The CLA bot will comment on your PR with instructions when you open one.
-
-The CLA grants the project maintainer the right to use your contribution under any license,
-including for future commercialization. This is standard practice for open-source projects
-that may be acquired or relicensed.
-
 ## Getting started
 
 ```bash
@@ -41,8 +32,7 @@ are no direct pushes to `main`.
 5. If your change is user-facing (a feature, fix, or behavior change), add one
    bullet under the `Unreleased` heading in [CHANGELOG.md](CHANGELOG.md).
 6. Push the branch to your fork.
-7. Open a pull request against `main` here. The CLA bot will prompt you to sign the CLA
-   if you haven't already.
+7. Open a pull request against `main` here.
 
 A PR can merge only when every required check passes (`Test`, `Lint`, and
 `update-go_modules-graph`) and all conversation threads are resolved.

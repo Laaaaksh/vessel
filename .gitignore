@@ -17,3 +17,6 @@ vendor/
 
 # Config (local dev)
 .env
+
+# Agent run state
+.gnhf/
