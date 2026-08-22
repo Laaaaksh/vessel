@@ -1886,7 +1886,7 @@ func (m Model) buildActions() []actionItem {
 	for _, cc := range m.cfg.CustomCommands {
 		cc := cc
 		items = append(items, actionItem{
-			label: "custom: " + cc.Name,
+			label: customHintLabel(cc.Name),
 			run: func(m Model) (Model, tea.Cmd) {
 				return m.runCustom(cc.Command)
 			},
@@ -1956,7 +1956,7 @@ func (m Model) runCustom(tmpl string) (Model, tea.Cmd) {
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.ID}}", id)
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.Name}}", name)
 	cmdStr = strings.ReplaceAll(cmdStr, "{{.Image}}", image)
-	m.setStatus("custom: " + cmdStr)
+	m.setStatus(customLabelPrefix + cmdStr)
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -2057,20 +2057,10 @@ func (m Model) footerLine() (lipgloss.Style, string) {
 	if n == 0 {
 		prefix = "0/0  "
 	}
-	var keys string
-	switch m.activeView {
-	case ViewImages:
-		keys = "[p] pull  [c] run  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
-	case ViewVolumes:
-		keys = "[c] create  [d] delete  [P] prune  [/] filter  [x] actions  [y] yank"
-	case ViewNetworks:
-		keys = "[/] filter  [y] yank"
-	case ViewSystem:
-		keys = "[j/k] navigate  [y] yank  (read-only)"
-	default:
-		keys = "[enter] shell  [L] logs  [s/u/r] lifecycle  [c] run  [e] exec  [d] remove  [/] filter  [x] actions  [y] yank"
-	}
-	return m.st.footerHelp, prefix + keys
+	// The hints resolve through the same custom-command shadowing help does,
+	// so a key a custom command has taken stops advertising its built-in here.
+	hints := footerHints(m.activeView, m.keys, m.cfg.CustomCommands)
+	return m.st.footerHelp, prefix + hints
 }
 
 func (m Model) cursorInfo() (int, int) {

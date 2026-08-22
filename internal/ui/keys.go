@@ -95,11 +95,19 @@ func Match(k string, candidates ...string) bool {
 	return false
 }
 
+// navAliasDown/navAliasUp are the vim-style aliases list navigation accepts
+// beside the arrow keys. They are reserved, so no hint that cites them can
+// ever be shadowed by a custom command.
+const (
+	navAliasDown = "j"
+	navAliasUp   = "k"
+)
+
 // NavDown matches down / j.
-func (k KeyMap) NavDown(s string) bool { return Match(s, k.Down, "j") }
+func (k KeyMap) NavDown(s string) bool { return Match(s, k.Down, navAliasDown) }
 
 // NavUp matches up / k.
-func (k KeyMap) NavUp(s string) bool { return Match(s, k.Up, "k") }
+func (k KeyMap) NavUp(s string) bool { return Match(s, k.Up, navAliasUp) }
 
 // Reserved reports whether s is a navigation, filtering, layout or global
 // binding. Update() dispatches those before user-configured custom command
@@ -440,6 +448,32 @@ func customCommandFor(custom []config.CustomCommand, keys KeyMap, k string) stri
 	return ""
 }
 
+// activeCustom is one configured custom command dispatch actually honors:
+// its key fires, and this entry is the one that owns it.
+type activeCustom struct {
+	key  string
+	name string
+}
+
+// activeCustomCommands resolves which custom commands dispatch answers onto
+// which keys: reachable keys only, first configuration winning duplicates.
+// Help and the resting footer both derive their view of taken keys from this
+// single pass through the same predicates customKey dispatch uses, so no
+// surface can advertise a key a custom command has taken over.
+func activeCustomCommands(custom []config.CustomCommand, keys KeyMap) []activeCustom {
+	var out []activeCustom
+	seen := map[string]bool{}
+	for _, cc := range custom {
+		k := customKey(cc, keys)
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, activeCustom{key: k, name: cc.Name})
+	}
+	return out
+}
+
 // logViewKeys maps the keys the log view handles itself onto what they do
 // there. handleKey serves the log view before it ever reaches a custom command
 // key, so these keep working after a custom command takes them over in browse
@@ -457,24 +491,16 @@ func logViewKeys(k KeyMap) map[string]string {
 // keys it lists and cannot be split when only some of them are shadowed. A row
 // for a key the log view still answers keeps its line, restated for that view.
 func withCustomBindings(base []helpRow, keys KeyMap, custom []config.CustomCommand) []helpRow {
-	names := map[string]string{}
-	var order []string
-	for _, cc := range custom {
-		k := customKey(cc, keys)
-		if k == "" {
-			continue
-		}
-		if _, dup := names[k]; dup {
-			continue
-		}
-		names[k] = cc.Name
-		order = append(order, k)
-	}
-	if len(order) == 0 {
+	active := activeCustomCommands(custom, keys)
+	if len(active) == 0 {
 		return base
 	}
+	names := make(map[string]string, len(active))
+	for _, ac := range active {
+		names[ac.key] = ac.name
+	}
 	live := logViewKeys(keys)
-	out := make([]helpRow, 0, len(base)+len(order))
+	out := make([]helpRow, 0, len(base)+len(active))
 	for _, b := range base {
 		tokens := helpKeyTokens(b.key)
 		shadowed := ""
@@ -491,12 +517,8 @@ func withCustomBindings(base []helpRow, keys KeyMap, custom []config.CustomComma
 			out = append(out, helpRow{b.key, live[shadowed]})
 		}
 	}
-	for _, k := range order {
-		desc := "custom command"
-		if names[k] != "" {
-			desc = "custom: " + names[k]
-		}
-		out = append(out, helpRow{k, desc})
+	for _, ac := range active {
+		out = append(out, helpRow{ac.key, customHintLabel(ac.name)})
 	}
 	return out
 }
@@ -511,4 +533,162 @@ func helpKeyTokens(s string) []string {
 		out = append(out, strings.Fields(part)...)
 	}
 	return out
+}
+
+// Custom-command naming convention shared by the help rows, the action-menu
+// entries and the footer hints: a named command reads "custom: name", and an
+// unnamed one still says what it is.
+const (
+	customLabelPrefix   = "custom: "
+	customLabelFallback = "custom command"
+)
+
+// customHintLabel names a custom command for display under its key.
+func customHintLabel(name string) string {
+	if name == "" {
+		return customLabelFallback
+	}
+	return customLabelPrefix + name
+}
+
+// Resting-footer rendering pieces. Two spaces between hints is the grouping
+// the line has always shown; the brackets make each key scannable at a glance.
+const (
+	footerHintSep    = "  "
+	footerHintSpace  = " "
+	footerKeyOpen    = "["
+	footerKeyClose   = "]"
+	footerKeyGroupBy = "/"
+)
+
+// Resting-footer labels. Deliberately shorter than their help-row cousins:
+// the footer shares one terminal line with the cursor position, so every hint
+// must stay readable even after truncation at the smallest supported width.
+const (
+	footerLabelShell     = "shell"
+	footerLabelLogs      = "logs"
+	footerLabelLifecycle = "lifecycle"
+	footerLabelRun       = "run"
+	footerLabelExec      = "exec"
+	footerLabelRemove    = "remove"
+	footerLabelDelete    = "delete"
+	footerLabelPrune     = "prune"
+	footerLabelCreate    = "create"
+	footerLabelPull      = "pull"
+	footerLabelFilter    = "filter"
+	footerLabelActions   = "actions"
+	footerLabelYank      = "yank"
+	footerLabelNavigate  = "navigate"
+	footerNoteReadOnly   = "(read-only)"
+)
+
+// footerHint is one piece of a view's resting footer line: the keys sharing a
+// label, or plain text when keys is empty (the System view's read-only note).
+type footerHint struct {
+	keys  []string
+	label string
+}
+
+// render draws one hint as the footer shows it: a bracketed key group followed
+// by its label ("[s/u/r] lifecycle"), or the bare text for a key-less note.
+func (h footerHint) render() string {
+	if len(h.keys) == 0 {
+		return h.label
+	}
+	return footerKeyOpen + strings.Join(h.keys, footerKeyGroupBy) + footerKeyClose +
+		footerHintSpace + h.label
+}
+
+// footerViewHints lists one view's resting hints in display order, keys taken
+// straight from the KeyMap so the line mirrors whatever dispatch answers.
+func footerViewHints(view View, keys KeyMap) []footerHint {
+	common := []footerHint{
+		{[]string{keys.Filter}, footerLabelFilter},
+		{[]string{keys.Actions}, footerLabelActions},
+		{[]string{keys.Yank}, footerLabelYank},
+	}
+	switch view {
+	case ViewImages:
+		return append([]footerHint{
+			{[]string{keys.Pull}, footerLabelPull},
+			{[]string{keys.Create}, footerLabelRun},
+			{[]string{keys.Remove}, footerLabelDelete},
+			{[]string{keys.Prune}, footerLabelPrune},
+		}, common...)
+	case ViewVolumes:
+		return append([]footerHint{
+			{[]string{keys.Create}, footerLabelCreate},
+			{[]string{keys.Remove}, footerLabelDelete},
+			{[]string{keys.Prune}, footerLabelPrune},
+		}, common...)
+	case ViewNetworks:
+		// Read-only by scope: no action-menu hint, unlike the other views.
+		return []footerHint{
+			{[]string{keys.Filter}, footerLabelFilter},
+			{[]string{keys.Yank}, footerLabelYank},
+		}
+	case ViewSystem:
+		// Navigation aliases are reserved, so this group can never be cut.
+		return []footerHint{
+			{[]string{navAliasDown, navAliasUp}, footerLabelNavigate},
+			{[]string{keys.Yank}, footerLabelYank},
+			{nil, footerNoteReadOnly},
+		}
+	default:
+		return append([]footerHint{
+			{[]string{keys.Enter}, footerLabelShell},
+			{[]string{keys.Logs}, footerLabelLogs},
+			{[]string{keys.Stop, keys.Start, keys.Restart}, footerLabelLifecycle},
+			{[]string{keys.Create}, footerLabelRun},
+			{[]string{keys.Exec}, footerLabelExec},
+			{[]string{keys.Remove}, footerLabelRemove},
+		}, common...)
+	}
+}
+
+// footerHints renders one view's resting hint line from the resolved binding
+// view, so the footer can never promise what a key no longer does: a key an
+// active custom command has claimed stops advertising its built-in label and
+// hands that slot to the owning command instead.
+func footerHints(view View, keys KeyMap, custom []config.CustomCommand) string {
+	taken := make(map[string]string)
+	for _, ac := range activeCustomCommands(custom, keys) {
+		taken[ac.key] = customHintLabel(ac.name)
+	}
+	var parts []string
+	for _, h := range footerViewHints(view, keys) {
+		switch {
+		case len(h.keys) == 0, len(taken) == 0:
+			parts = append(parts, h.render())
+		default:
+			parts = appendSplitHint(parts, h, taken)
+		}
+	}
+	return strings.Join(parts, footerHintSep)
+}
+
+// appendSplitHint emits one hint whose key group an active custom command has
+// cut into: surviving keys keep the built-in label as a possibly smaller group
+// ("[u/r] lifecycle"), and each claimed key passes its slot, in place, to the
+// command now firing on it.
+func appendSplitHint(parts []string, h footerHint, taken map[string]string) []string {
+	live := make([]string, 0, len(h.keys))
+	flush := func() {
+		if len(live) == 0 {
+			return
+		}
+		parts = append(parts, footerHint{keys: live, label: h.label}.render())
+		live = nil
+	}
+	for _, k := range h.keys {
+		label, claimed := taken[k]
+		if !claimed {
+			live = append(live, k)
+			continue
+		}
+		flush()
+		parts = append(parts, footerHint{keys: []string{k}, label: label}.render())
+	}
+	flush()
+	return parts
 }
