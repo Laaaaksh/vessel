@@ -27,6 +27,10 @@ condensed into user-facing terms. Format is based on
   truncation window. Success now shows the command's stdout alone (empty
   output still reports "custom ok"); failures carry the exit status plus the
   command's stderr diagnostics.
+- The resting footer no longer advertises a built-in action on a key a custom
+  command has taken over: hints are derived from the same binding resolution
+  the help screen uses, so help and footer agree, and the owning command
+  shows in place of the built-in it replaced.
 - The README install instructions work on current Homebrew: since Homebrew
   6.0.0, third-party taps must be trusted before they can be installed from,
   so the documented flow now includes a one-time `brew trust laaaaksh/vessel`
