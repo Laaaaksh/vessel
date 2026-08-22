@@ -331,12 +331,14 @@ func TestExec_runsUnderOneShotExecBudget(t *testing.T) {
 	}
 }
 
-func TestImagePull_keepsQuickDefaultBudget(t *testing.T) {
+func TestImagePull_runsUnderTransferBudget(t *testing.T) {
 	c := slowClient(t)
 	ctx, cancel := scenarioCtx()
 	defer cancel()
 
-	assertKilledByBudget(t, c.PullImage(ctx, "alpine:latest"))
+	if err := c.PullImage(ctx, "alpine:latest"); err != nil {
+		t.Fatalf("a pull slower than the quick default must survive under the transfer budget: %v", err)
+	}
 	want := []string{"container image pull alpine:latest"}
 	if got := recordedCalls(c); len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("command log = %v, want exactly %v", got, want)

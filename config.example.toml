@@ -7,12 +7,6 @@ shell = "/bin/sh"
 # Ask before stopping a container (the `s` key and the action menu's Stop entry).
 confirm_stop = false
 
-# Optional theme overrides (hex). Leave empty for defaults.
-# [theme]
-# selected_bg = "#2d1b69"
-# selected_fg = "#c4b5fd"
-# accent = "#a78bfa"
-
 # Custom commands appear in the action menu (x).
 # Templates: {{.ID}} {{.Name}} {{.Image}}
 # key is optional: a single character ("z"), a named key ("space", "enter",
