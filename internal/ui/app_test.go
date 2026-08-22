@@ -1089,6 +1089,80 @@ func TestFooterView_servicesDownStaysOneLine(t *testing.T) {
 	}
 }
 
+// hintMsgSliverCells is how many cells of the raw error must stay visible
+// beside a whole hint before a frame counts as narrow.
+const hintMsgSliverCells = 10
+
+// pushRefusedForPermission drives a real 403-refused push through its confirm
+// flow, so footer assertions run against the exact HintedError the backend
+// produced rather than a hand-built stand-in.
+func pushRefusedForPermission(t *testing.T) Model {
+	t.Helper()
+	t.Setenv("FAKE_CONTAINER_FAIL_PUSH", "forbidden")
+	m := beginPush(t, imagesModelWithItems(t, []backend.Image{
+		{ID: "sha256:abc", Repository: "myorg/app", Tag: "v1"},
+	}))
+	next, cmd := m.handleKey(keyMsg("y"))
+	done := cmd().(actionDoneMsg)
+	if done.err == nil {
+		t.Fatal("expected the push to be refused")
+	}
+	out, _ := next.(Model).Update(done)
+	return out.(Model)
+}
+
+func TestFooterView_pushHintSurvivesLongErrorAcrossLayouts(t *testing.T) {
+	// The fake registry's stderr alone dwarfs any row here, and the permission
+	// hint rides behind it. The frame is sized from the hint itself so the
+	// scenario keeps testing the budget split even if the wording changes.
+	for _, layout := range []LayoutMode{LayoutNormal, LayoutWideList} {
+		m := pushRefusedForPermission(t)
+		_, hint := footerErrorParts(m.lastErr)
+		m.layout = layout
+		m.width = lipgloss.Width(footerErrorPrefix) + lipgloss.Width(hint) + hintMsgSliverCells
+		m.height = 30
+		out := ansi.Strip(m.footerView())
+		if got := strings.Count(out, "\n") + 1; got != 1 {
+			t.Fatalf("layout %v: footer must stay one row, got %d: %q", layout, got, out)
+		}
+		if w := lipgloss.Width(out); w > m.width {
+			t.Fatalf("layout %v: footer rendered %d cells on a %d-cell row", layout, w, m.width)
+		}
+		if !strings.Contains(squash(out), squash(hint)) {
+			t.Fatalf("layout %v: the whole hint must survive a long raw error, footer=%q", layout, out)
+		}
+		if !strings.Contains(out, "…") {
+			t.Fatalf("layout %v: the raw error should be truncated beside the hint, footer=%q", layout, out)
+		}
+	}
+}
+
+func TestFooterView_pushHintKeepsLoginCommandAtNarrowFrames(t *testing.T) {
+	// Below prefix plus hint there is room for neither diagnosis nor
+	// instruction in full; the cut must take the hint's head so the command it
+	// exists to hand over still renders at the smallest supported frame.
+	for _, layout := range []LayoutMode{LayoutNormal, LayoutWideList} {
+		for _, size := range []struct{ w, h int }{{60, 12}, {80, 24}} {
+			m := pushRefusedForPermission(t)
+			m.layout = layout
+			m.width, m.height = size.w, size.h
+			out := ansi.Strip(m.footerView())
+			if got := strings.Count(out, "\n") + 1; got != 1 {
+				t.Fatalf("layout %v at %dx%d: footer must stay one row, got %d: %q", layout, size.w, size.h, got, out)
+			}
+			if w := lipgloss.Width(strings.TrimRight(out, " ")); w > size.w {
+				t.Fatalf("layout %v at %dx%d: footer rendered %d cells", layout, size.w, size.h, w)
+			}
+			if !strings.HasPrefix(out, footerErrorPrefix) {
+				t.Fatalf("layout %v at %dx%d: the cut row should still read as an error, got %q", layout, size.w, size.h, out)
+			}
+			if !strings.Contains(squash(out), squash("`container registry login`")) {
+				t.Fatalf("layout %v at %dx%d: the login command must survive, footer=%q", layout, size.w, size.h, out)
+			}
+		}
+	}
+}
+
 func TestConfirmPrune_keepsGlobalBudgetAndReportsProgress(t *testing.T) {
 	if _, _, timeout := pendingAction(pruneImages); timeout != globalTimeout {
 		t.Fatalf("prune must keep the global budget, got %v want %v", timeout, globalTimeout)
@@ -2529,8 +2603,9 @@ func TestImagesDetail_noticeNeverGrowsThePaneBeyondItsBudget(t *testing.T) {
 		SetNotice("alpine:latest", backend.PushAuthNotice)
 	// The geometry mainPanels hands the detail pane on the smallest terminal
 	// View() still renders (60x12) — 18x4 once the command log is open, 18x8
-	// without it — and on 80x24 with the command log open.
-	for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
+	// without it, and 10-wide in both cases under LayoutWideList — and on
+	// 80x24 with the command log open.
+	for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}, {10, 4}, {10, 8}} {
 		rendered := ansi.Strip(panel.DetailView(size.w, size.h))
 		rows := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 		if len(rows) > size.h {
@@ -2552,11 +2627,12 @@ func TestImagesDetail_noticeSurvivesTheSmallestSupportedPane(t *testing.T) {
 	}}
 	// Both refusals are held to the same envelope: 18x4 is what mainPanels hands
 	// the detail pane at 60x12 — the smallest frame View() still renders — with
-	// the command log toggled on.
+	// the command log toggled on. 10x8 is the same frame under LayoutWideList,
+	// where the narrower pane wraps the notice harder but must not clip it.
 	for _, notice := range []string{backend.PushAuthNotice, backend.PushPermissionNotice} {
 		panel := New().imgPanel.SetItems(items).
 			SetNotice(backend.FormatRef(items[0]), notice)
-		for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}} {
+		for _, size := range []struct{ w, h int }{{18, 4}, {18, 8}, {14, 16}, {40, 20}, {10, 8}} {
 			detail := squash(ansi.Strip(panel.DetailView(size.w, size.h)))
 			if !strings.Contains(detail, squash(notice)) {
 				t.Errorf("detail pane %dx%d truncates %q: %q", size.w, size.h, notice, detail)

@@ -392,7 +392,8 @@ func (m Model) ListView(width, height int) string {
 // DetailView renders image details. Height is a floor for lipgloss, never a
 // cap, so the pane is capped explicitly: anything longer would grow the body row
 // and push the header off the alt-screen. The notice leads the pane so that when
-// the cap bites — 18x4 at the smallest supported frame — it is the reference and
+// the cap bites — 18x4 in the normal layout, 10-wide under LayoutWideList,
+// both at the smallest supported frame — it is the reference and
 // the static fields that get cut, not the instruction the user has to act on. It
 // shows only on the image it was recorded against, so moving the cursor hides it
 // and moving back brings it into view again.

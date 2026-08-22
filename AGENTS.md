@@ -72,6 +72,18 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   at the smallest supported frame; the constant comments in
   `internal/backend/images.go` own that measurement, so check them before
   rewording a notice).
+- A verb refusal's hint travels beside its error, not inside it:
+  `PushImage` returns `*backend.HintedError` (Err + Hint, `Unwrap` intact so
+  classification still works), and `footerErrorParts` (`internal/ui/app.go`)
+  splits it so the footer truncates only the message and appends the whole
+  hint. When prefix plus hint alone overflow the row (prefix plus the
+  permission hint need ~130 cells), the hint is cut from its HEAD via
+  `uiutil.TruncateTail` — its tail carries the command to run, and a
+  right-cut would drop exactly that.
+  Never fold a new hint back into an error string: baked tail text is what
+  truncation eats first. LayoutWideList hands `DetailView` a 10-wide pane at
+  60x12 where normal layout hands 18; the notice geometry at both widths is
+  pinned by the `{10, …}` sizes in `TestImagesDetail_notice*` (`app_test.go`).
 - On the installed 1.2.2 build (services running) `image save/load/tag/push` are
   core subcommands and `image pull` works live; honour the plugin gate only when
   a probe says so. `docs/APPLE_CONTAINER_MATRIX.md` records earlier probe results.
