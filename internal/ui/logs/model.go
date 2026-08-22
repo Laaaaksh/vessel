@@ -3,6 +3,7 @@ package logs
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -103,13 +104,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.jumpMatch(1)
 			}
 		case "backspace":
-			if len(m.query) > 0 {
-				m.query = m.query[:len(m.query)-1]
+			if m.query != "" {
+				_, size := utf8.DecodeLastRuneInString(m.query)
+				m.query = m.query[:len(m.query)-size]
 			}
 		default:
-			if len(k) == 1 {
-				m.query += k
+			// Bubble Tea reports a space press as "space", and Key.String()
+			// is byte-lengthed, so accept one full rune of text either way.
+			if k == "space" {
+				k = " "
+			} else if utf8.RuneCountInString(k) != 1 {
+				return m, nil
 			}
+			m.query += k
 		}
 		return m, nil
 	}

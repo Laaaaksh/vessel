@@ -6,10 +6,22 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+# Superseded runs (new commit pushed to the same branch/PR) are pure waste on
+# macos runners, which bill at 10x the Linux rate; cancelling them early keeps
+# the queue free. CI publishes nothing, so cancellation is always safe here.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test
     runs-on: macos-latest
+    # Fail hung jobs fast instead of burning the runner default (360m).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +48,7 @@ jobs:
   lint:
     name: Lint
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -56,6 +69,7 @@ jobs:
     # that status on PR heads and verifies the module graph is consistent.
     name: update-go_modules-graph
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
