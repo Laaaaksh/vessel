@@ -14,6 +14,9 @@ import (
 // single separating space.
 const kvLabelWidth = 9
 
+// ellipsis marks a cut in one cell, matching what ansi.Truncate appends.
+const ellipsis = "…"
+
 // KV renders a dim "key:" label followed by its value.
 func KV(key, val string) string {
 	k := lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280")).Width(kvLabelWidth).Render(key + ":")
@@ -60,7 +63,35 @@ func TruncateCells(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	return ansi.Truncate(s, w, "…")
+	return ansi.Truncate(s, w, ellipsis)
+}
+
+// TruncateTail keeps the last w terminal cells of s, leading with an ellipsis
+// when cut — the mirror of TruncateCells. A hint whose tail carries the
+// actionable command must lose its diagnosis, not its instruction, when the
+// surface holding it is narrower than the whole text.
+func TruncateTail(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= w {
+		return s
+	}
+	budget := w - ansi.StringWidth(ellipsis)
+	runes := []rune(s)
+	// Widths grow monotonically as the kept tail lengthens, so the first
+	// overflow marks one past the longest tail that fits beside the ellipsis.
+	kept := 0
+	for keep := 1; keep <= len(runes); keep++ {
+		if ansi.StringWidth(string(runes[len(runes)-keep:])) > budget {
+			break
+		}
+		kept = keep
+	}
+	if kept == 0 {
+		return ellipsis
+	}
+	return ellipsis + string(runes[len(runes)-kept:])
 }
 
 // PadCells truncates s to w terminal cells and left-aligns it in a field of

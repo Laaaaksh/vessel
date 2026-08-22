@@ -180,12 +180,27 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 	_, err := c.runWithTimeout(ctx, globalTimeout, "image", "push", ref)
 	switch pushDenialOf(err) {
 	case denialCredentials:
-		return fmt.Errorf("%w%s", err, pushAuthHint)
+		return &HintedError{Err: err, Hint: pushAuthHint}
 	case denialPermission:
-		return fmt.Errorf("%w%s", err, pushPermissionHint)
+		return &HintedError{Err: err, Hint: pushPermissionHint}
 	}
 	return err
 }
+
+// HintedError carries a refused verb's hint beside its raw failure instead of
+// baked into one string. The raw CLI error alone is longer than any footer
+// row, so a hint appended at its tail could never survive truncation; keeping
+// the two apart lets the footer budget them separately - truncate the error,
+// reserve room for the whole hint - while Error still reads as one message for
+// logs and callers that only print.
+type HintedError struct {
+	Err  error
+	Hint string
+}
+
+func (e *HintedError) Error() string { return e.Err.Error() + e.Hint }
+
+func (e *HintedError) Unwrap() error { return e.Err }
 
 // PushAuthNotice and PushPermissionNotice are what the images detail pane shows
 // after a refused push. Container registry login is intentionally out of
@@ -195,7 +210,10 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 // PushPermissionNotice already wraps to exactly four rows there, saturating that
 // budget with no slack: it leads the pane, so it renders in full today, but any
 // reword that makes it longer is clipped rather than merely crowding the fields
-// below it. Measure a reword against that geometry, not against the terminal.
+// below it. LayoutWideList hands the same 60x12 terminal a 10-column pane,
+// where the notice wraps harder and needs the taller 10x8 frame to survive.
+// Measure a reword against both geometries, not against the terminal;
+// TestImagesDetail_notice* pins them.
 const (
 	PushAuthNotice = "push rejected — run `container registry login`"
 	// A 403 does not on its own establish that the session holds valid,
@@ -207,8 +225,9 @@ const (
 	PushPermissionNotice = "push forbidden — may lack write access or need login"
 )
 
-// The fuller instructions appended to the error itself, which the footer
-// renders. Each stays on one line because the footer budgets exactly one row.
+// The fuller instructions carried beside a refused push's error as a
+// HintedError, which the footer renders next to the truncated message. Each
+// stays on one line because the footer budgets exactly one row.
 const (
 	pushAuthHint       = " — registry rejected these credentials; run `container registry login`, then retry"
 	pushPermissionHint = " — registry refused the push: this account may lack write access, or you may need to log in with `container registry login`"
