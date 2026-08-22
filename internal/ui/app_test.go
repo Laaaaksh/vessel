@@ -679,6 +679,65 @@ func TestCustomCommandConfiguredKeyOverridesDefault(t *testing.T) {
 	}
 }
 
+// isolatedProfileHome points $HOME at a temp dir whose login-shell profile
+// writes noise to stderr, reproducing machines where ~/.profile chatter (a
+// stale line, a version manager's notice) would otherwise contaminate every
+// custom command's displayed output. t.Setenv keeps the override test-local.
+func isolatedProfileHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	prof := filepath.Join(home, ".bash_profile")
+	noisy := "#!/bin/bash\necho profile-noise >&2\n"
+	if err := os.WriteFile(prof, []byte(noisy), 0o644); err != nil {
+		t.Fatalf("write .bash_profile: %v", err)
+	}
+	t.Setenv("HOME", home)
+}
+
+func TestRunCustom_profileNoiseDoesNotHideStdout(t *testing.T) {
+	isolatedProfileHome(t)
+	m := newTestModel()
+	_, cmd := m.runCustom("printf vessel-custom-stdout")
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("runCustom returned %T, want actionDoneMsg", done)
+	}
+	if done.msg != "vessel-custom-stdout" {
+		t.Fatalf("custom output must be the command's stdout alone, got %q", done.msg)
+	}
+}
+
+func TestRunCustom_errorCarriesStderrDiagnostics(t *testing.T) {
+	isolatedProfileHome(t)
+	m := newTestModel()
+	_, cmd := m.runCustom("echo boom-diag >&2; exit 7")
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("runCustom returned %T, want actionDoneMsg", done)
+	}
+	if done.err == nil {
+		t.Fatal("failing custom command must produce an error")
+	}
+	for _, want := range []string{"exit status 7", "boom-diag"} {
+		if !strings.Contains(done.err.Error(), want) {
+			t.Fatalf("error must carry %q, got %q", want, done.err.Error())
+		}
+	}
+}
+
+func TestRunCustom_silentSuccessReportsCustomOk(t *testing.T) {
+	isolatedProfileHome(t)
+	m := newTestModel()
+	_, cmd := m.runCustom("true")
+	done, ok := cmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("runCustom returned %T, want actionDoneMsg", done)
+	}
+	if done.msg != "custom ok" {
+		t.Fatalf("silent success must report custom ok, got %q", done.msg)
+	}
+}
+
 func TestFooterView_servicesDownHint(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 100, 30
