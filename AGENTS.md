@@ -76,9 +76,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `PushImage` returns `*backend.HintedError` (Err + Hint, `Unwrap` intact so
   classification still works), and `footerErrorParts` (`internal/ui/app.go`)
   splits it so the footer truncates only the message and appends the whole
-  hint. When prefix plus hint alone overflow the row (the permission hint needs
-  ~130 cells), the hint is cut from its HEAD via `uiutil.TruncateTail` — its
-  tail carries the command to run, and a right-cut would drop exactly that.
+  hint. When prefix plus hint alone overflow the row (prefix plus the
+  permission hint need ~130 cells), the hint is cut from its HEAD via
+  `uiutil.TruncateTail` — its tail carries the command to run, and a
+  right-cut would drop exactly that.
   Never fold a new hint back into an error string: baked tail text is what
   truncation eats first. LayoutWideList hands `DetailView` a 10-wide pane at
   60x12 where normal layout hands 18; the notice geometry at both widths is
