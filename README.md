@@ -149,7 +149,7 @@ Notable changes per release live in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) - all contributors must sign the CLA before their first PR is merged.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
