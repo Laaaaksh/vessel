@@ -180,12 +180,27 @@ func (c *Client) PushImage(ctx context.Context, ref string) error {
 	_, err := c.runWithTimeout(ctx, globalTimeout, "image", "push", ref)
 	switch pushDenialOf(err) {
 	case denialCredentials:
-		return fmt.Errorf("%w%s", err, pushAuthHint)
+		return &HintedError{Err: err, Hint: pushAuthHint}
 	case denialPermission:
-		return fmt.Errorf("%w%s", err, pushPermissionHint)
+		return &HintedError{Err: err, Hint: pushPermissionHint}
 	}
 	return err
 }
+
+// HintedError carries a refused verb's hint beside its raw failure instead of
+// baked into one string. The raw CLI error alone is longer than any footer
+// row, so a hint appended at its tail could never survive truncation; keeping
+// the two apart lets the footer budget them separately - truncate the error,
+// reserve room for the whole hint - while Error still reads as one message for
+// logs and callers that only print.
+type HintedError struct {
+	Err  error
+	Hint string
+}
+
+func (e *HintedError) Error() string { return e.Err.Error() + e.Hint }
+
+func (e *HintedError) Unwrap() error { return e.Err }
 
 // PushAuthNotice and PushPermissionNotice are what the images detail pane shows
 // after a refused push. Container registry login is intentionally out of
