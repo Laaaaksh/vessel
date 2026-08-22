@@ -66,7 +66,7 @@ Or download a binary from [GitHub Releases](https://github.com/Laaaaksh/vessel/r
 
 ```bash
 vessel
-vessel doctor   # check CLI, system status, config
+vessel doctor   # check CLI version, macOS, arch, system status, config
 ```
 
 ### Keybindings

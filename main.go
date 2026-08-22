@@ -26,7 +26,7 @@ const usage = `usage: vessel [command]
 
 commands:
   vessel              start the dashboard
-  vessel doctor       check CLI, system status, config
+  vessel doctor       check CLI version, macOS, arch, system status, config
   vessel version      print version information
   vessel help         show this message`
 
