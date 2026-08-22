@@ -37,6 +37,41 @@ func TestPad(t *testing.T) {
 	}
 }
 
+func TestTruncateTail_keepsTheTailAndMarksTheHead(t *testing.T) {
+	got := TruncateTail("registry refused the push: run `container registry login`", 31)
+	if want := "…run `container registry login`"; got != want {
+		t.Errorf("TruncateTail = %q, want %q", got, want)
+	}
+	if w := lipgloss.Width(got); w > 31 {
+		t.Errorf("TruncateTail rendered %d cells, must stay within the budget", w)
+	}
+}
+
+func TestTruncateTail_leavesAFittingStringAlone(t *testing.T) {
+	for _, tc := range []struct {
+		s string
+		w int
+	}{{"short hint", 30}, {"exact", 5}} {
+		if got := TruncateTail(tc.s, tc.w); got != tc.s {
+			t.Errorf("TruncateTail(%q, %d) = %q, want it unchanged", tc.s, tc.w, got)
+		}
+	}
+}
+
+func TestTruncateTail_yieldsEllipsisWhenNothingElseFits(t *testing.T) {
+	if got := TruncateTail("registry refused the push", 1); got != "…" {
+		t.Errorf("TruncateTail = %q, want just the ellipsis", got)
+	}
+}
+
+func TestTruncateTail_emptyForANonPositiveBudget(t *testing.T) {
+	for _, budget := range []int{0, -3} {
+		if got := TruncateTail("hint", budget); got != "" {
+			t.Errorf("TruncateTail with budget %d = %q, want empty", budget, got)
+		}
+	}
+}
+
 func TestWindow(t *testing.T) {
 	cases := []struct {
 		name                string
