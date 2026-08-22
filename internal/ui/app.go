@@ -1184,6 +1184,9 @@ func (m Model) beginDeleteContainer() (tea.Model, tea.Cmd) {
 	if marked := m.cntPanel.MarkedIDs(); len(marked) > 1 {
 		return m.beginDelete(deleteContainers, marked, fmt.Sprintf("%d containers", len(marked)))
 	}
+	if sel := m.cntPanel.SingleMarked(); sel != nil {
+		return m.beginDelete(deleteContainers, []string{sel.ID}, sel.Name)
+	}
 	sel := m.cntPanel.Selected()
 	if sel == nil {
 		m.setStatus("nothing selected")
@@ -1196,6 +1199,9 @@ func (m Model) beginDeleteImages() (tea.Model, tea.Cmd) {
 	if marked := m.imgPanel.MarkedIDs(); len(marked) > 1 {
 		return m.beginDelete(deleteImages, marked, fmt.Sprintf("%d images", len(marked)))
 	}
+	if sel := m.imgPanel.SingleMarked(); sel != nil {
+		return m.beginDelete(deleteImages, []string{sel.ID}, backend.FormatRef(*sel))
+	}
 	sel := m.imgPanel.Selected()
 	if sel == nil {
 		return m, nil
@@ -1206,6 +1212,9 @@ func (m Model) beginDeleteImages() (tea.Model, tea.Cmd) {
 func (m Model) beginDeleteVolumes() (tea.Model, tea.Cmd) {
 	if marked := m.volPanel.MarkedIDs(); len(marked) > 1 {
 		return m.beginDelete(deleteVolumes, marked, fmt.Sprintf("%d volumes", len(marked)))
+	}
+	if sel := m.volPanel.SingleMarked(); sel != nil {
+		return m.beginDelete(deleteVolumes, []string{sel.Name}, sel.Name)
 	}
 	sel := m.volPanel.Selected()
 	if sel == nil {
