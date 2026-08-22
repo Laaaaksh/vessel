@@ -124,14 +124,15 @@ func readmeTableRows(t *testing.T) [][]string {
 func readmeRowScope(toks []string) []View {
 	key := strings.Join(toks, ",")
 	all := []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem, ViewNetworks}
-	listAndSystem := []View{ViewContainers, ViewImages, ViewVolumes, ViewSystem}
+	listViews := []View{ViewContainers, ViewImages, ViewVolumes}
 	switch key {
 	case "enter", "e", "L", "s,u,r":
-		// Container actions live in the containers view; the system view
-		// shares the same help branch today.
-		return []View{ViewContainers, ViewSystem}
+		// Container verbs: only the containers view dispatches them. The
+		// system and networks views are read-only (list and inspect), so
+		// their help overlays must not advertise them.
+		return []View{ViewContainers}
 	case "d", "P", "c":
-		return listAndSystem
+		return listViews
 	case "p":
 		return []View{ViewImages}
 	default:

@@ -85,6 +85,20 @@ func DefaultKeyMap() KeyMap {
 	}
 }
 
+// Dispatched key literals handleKey matches outside the KeyMap fields. They
+// live beside KeyMap as constants so dispatch, the reserved-key guard below,
+// and the help-completeness test all read one definition instead of three
+// copies that can drift apart.
+const (
+	keyForceQuit      = "ctrl+c"
+	keyViewContainers = "1"
+	keyViewImages     = "2"
+	keyViewVolumes    = "3"
+	keyViewSystem     = "4"
+	keyViewNetworks   = "5"
+	keyToggleCmdLog   = "`"
+)
+
 // Match reports whether k equals any of the candidates.
 func Match(k string, candidates ...string) bool {
 	for _, c := range candidates {
@@ -125,7 +139,12 @@ func (k KeyMap) Reserved(s string) bool {
 		k.Quit, k.Help, k.LayoutNext, k.LayoutPrev, k.Actions) {
 		return true
 	}
-	return Match(s, "1", "2", "3", "4", "5", "`", "ctrl+c")
+	// Every view digit is reserved, not just the first three: handleKey's
+	// numeric switch runs before custom-command dispatch, so a custom command
+	// bound to any digit can never fire — reserving all five is what stops
+	// help from advertising a binding that does nothing.
+	return Match(s, keyViewContainers, keyViewImages, keyViewVolumes,
+		keyViewSystem, keyViewNetworks, keyToggleCmdLog, keyForceQuit)
 }
 
 // helpRow is one line of the in-app help: the key column and what it does.
@@ -151,6 +170,7 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 		{"`", "toggle command log"},
 		{"?", "toggle help"},
 		{"esc", "cancel / close"},
+		{"enter", "confirm dialogs / enter list from sidebar"},
 		{"q / ctrl+c", "quit"},
 	}
 	switch view {
@@ -168,8 +188,10 @@ func helpBindings(view View, focus Focus, mode Mode, keys KeyMap, custom []confi
 			{"P", "prune unused volumes (confirm)"},
 			{"d", "delete marked, else cursor row (confirm)"},
 		}, base...)
-	case ViewNetworks:
-		// Read-only: list and inspect only, no view-specific bindings to add.
+	case ViewNetworks, ViewSystem:
+		// Read-only views: list and inspect only. They get no view-specific
+		// rows — dispatch handles no per-view verbs here, and inheriting the
+		// containers block's would advertise actions that do nothing.
 	default:
 		base = append([]helpRow{
 			{"enter", "open shell in running container"},
