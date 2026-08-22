@@ -177,6 +177,26 @@ func (m Model) MarkedIDs() []string {
 	return out
 }
 
+// SingleMarked returns the one marked image when exactly one visible row
+// carries a mark, and nil otherwise. Marks key off digest+reference, so two
+// rows sharing a digest count as two marks here even though MarkedIDs would
+// emit one id: a lone mark names its row more precisely than the cursor does,
+// so the delete path prefers it, while zero or several marks leave the cursor
+// in charge.
+func (m Model) SingleMarked() *backend.Image {
+	var found *backend.Image
+	for i := range m.filtered {
+		if !m.marked[markKey(m.filtered[i])] {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = &m.filtered[i]
+	}
+	return found
+}
+
 // SetInspect stores the inspected detail for the given image reference. The
 // panel keeps the result keyed by ref and only renders it while that image is
 // selected, so a slow response never labels the wrong image. A result for an
