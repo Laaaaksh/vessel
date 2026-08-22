@@ -21,6 +21,10 @@ condensed into user-facing terms. Format is based on
   `poll_interval` panicked the metrics loop) or silently run with defaults:
   the parse error is reported in the footer at startup, unsafe values are
   clamped to safe defaults, and `vessel doctor` already printed the error.
+- The README install instructions work on current Homebrew: since Homebrew
+  6.0.0, third-party taps must be trusted before they can be installed from,
+  so the documented flow now includes a one-time `brew trust laaaaksh/vessel`
+  (verified end-to-end against Homebrew 6.0).
 
 ### Changed
 - Unknown command-line arguments print usage and exit with code 2 rather than

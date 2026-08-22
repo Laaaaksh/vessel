@@ -38,8 +38,12 @@ container system start   # downloads a default Linux kernel on first run
 
 ```bash
 brew tap Laaaaksh/vessel
+brew trust laaaaksh/vessel   # once; Homebrew 6+ refuses untrusted third-party taps
 brew install vessel
 ```
+
+On Homebrew versions before 6.0 there is no trust gate and no `brew trust`
+command - skip that step. See [Tap Trust](https://docs.brew.sh/Tap-Trust).
 
 Or download a binary from [GitHub Releases](https://github.com/Laaaaksh/vessel/releases).
 
