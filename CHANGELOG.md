@@ -41,6 +41,11 @@ condensed into user-facing terms. Format is based on
   permission notice overflowed the narrower frame the wide-list layout hands
   it. The raw error is truncated instead, so the `container registry login`
   command always stays on screen.
+- Help overlays advertise only what their view can run: the read-only System
+  view no longer inherits the containers verbs (stop/start/restart, logs,
+  exec, shell, remove, prune, create), and every view's help states what
+  `enter` does outside them (confirm dialogs, enter the list from the
+  sidebar).
 
 ### Changed
 - Unknown command-line arguments print usage and exit with code 2 rather than
