@@ -80,10 +80,12 @@ A custom command with a `key` set fires on that key and replaces the built-in ac
 ### Images: tag, save, load, push
 
 Pick an image, press `x`, and choose `Tag…`, `Save…`, `Load…` or `Push`. Tag, save and
-push need a named reference, so an untagged row is refused rather than quietly resolved
-to `:latest`. Save prompts for an archive path and confirms before overwriting a file
-that already exists; load prompts for an existing archive and says so plainly when the
-path is missing; push confirms first, because it publishes.
+push refuse two row shapes: an untagged row, whose bare repository would quietly resolve
+to a moving `:latest`, and a digest-pinned row (`repo@sha256:…`) - its reference is
+exact, but those verbs are not yet verified against pins. Save prompts for an archive
+path and confirms before overwriting a file that already exists; load prompts for an
+existing archive and says so plainly when the path is missing; push confirms first,
+because it publishes.
 
 Known limits:
 
