@@ -110,6 +110,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   is a real list name that parses to a non-empty tag AND digest. Revisit only
   with a probe, and note push needs registry credentials to test fully.
 
+## internal/doctor
+
+- `Run` (`internal/doctor/doctor.go`) probes through package-level test seams (`stdout`, `lookPath`, `runCmd`, `hostArch`) so tests fake a whole machine without touching the host - build scenarios off `stubDoctor(t)` in `doctor_test.go`, which restores every seam on cleanup. The support floors live as constants in that one file and mirror README Requirements + `docs/APPLE_CONTAINER_MATRIX.md`: `container --version` must parse to >= 1.2.0, macOS major must be >= 26 (fatal below 15, "LIMITED" warning for 15..25), host arch must be arm64. The version/status checks invoke the LookPath-resolved path, not a fresh PATH lookup, so fakes must dispatch on args rather than the binary name.
+
 ## Release pipeline
 
 - CI is least-privilege on purpose: `ci.yml` pins `permissions: contents: read`
