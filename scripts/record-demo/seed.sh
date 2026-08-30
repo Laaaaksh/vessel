@@ -23,7 +23,10 @@ container volume delete demo-data >/dev/null 2>&1 || true
 container image pull docker.io/library/alpine:latest >/dev/null
 container image pull docker.io/library/nginx:alpine >/dev/null
 
-container run -d --name web -p 8080:80 docker.io/library/nginx:alpine >/dev/null
+# 18080, not 8080/8081/8090: those are common defaults for other local
+# tooling (Docker Desktop, dev servers) and a collision fails the whole seed
+# with a "bind: address already in use" error from the container runtime.
+container run -d --name web -p 18080:80 docker.io/library/nginx:alpine >/dev/null
 container run -d --name cache docker.io/library/alpine:latest sleep 3600 >/dev/null
 container run -d --name worker docker.io/library/alpine:latest sleep 3600 >/dev/null
 container volume create demo-data >/dev/null

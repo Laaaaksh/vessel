@@ -10,8 +10,8 @@ Output scripts/record-demo/out.mp4
 Set Shell "bash"
 Set FontSize 14
 Set Width 1280
-Set Height 800
-Set Padding 10
+Set Height 640
+Set Padding 8
 Set Theme "Dracula"
 Set TypingSpeed 80ms
 
@@ -20,28 +20,48 @@ Enter
 Sleep 1500ms
 
 # Containers view: live list with mixed running/stopped state.
-Sleep 1500ms
+Sleep 4000ms
 
 # Keyboard-driven navigation: cursor moves update the detail pane live.
 Down
-Sleep 700ms
+Sleep 1500ms
 Down
-Sleep 700ms
+Sleep 1500ms
 Up
-Sleep 700ms
+Sleep 1500ms
+Up
+Sleep 1500ms
+Down
+Sleep 1500ms
+Up
+Sleep 1500ms
+
+# Move focus into the detail pane and back (h/l), inspecting a container.
+Type "l"
+Sleep 2000ms
+Type "h"
+Sleep 1500ms
+
+# Images view: browse, then inspect a second image.
+Type "2"
+Sleep 5000ms
+Down
+Sleep 2000ms
+Up
+Sleep 2000ms
+
+# Volumes view.
+Type "3"
+Sleep 5000ms
+
+# Back to Containers.
+Type "1"
+Sleep 1500ms
 
 # Keybinding help overlay.
 Type "?"
-Sleep 2200ms
+Sleep 6000ms
 Type "?"
-Sleep 500ms
-
-# Switch views: Images, then Volumes, then back to Containers.
-Type "2"
-Sleep 1600ms
-Type "3"
-Sleep 1600ms
-Type "1"
 Sleep 800ms
 
 # Filter down to one container regardless of list order, then start/stop it
@@ -51,17 +71,17 @@ Sleep 800ms
 Type "/"
 Type "web"
 Enter
-Sleep 1000ms
+Sleep 2000ms
 Type "u"
-Sleep 1800ms
+Sleep 3000ms
 Type "s"
-Sleep 1800ms
+Sleep 3000ms
 
 # Clear the filter back to the full list.
 Type "/"
 Backspace 3
 Enter
-Sleep 1000ms
+Sleep 1500ms
 
 Type "q"
-Sleep 800ms
+Sleep 1200ms
