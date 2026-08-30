@@ -1,4 +1,4 @@
-.PHONY: build run test lint tidy clean
+.PHONY: build run test lint tidy clean demo
 
 BINARY := vessel
 MODULE := github.com/Laaaaksh/vessel
@@ -21,3 +21,6 @@ tidy:
 clean:
 	rm -f $(BINARY)
 	go clean -testcache
+
+demo:
+	scripts/record-demo/record.sh
