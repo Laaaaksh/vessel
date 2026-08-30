@@ -111,6 +111,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   is a real list name that parses to a non-empty tag AND digest. Revisit only
   with a probe, and note push needs registry credentials to test fully.
 
+## Demo recording
+
+- `scripts/record-demo/` produces `docs/assets/demo.{mp4,gif}` from a real, live vessel session against Apple's `container` CLI — nothing in that pipeline is staged or hand-authored. `make demo` builds, seeds, records (VHS, `demo.tape`), and converts (ffmpeg) in one shot; see `scripts/record-demo/README.md` for the breakdown and how to sanity-check a re-recording. `seed.sh` is idempotent — it stops-then-deletes any prior demo containers/volume before recreating them, because `container delete` refuses a running container. A container running a bare `sleep` can take several real seconds to react to `container stop` (it does not reliably die on SIGTERM the way nginx does, which stops in ~100ms) — that is a `container` CLI/kernel behavior, not a vessel bug, but it means the live start/stop beat in the tape uses the nginx-backed `web` container, not the sleep-backed ones, or the recording shows a multi-second stall that reads as a hang.
+
 ## internal/doctor
 
 - `Run` (`internal/doctor/doctor.go`) probes through package-level test seams (`stdout`, `lookPath`, `runCmd`, `hostArch`) so tests fake a whole machine without touching the host - build scenarios off `stubDoctor(t)` in `doctor_test.go`, which restores every seam on cleanup. The support floors live as constants in that one file and mirror README Requirements + `docs/APPLE_CONTAINER_MATRIX.md`: `container --version` must parse to >= 1.2.0, macOS major must be >= 26 (fatal below 15, "LIMITED" warning for 15..25), host arch must be arm64. The version/status checks invoke the LookPath-resolved path, not a fresh PATH lookup, so fakes must dispatch on args rather than the binary name.
