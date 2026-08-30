@@ -24,6 +24,14 @@ images, and volumes - one screen, zero daemons, no CLI flags to memorize.
 
 </div>
 
+## Demo
+
+![vessel demo](docs/assets/demo.gif)
+
+Keyboard-driven navigation across the containers, images, and volumes views, inspecting a container's detail pane, and starting/stopping a container with its status updating live in the list.
+
+Full quality: [docs/assets/demo.mp4](docs/assets/demo.mp4)
+
 ## What it does
 
 `vessel` gives you a keyboard-driven dashboard for managing Mac containers - the OCI-compatible native containers introduced in macOS at WWDC 2025. No more memorizing CLI flags or running multiple commands to see what's running.

@@ -20,3 +20,6 @@ vendor/
 
 # Agent run state
 .gnhf/
+
+# Raw demo recording (converted assets in docs/assets/ are committed)
+scripts/record-demo/out.mp4
