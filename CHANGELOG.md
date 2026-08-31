@@ -71,6 +71,9 @@ condensed into user-facing terms. Format is based on
   no longer break tagging.
 
 ### Added
+- A recorded demo of a real vessel session at the top of the README
+  (`docs/assets/demo.gif`, with the full-quality MP4 linked beside it),
+  regenerable end to end with `make demo`.
 - `vessel doctor` now verifies the machine against the documented requirements
   before first run: it parses `container --version` and enforces the 1.2.x
   floor, checks macOS version (26+ required; 15-25 prints a limited-support
