@@ -29,7 +29,7 @@ This:
    (`brew install vhs`) into `out.mp4`.
 4. Encodes `docs/assets/demo.mp4` (H.264, `yuv420p`, 1280px wide) and
    `docs/assets/demo.gif` (960px wide, 12fps, palette-based) with ffmpeg,
-   and fails if the gif exceeds 10 MB.
+   and fails if the gif exceeds 10 MiB.
 
 ## Editing the tape
 
