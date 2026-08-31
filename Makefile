@@ -1,4 +1,4 @@
-.PHONY: build run test lint tidy clean demo
+.PHONY: build run test lint tidy clean demo demo-teardown
 
 BINARY := vessel
 MODULE := github.com/Laaaaksh/vessel
@@ -24,3 +24,6 @@ clean:
 
 demo:
 	scripts/record-demo/record.sh
+
+demo-teardown:
+	scripts/record-demo/teardown.sh

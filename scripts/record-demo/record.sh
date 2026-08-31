@@ -28,7 +28,9 @@ vhs scripts/record-demo/demo.tape
 raw="scripts/record-demo/out.mp4"
 mp4="docs/assets/demo.mp4"
 gif="docs/assets/demo.gif"
-palette="$(mktemp -t vessel-demo-palette).png"
+palette_dir="$(mktemp -d)"
+trap 'rm -rf "$palette_dir"' EXIT
+palette="$palette_dir/palette.png"
 
 echo "==> encoding docs/assets/demo.mp4 (h264, yuv420p, 1280 wide)"
 ffmpeg -y -i "$raw" -vf "scale=1280:-2" -pix_fmt yuv420p -c:v libx264 -movflags +faststart "$mp4"
@@ -38,7 +40,6 @@ ffmpeg -y -i "$raw" -vf "fps=12,scale=960:-2:flags=lanczos,palettegen" -update 1
 
 echo "==> encoding docs/assets/demo.gif (960 wide, 12fps)"
 ffmpeg -y -i "$raw" -i "$palette" -filter_complex "fps=12,scale=960:-2:flags=lanczos[x];[x][1:v]paletteuse" "$gif"
-rm -f "$palette"
 
 echo "==> sizes"
 ls -lh "$mp4" "$gif"
