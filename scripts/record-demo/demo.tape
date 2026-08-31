@@ -15,6 +15,12 @@ Set Padding 8
 Set Theme "Dracula"
 Set TypingSpeed 80ms
 
+# Isolate the recording from the operator's real ~/.config/vessel/config.toml
+# (config.Load -> config.Path, internal/config/config.go): a host with
+# confirm_stop = true (or other non-default settings) would otherwise change
+# what keys do mid-recording and desync the tape from the app's actual state.
+Env XDG_CONFIG_HOME "/tmp/vessel-demo-config"
+
 Type "./vessel"
 Enter
 Sleep 1500ms
@@ -69,7 +75,7 @@ Sleep 800ms
 # "sleep" container) reacts to SIGTERM immediately, so the transition is
 # visible within a couple hundred ms.
 Type "/"
-Type "web"
+Type "vessel-demo-web"
 Enter
 Sleep 2000ms
 Type "u"
@@ -77,11 +83,9 @@ Sleep 3000ms
 Type "s"
 Sleep 3000ms
 
-# Clear the filter back to the full list.
+# Clear the filter back to the full list. End the capture here, with the
+# app still on screen, so the looping README GIF doesn't dead-end on a
+# blank shell prompt between cycles.
 Type "/"
-Backspace 3
 Enter
-Sleep 1500ms
-
-Type "q"
-Sleep 1200ms
+Sleep 2000ms
