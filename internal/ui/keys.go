@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/attentionfs/vessel/internal/config"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 // KeyMap documents all keybindings for vessel.

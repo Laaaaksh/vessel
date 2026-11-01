@@ -33,7 +33,7 @@ checksum:
 
 release:
   github:
-    owner: attentionfs
+    owner: Laaaaksh
     name: vessel
   draft: false
   prerelease: auto
@@ -42,10 +42,10 @@ brews:
   - name: vessel
     directory: Formula
     repository:
-      owner: attentionfs
+      owner: Laaaaksh
       name: homebrew-vessel
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/attentionfs/vessel"
+    homepage: "https://github.com/Laaaaksh/vessel"
     description: "A keyboard-driven TUI for Apple's native Mac containers"
     license: "MIT"
     install: |

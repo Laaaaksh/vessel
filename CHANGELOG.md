@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to vessel are documented in this file. Released sections mirror
-the notes on the [GitHub Releases page](https://github.com/attentionfs/vessel/releases),
+the notes on the [GitHub Releases page](https://github.com/Laaaaksh/vessel/releases),
 condensed into user-facing terms. Format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -10,7 +10,7 @@ condensed into user-facing terms. Format is based on
 ## [0.2.2] - 2026-11-01
 
 ### Changed
-- Go module path is now `github.com/attentionfs/vessel`, following the GitHub account rename. Update imports and `go install` commands. Homebrew users: `brew tap attentionfs/vessel`.
+- Go module path is now `github.com/Laaaaksh/vessel`, following the GitHub account rename. Update imports and `go install` commands. Homebrew users: `brew tap Laaaaksh/vessel`.
 
 ### Fixed
 - The space bar and multi-byte characters (accents, CJK, emoji) are no longer
@@ -153,8 +153,8 @@ condensed into user-facing terms. Format is based on
 - Initial release of vessel, a keyboard-driven TUI for Apple's native Mac
   containers.
 
-[Unreleased]: https://github.com/attentionfs/vessel/compare/v0.2.2...HEAD
-[0.2.2]: https://github.com/attentionfs/vessel/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/attentionfs/vessel/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/attentionfs/vessel/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/attentionfs/vessel/compare/v0.1.0...v0.1.1
+[Unreleased]: https://github.com/Laaaaksh/vessel/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Laaaaksh/vessel/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/Laaaaksh/vessel/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/Laaaaksh/vessel/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/Laaaaksh/vessel/compare/v0.1.0...v0.1.1

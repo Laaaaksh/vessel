@@ -15,8 +15,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/attentionfs/vessel/internal/backend"
-	"github.com/attentionfs/vessel/internal/config"
+	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 func TestView_shellModeEmpty(t *testing.T) {

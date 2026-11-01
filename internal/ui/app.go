@@ -14,15 +14,15 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/attentionfs/vessel/internal/backend"
-	"github.com/attentionfs/vessel/internal/config"
-	"github.com/attentionfs/vessel/internal/ui/containers"
-	"github.com/attentionfs/vessel/internal/ui/images"
-	"github.com/attentionfs/vessel/internal/ui/logs"
-	"github.com/attentionfs/vessel/internal/ui/networks"
-	"github.com/attentionfs/vessel/internal/ui/system"
-	"github.com/attentionfs/vessel/internal/ui/uiutil"
-	"github.com/attentionfs/vessel/internal/ui/volumes"
+	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/config"
+	"github.com/Laaaaksh/vessel/internal/ui/containers"
+	"github.com/Laaaaksh/vessel/internal/ui/images"
+	"github.com/Laaaaksh/vessel/internal/ui/logs"
+	"github.com/Laaaaksh/vessel/internal/ui/networks"
+	"github.com/Laaaaksh/vessel/internal/ui/system"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
+	"github.com/Laaaaksh/vessel/internal/ui/volumes"
 )
 
 // keySpace is the literal tea.KeyPressMsg.String() serialisation of a space

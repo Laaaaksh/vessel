@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/attentionfs/vessel/internal/backend"
-	"github.com/attentionfs/vessel/internal/ui/uiutil"
+	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 // row is one of the fixed rows this panel shows: overall service status,
