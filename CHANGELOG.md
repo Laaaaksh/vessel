@@ -7,6 +7,11 @@ condensed into user-facing terms. Format is based on
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-01
+
+### Changed
+- Go module path is `github.com/Laaaaksh/vessel` again, following the GitHub account rename. Update imports and `go install` commands. The v0.2.3 tag has the same code but no GitHub release.
+
 ## [0.2.2] - 2026-11-01
 
 ### Changed
