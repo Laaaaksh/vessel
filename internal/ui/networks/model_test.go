@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/attentionfs/vessel/internal/backend"
 )
 
 func keyMsg(s string) tea.KeyPressMsg {

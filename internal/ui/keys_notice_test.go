@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/Laaaaksh/vessel/internal/config"
+	"github.com/attentionfs/vessel/internal/config"
 )
 
 const (

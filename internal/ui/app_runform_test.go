@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/attentionfs/vessel/internal/backend"
 )
 
 func containersModel(t *testing.T) Model {

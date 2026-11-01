@@ -25,7 +25,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Build / test / lint
 - `make test` and `make lint` before anything else; [CONTRIBUTING.md](CONTRIBUTING.md#development-workflow) owns the workflow, including the live Apple-CLI test variants and `scripts/smoke.sh`.
-- `golangci-lint` must be v2.12.2+: an older build refuses to load `.golangci.yml` when `go.mod` targets a newer Go than the binary was built with. The goimports group uses `github.com/Laaaaksh/vessel` as the local prefix.
+- `golangci-lint` must be v2.12.2+: an older build refuses to load `.golangci.yml` when `go.mod` targets a newer Go than the binary was built with. The goimports group uses `github.com/attentionfs/vessel` as the local prefix.
 - `main` is lint-clean; keep it that way and fix any issue a diff introduces.
 
 ## Live CLI probes

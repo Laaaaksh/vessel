@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Laaaaksh/vessel/internal/config"
+	"github.com/attentionfs/vessel/internal/config"
 )
 
 // Documented support floor. README Requirements asks for macOS 26+ on Apple

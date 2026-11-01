@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/attentionfs/vessel/internal/backend"
 )
 
 // spaceKey mirrors a real space bar press: KeyPressMsg.String() returns

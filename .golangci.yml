@@ -31,4 +31,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/Laaaaksh/vessel
+        - github.com/attentionfs/vessel
