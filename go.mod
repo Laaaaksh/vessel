@@ -1,4 +1,4 @@
-module github.com/Laaaaksh/vessel
+module github.com/attentionfs/vessel
 
 go 1.26.5
 

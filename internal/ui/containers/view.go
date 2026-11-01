@@ -6,8 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/Laaaaksh/vessel/internal/backend"
-	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
+	"github.com/attentionfs/vessel/internal/backend"
+	"github.com/attentionfs/vessel/internal/ui/uiutil"
 )
 
 const (

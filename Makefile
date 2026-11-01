@@ -1,7 +1,7 @@
 .PHONY: build run test lint tidy clean demo demo-teardown
 
 BINARY := vessel
-MODULE := github.com/Laaaaksh/vessel
+MODULE := github.com/attentionfs/vessel
 
 build:
 	go build -o $(BINARY) .

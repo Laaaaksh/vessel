@@ -18,7 +18,7 @@ security problem.
 
 Use GitHub's private vulnerability reporting instead:
 
-> https://github.com/Laaaaksh/vessel/security/advisories/new
+> https://github.com/attentionfs/vessel/security/advisories/new
 
 That link reaches the maintainer privately — the report, follow-up discussion,
 and any fix coordination stay confidential until a patched release ships.
