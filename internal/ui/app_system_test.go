@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/attentionfs/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/backend"
 )
 
 func tabKey() tea.KeyPressMsg {

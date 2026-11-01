@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/attentionfs/vessel/internal/backend"
-	"github.com/attentionfs/vessel/internal/ui/uiutil"
+	"github.com/Laaaaksh/vessel/internal/backend"
+	"github.com/Laaaaksh/vessel/internal/ui/uiutil"
 )
 
 // Model is the containers panel model.

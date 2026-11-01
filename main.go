@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/attentionfs/vessel/internal/doctor"
-	"github.com/attentionfs/vessel/internal/ui"
+	"github.com/Laaaaksh/vessel/internal/doctor"
+	"github.com/Laaaaksh/vessel/internal/ui"
 )
 
 // version, commit, and date are set at build time via

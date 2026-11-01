@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/attentionfs/vessel/internal/config"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 // helpWalkWidth is wide enough that every help key and description column

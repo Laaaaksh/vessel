@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/attentionfs/vessel/internal/config"
+	"github.com/Laaaaksh/vessel/internal/config"
 )
 
 // restingContainersFooter is what the containers view has always advertised

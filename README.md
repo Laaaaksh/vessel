@@ -8,15 +8,15 @@ A keyboard-driven terminal UI for [Apple's native Mac containers](https://github
 (the OCI-compatible containers introduced in macOS at WWDC 2025). Live lists, logs, shells,
 images, and volumes - one screen, zero daemons, no CLI flags to memorize.
 
-[![Star this repo](https://img.shields.io/github/stars/attentionfs/vessel?style=for-the-badge&logo=github&label=star%20this%20repo&color=yellow)](https://github.com/attentionfs/vessel/stargazers)
+[![Star this repo](https://img.shields.io/github/stars/Laaaaksh/vessel?style=for-the-badge&logo=github&label=star%20this%20repo&color=yellow)](https://github.com/Laaaaksh/vessel/stargazers)
 [![Built for Apple container](https://img.shields.io/badge/built_for-Apple_Container-00ADD8?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/apple/container)
 
-[![CI](https://github.com/attentionfs/vessel/actions/workflows/ci.yml/badge.svg)](https://github.com/attentionfs/vessel/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/attentionfs/vessel?color=green&display_name=tag)](https://github.com/attentionfs/vessel/releases)
+[![CI](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml/badge.svg)](https://github.com/Laaaaksh/vessel/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Laaaaksh/vessel?color=green&display_name=tag)](https://github.com/Laaaaksh/vessel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%E2%80%A2%20Apple%20silicon-000?logo=apple&logoColor=white)](#requirements)
-[![Homebrew](https://img.shields.io/badge/brew-attentionfs%2Fvessel-orange?logo=homebrew)](#install)
+[![Homebrew](https://img.shields.io/badge/brew-Laaaaksh%2Fvessel-orange?logo=homebrew)](#install)
 
 **[Install](#install) • [Usage](#usage) • [Keybindings](#keybindings) • [Configuration](#configuration) • [CLI matrix](docs/APPLE_CONTAINER_MATRIX.md) • [Changelog](CHANGELOG.md) • [Contributing](CONTRIBUTING.md) • [License](LICENSE)**
 
@@ -60,7 +60,7 @@ container system start   # downloads a default Linux kernel on first run
 ## Install
 
 ```bash
-brew tap attentionfs/vessel
+brew tap Laaaaksh/vessel
 brew trust laaaaksh/vessel   # once; Homebrew 6+ refuses untrusted third-party taps
 brew install vessel
 ```
@@ -68,7 +68,7 @@ brew install vessel
 On Homebrew versions before 6.0 there is no trust gate and no `brew trust`
 command - skip that step. See [Tap Trust](https://docs.brew.sh/Tap-Trust).
 
-Or download a binary from [GitHub Releases](https://github.com/attentionfs/vessel/releases).
+Or download a binary from [GitHub Releases](https://github.com/Laaaaksh/vessel/releases).
 
 ## Usage
 
@@ -165,7 +165,7 @@ Found a security issue? Please report it privately - see [SECURITY.md](SECURITY.
 
 ## Star this repo
 
-If `vessel` makes managing containers on your Mac easier, [leave a star](https://github.com/attentionfs/vessel/stargazers) - it helps other people find it.
+If `vessel` makes managing containers on your Mac easier, [leave a star](https://github.com/Laaaaksh/vessel/stargazers) - it helps other people find it.
 
 <a href="https://www.star-history.com/?repos=laaaaksh%2Fvessel&type=date&legend=top-left">
  <picture>
